@@ -229,6 +229,7 @@
     l3: {
       catalog:   function ()  { return rpc("l3:catalog"); },
       status:    function ()  { return rpc("l3:status"); },
+      running:   function ()  { return rpc("l3:running"); },
       figafSystems: function () { return rpc("l3:figafSystems"); },
       // Catalog v3: base service instances created by the manager.
       services:           function ()  { return rpc("l3:services"); },

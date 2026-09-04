@@ -109,6 +109,8 @@ known and the installing person agrees.
 | `cf start <app> failed — see the staging log in the terminal: Start unsuccessful` | The app crashed on start (bad env, missing binding, code error). | Terminal drawer for the staging log; `cf logs <app> --recent` for the app's own output. |
 | `... memory limit ...` / `insufficient resources` | The space's memory quota is full. | Remove unused apps or raise the quota (BTP cockpit -> space -> quota). |
 | `checksum mismatch for <artifact> — the release is corrupt` | The release inside the manager zip is damaged or was changed after the catalog was written. | Build the release and the manager zip again (`build-artifacts.ps1`, `npm run build:manager`), deploy the new zip. |
+| `<action> of <app> is already running (started <time> ago)` | A second action was started while one was running (a page reload, a second tab, or a second sign-in). The manager runs one lifecycle action at a time. | Wait until the running action ends - the app row shows `Installing…` and the parts show `staging`. Nothing was changed by the refused call. |
+| The row says `Installing…` and every button is off, but you started nothing | Cloud Foundry is staging a build of this app (a fresh install keeps the CF app STOPPED until staging and start are through), or another page started the action. | Wait. The page refreshes itself every 10 s while an action runs. `cf logs <app> --recent` shows the staging output. |
 | `could not resolve the route of figaf-l3l4-backend` | The frontend was deployed while the platform base has no route (not started, or deleted by hand). | Install again (the platform base is deployed first, every time). |
 
 ## Why the 2026-09-03 case was invisible, and what changed

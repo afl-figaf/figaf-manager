@@ -45,6 +45,44 @@ const MAX_ENV_VALUE_LEN = 4096;
 // instance is created or updated.
 const managerXsuaa = require("./manager-xsuaa");
 
+// ─── one lifecycle action at a time (process-wide) ──────────────────────────
+// Why: the console's "busy" state lives in ONE browser page. A reload, a
+// second tab or a second session sees nothing running, and a fresh install
+// keeps the CF app in state STOPPED for the whole staging time (`cf push
+// --no-start` + `cf start`) — so the page invites a second click. Live on
+// 2026-09-04: Install was pressed again while the shared backend was staging;
+// the second push uploaded a new package, Cloud Foundry dropped the running
+// build, and the install never finished. Module scope = one lock for every
+// session in this container (one instance runs the manager).
+const ACTION_STALE_MS = 30 * 60_000;
+let currentAction = null; // { action, appId, startedAt } | null
+
+/**
+ * The lifecycle action running now, or null. An entry older than
+ * ACTION_STALE_MS is treated as gone, so a lost release can never block the
+ * console for good (the normal release is a `finally`).
+ */
+function runningAction(now) {
+  if (!currentAction) return null;
+  const t = typeof now === "number" ? now : Date.now();
+  if (t - currentAction.startedAt > ACTION_STALE_MS) {
+    currentAction = null;
+    return null;
+  }
+  return { ...currentAction };
+}
+
+/** Test seam: forget the in-flight action. */
+function resetRunningAction() {
+  currentAction = null;
+}
+
+/** How long ago, in words, for the refusal message. */
+function agoText(ms) {
+  const secs = Math.max(0, Math.round(ms / 1000));
+  return secs < 90 ? `${secs} s` : `${Math.round(secs / 60)} min`;
+}
+
 // ─── pure helpers (unit-tested in l3-apps.test.js) ──────────────────────────
 
 /** Read + validate <dir>/catalog.json. Returns { ok, catalog } or { ok:false, error }. */
@@ -128,11 +166,16 @@ function platformPseudoApp(catalog) {
 
 /**
  * Roll the per-CF-app states up to one app-level status.
- * parts: [{ exists: bool, state: "STARTED"|"STOPPED"|null }]
+ * parts: [{ exists: bool, state: "STARTED"|"STOPPED"|null, staging?: bool }]
  */
 function computeAppStatus(parts) {
   const existing = parts.filter((p) => p.exists);
   if (existing.length === 0) return "not-installed";
+  // A part with a build in STAGING is being deployed right now. It must not
+  // read as "stopped": between `cf push --no-start` and the end of staging a
+  // fresh app IS stopped, and that state made an operator install twice
+  // (2026-09-04). "installing" wins over every other rollup.
+  if (existing.some((p) => p.staging)) return "installing";
   if (existing.length < parts.length) return "partial";
   if (existing.every((p) => p.state === "STARTED")) return "running";
   if (existing.every((p) => p.state === "STOPPED")) return "stopped";
@@ -380,6 +423,18 @@ function createL3Handlers(ctx) {
     send("l3:phase", { appId, cfApp, step, state, detail: detail || null });
   }
 
+  /**
+   * Is a build of this CF app being staged right now? One `cf curl`; asked
+   * only for a part that Cloud Foundry reports as STOPPED, which is exactly
+   * the window a fresh install spends in staging.
+   */
+  async function isStaging(guid) {
+    if (!guid) return false;
+    const r = await run(resolveCf(), ["curl", `/v3/builds?app_guids=${guid}&states=STAGING`], { source: "cf", quiet: true });
+    if (r.code !== 0) return false;
+    try { return (JSON.parse(r.stdout).resources || []).length > 0; } catch { return false; }
+  }
+
   async function cfAppExists(name) {
     const r = await run(resolveCf(), ["app", name, "--guid"], { source: "cf", quiet: true });
     return r.code === 0;
@@ -438,6 +493,34 @@ function createL3Handlers(ctx) {
       command: command || undefined,
       detail: detail || undefined,
     };
+  }
+
+  /**
+   * Run one state-changing lifecycle action, refusing a second one while it
+   * lasts (see the module header). The refusal is a normal failed result, so
+   * the console shows it in the red panel; `busy: true` and `running` let a
+   * caller tell it apart from a real error. While the action runs, every page
+   * of this session learns it from the `l3:running` event, and any page can
+   * ask with `l3:running` or read `running` from `l3:status`.
+   */
+  async function exclusive(action, appId, fn) {
+    const busy = runningAction();
+    if (busy) {
+      const error =
+        `${busy.action} of ${busy.appId} is already running (started ${agoText(Date.now() - busy.startedAt)} ago) — ` +
+        "wait until it finishes. Two deploys at the same time overwrite the package Cloud Foundry is staging, " +
+        "and both fail.";
+      log("l3", "err", `${action} ${appId} refused: ${error}`);
+      return { ok: false, busy: true, running: busy, error };
+    }
+    currentAction = { action, appId, startedAt: Date.now() };
+    send("l3:running", runningAction());
+    try {
+      return await fn();
+    } finally {
+      currentAction = null;
+      send("l3:running", null);
+    }
   }
 
   /**
@@ -613,6 +696,24 @@ function createL3Handlers(ctx) {
       }
     }
     return { ok: true };
+  }
+
+  /** l3:configure body — see the handler. */
+  async function configure(appId, env) {
+    const req = requireApp(appId);
+    if (req.error) return { ok: false, error: req.error };
+    const v = validateConfigEnv(req.app, env);
+    if (!v.ok) return v;
+    if (v.entries.length === 0) return { ok: true, applied: 0, note: "nothing to apply" };
+    const target = req.app.configTargetCfApp || req.app.cfApps[0].name;
+    if (!(await cfAppExists(target))) return { ok: false, error: `${target} is not deployed — install the app first` };
+    for (const { key, value } of v.entries) {
+      const r = await setEnvMasked(target, key, value);
+      if (r.code !== 0) return { ok: false, error: `cf set-env ${key} failed` };
+    }
+    const r = await run(resolveCf(), ["restart", target], { source: "cf" });
+    if (r.code !== 0) return { ok: false, error: `cf restart ${target} failed` };
+    return { ok: true, applied: v.entries.length };
   }
 
   /**
@@ -799,6 +900,7 @@ function createL3Handlers(ctx) {
       // as the app rows (catalog v2; null on v1 catalogs).
       const platform = platformPseudoApp(c.catalog);
       const entries = platform ? [platform, ...c.catalog.apps] : c.catalog.apps;
+      const running = runningAction();
       const apps = [];
       for (const app of entries) {
         const parts = [];
@@ -816,18 +918,31 @@ function createL3Handlers(ctx) {
           if (!p.exists) continue;
           const rr = await run(resolveCf(), ["curl", `/v3/apps/${p.guid}/routes`], { source: "cf", quiet: true });
           if (rr.code === 0) { try { p.route = (((JSON.parse(rr.stdout).resources || [])[0]) || {}).url || null; } catch {} }
+          if (p.state === "STOPPED") p.staging = await isStaging(p.guid);
         }
+        // A deploy in flight is more truthful than the CF state it is about
+        // to change: with `push --no-start` + `cf start` the app stays
+        // STOPPED (or, before the first push, absent) for minutes. Every
+        // deploy touches the shared backend, so the platform row follows any
+        // running deploy, not only its own.
+        const deploying = running &&
+          (running.action === "install" || running.action === "update") &&
+          (running.appId === app.id || app.id === "platform");
+        let status = computeAppStatus(parts);
+        if (deploying && status !== "running") status = "installing";
         apps.push({
           id: app.id,
           name: app.name || app.id,
-          status: computeAppStatus(parts),
+          status,
           installedVersion,
           catalogVersion: app.version,
           parts: parts.map(({ guid, ...rest }) => rest),
         });
       }
       const platformRow = platform ? apps.shift() : null;
-      return { ok: true, platform: platformRow, apps };
+      // `running` travels with the status so ANY page — also one that just
+      // reloaded — knows an action is in flight and keeps its buttons off.
+      return { ok: true, platform: platformRow, apps, running };
     },
 
     /**
@@ -969,31 +1084,47 @@ function createL3Handlers(ctx) {
       return { ok: true, note: "restart started" };
     },
 
+    /**
+     * What lifecycle action is running now, for a page that did not start it
+     * (a reload, a second tab, a second session). `{ ok:true, running:null }`
+     * = nothing is running. No cf call.
+     */
+    async "l3:running"() {
+      return { ok: true, running: runningAction() };
+    },
+
     async "l3:install"({ appId } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
-      log("l3", "line", `Installing ${appId} …`);
-      return reportOutcome("install", appId, await deployAll(appId));
+      return exclusive("install", appId, async () => {
+        log("l3", "line", `Installing ${appId} …`);
+        return reportOutcome("install", appId, await deployAll(appId));
+      });
     },
 
     async "l3:update"({ appId } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
-      log("l3", "line", `Updating ${appId} …`);
-      return reportOutcome("update", appId, await deployAll(appId));
+      return exclusive("update", appId, async () => {
+        log("l3", "line", `Updating ${appId} …`);
+        return reportOutcome("update", appId, await deployAll(appId));
+      });
     },
 
     async "l3:disable"({ appId } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
-      return reportOutcome("disable", appId, await forEachPart(appId, (c) => ["stop", c.name], { reverse: true }));
+      return exclusive("disable", appId, async () =>
+        reportOutcome("disable", appId, await forEachPart(appId, (c) => ["stop", c.name], { reverse: true })));
     },
 
     async "l3:enable"({ appId } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
-      return reportOutcome("enable", appId, await forEachPart(appId, (c) => ["start", c.name]));
+      return exclusive("enable", appId, async () =>
+        reportOutcome("enable", appId, await forEachPart(appId, (c) => ["start", c.name])));
     },
 
     async "l3:remove"({ appId } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
-      return reportOutcome("remove", appId, await forEachPart(appId, (c) => ["delete", c.name, "-f"], { reverse: true }));
+      return exclusive("remove", appId, async () =>
+        reportOutcome("remove", appId, await forEachPart(appId, (c) => ["delete", c.name, "-f"], { reverse: true })));
     },
 
     /**
@@ -1062,22 +1193,15 @@ function createL3Handlers(ctx) {
       return { ok: true, systems };
     },
 
+    /**
+     * Rare infrastructure fix: set whitelisted env keys on the app's config
+     * target and restart it. Under the same lock as a deploy — it restarts the
+     * shared backend, so it must not overlap an install (decision: one
+     * lifecycle action at a time).
+     */
     async "l3:configure"({ appId, env } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
-      const req = requireApp(appId);
-      if (req.error) return { ok: false, error: req.error };
-      const v = validateConfigEnv(req.app, env);
-      if (!v.ok) return v;
-      if (v.entries.length === 0) return { ok: true, applied: 0, note: "nothing to apply" };
-      const target = req.app.configTargetCfApp || req.app.cfApps[0].name;
-      if (!(await cfAppExists(target))) return { ok: false, error: `${target} is not deployed — install the app first` };
-      for (const { key, value } of v.entries) {
-        const r = await setEnvMasked(target, key, value);
-        if (r.code !== 0) return { ok: false, error: `cf set-env ${key} failed` };
-      }
-      const r = await run(resolveCf(), ["restart", target], { source: "cf" });
-      if (r.code !== 0) return { ok: false, error: `cf restart ${target} failed` };
-      return { ok: true, applied: v.entries.length };
+      return exclusive("configure", appId, () => configure(appId, env));
     },
 
     async "l3:health"({ appId } = {}) {
@@ -1112,6 +1236,8 @@ function createL3Handlers(ctx) {
 module.exports = {
   APPS_DOMAIN_PLACEHOLDER,
   VERSION_ENV,
+  runningAction,
+  resetRunningAction,
   loadCatalog,
   platformPseudoApp,
   computeAppStatus,

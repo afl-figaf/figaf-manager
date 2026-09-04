@@ -139,6 +139,7 @@ contextBridge.exposeInMainWorld("figaf", {
   l3: {
     catalog:   () => ipcRenderer.invoke("l3:catalog"),
     status:    () => ipcRenderer.invoke("l3:status"),
+    running:   () => ipcRenderer.invoke("l3:running"),
     figafSystems: () => ipcRenderer.invoke("l3:figafSystems"),
     services:           ()  => ipcRenderer.invoke("l3:services"),
     provisionServices:  (a) => ipcRenderer.invoke("l3:provisionServices", a || {}),

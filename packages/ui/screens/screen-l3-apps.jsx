@@ -10,9 +10,21 @@
 const L3_STATUS_META = {
   "not-installed": { label: "Not installed", cls: "gray" },
   "running":       { label: "Running",       cls: "blue" },
+  // A fresh install pushes with --no-start, so Cloud Foundry keeps the app
+  // STOPPED until staging and start are through. "Installing…" says that,
+  // instead of inviting a second Install (live 2026-09-04).
+  "installing":    { label: "Installing…",   cls: "blue" },
   "stopped":       { label: "Stopped",       cls: "gray" },
   "partial":       { label: "Partial",       cls: "gray" },
   "mixed":         { label: "Mixed",         cls: "gray" },
+};
+
+// What the pill says while an action runs. Same words for the page that
+// started it and for a page that only learned about it from the server.
+const L3_BUSY_LABEL = {
+  install: "installing…", update: "updating…", disable: "stopping…",
+  enable: "starting…", remove: "removing…", configure: "configuring…",
+  health: "health check…",
 };
 
 function L3StatusPill({ status }) {
@@ -135,6 +147,9 @@ function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
   const installed = st && st !== "not-installed";
   const updateAvailable =
     installed && status.installedVersion && status.installedVersion !== status.catalogVersion;
+  // Every action is off while this app (or any other) is being deployed, and
+  // also while Cloud Foundry is staging a build we did not start ourselves.
+  const locked = busy || st === "installing";
 
   async function health_() {
     setHealth({ loading: true });
@@ -164,7 +179,7 @@ function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
         {(status ? status.parts : app.cfApps.map((c) => ({ name: c.name }))).map((p) => (
           <span key={p.name} style={{ marginRight: 12 }}>
             <span className="kbd">{p.name}</span>
-            {" "}{p.exists === false ? "absent" : (p.state || "").toLowerCase()}
+            {" "}{p.exists === false ? "absent" : (p.staging ? "staging" : (p.state || "").toLowerCase())}
             {p.route ? <> · <a href={"https://" + p.route} target="_blank" rel="noopener noreferrer">{p.route}</a></> : null}
           </span>
         ))}
@@ -172,41 +187,41 @@ function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
 
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
         {!installed && (
-          <button className="btn btn-primary" disabled={busy} onClick={() => onAction("install")}>
+          <button className="btn btn-primary" disabled={locked} onClick={() => onAction("install")}>
             Install {app.version}
           </button>
         )}
         {installed && (
-          <button className="btn btn-primary" disabled={busy} onClick={() => onAction("update")}>
+          <button className="btn btn-primary" disabled={locked} onClick={() => onAction("update")}>
             {updateAvailable ? `Update to ${app.version}` : "Re-deploy"}
           </button>
         )}
         {installed && (app.configForm || []).length > 0 && (
-          <button className="btn" disabled={busy} onClick={() => setShowConfig((s) => !s)}>Configure</button>
+          <button className="btn" disabled={locked} onClick={() => setShowConfig((s) => !s)}>Configure</button>
         )}
         {installed && app.healthPath && (
-          <button className="btn" disabled={busy} onClick={health_}>Health</button>
+          <button className="btn" disabled={locked} onClick={health_}>Health</button>
         )}
         {st === "running" && (
-          <button className="btn" disabled={busy} onClick={() => onAction("disable")}>Disable</button>
+          <button className="btn" disabled={locked} onClick={() => onAction("disable")}>Disable</button>
         )}
         {st === "stopped" && (
-          <button className="btn" disabled={busy} onClick={() => onAction("enable")}>Enable</button>
+          <button className="btn" disabled={locked} onClick={() => onAction("enable")}>Enable</button>
         )}
         {installed && !confirmRemove && (
-          <button className="btn" disabled={busy} onClick={() => setConfirmRemove(true)}>Remove</button>
+          <button className="btn" disabled={locked} onClick={() => setConfirmRemove(true)}>Remove</button>
         )}
         {installed && confirmRemove && (
           <>
             <button
               className="btn"
               style={{ color: "var(--fg-red, #c0392b)" }}
-              disabled={busy}
+              disabled={locked}
               onClick={() => { setConfirmRemove(false); onAction("remove"); }}
             >
               Confirm remove
             </button>
-            <button className="btn" disabled={busy} onClick={() => setConfirmRemove(false)}>Keep</button>
+            <button className="btn" disabled={locked} onClick={() => setConfirmRemove(false)}>Keep</button>
           </>
         )}
       </div>
@@ -215,7 +230,7 @@ function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
         <L3ConfigForm
           app={app}
           figafSystems={figafSystems}
-          busy={busy}
+          busy={locked}
           onCancel={() => setShowConfig(false)}
           onApply={async (values) => {
             const r = await onAction("configure", { env: values });
@@ -428,6 +443,13 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
   const [refreshing, setRefreshing] = React.useState(false);
   const [busyApp, setBusyApp] = React.useState(null);   // appId currently running an action
   const [busyLabel, setBusyLabel] = React.useState("");
+  // The action the MANAGER says is running: { action, appId, startedAt } or
+  // null. It comes with every l3:status and on the l3:running event, so a
+  // page that just reloaded (or a second tab) also shows "installing…" and
+  // keeps its buttons off. Without it, the operator sees a stopped app and
+  // clicks Install again — the second push then replaces the package Cloud
+  // Foundry is staging and both attempts fail (live 2026-09-04).
+  const [running, setRunning] = React.useState(null);
   // The outcome of the LAST action (action-outcome.js model). Set when an
   // action fails; cleared ONLY by Dismiss or by the start of the next action.
   // Never cleared by the status refresh (see L3ActionOutcome).
@@ -484,6 +506,7 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
         for (const row of s.apps) map[row.id] = row;
         setStatuses(map);
         setPlatformStatus(s.platform || null);
+        setRunning(s.running || null);
         if (onStatus) onStatus(s);
       } else if (s && s.error) {
         failed("status", null, s);
@@ -514,14 +537,37 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
     return () => { cancelled = true; };
   }, [api, refresh, refreshServices]);
 
+  // The manager announces every start and end of a lifecycle action. The
+  // event reaches every page of this session, including one that reloaded
+  // while an install was running.
+  React.useEffect(() => {
+    if (!api || !api.on) return undefined;
+    const off = api.on("l3:running", (p) => {
+      const next = p && p.action ? p : null;
+      setRunning(next);
+      if (!next) refresh();   // it just finished — show the new state
+    });
+    return off;
+  }, [api, refresh]);
+
+  // While an action runs, nothing else would move this page: a fresh install
+  // leaves the app STOPPED for minutes. Poll the status until it is over.
+  const runningKey = running ? `${running.action}:${running.appId}:${running.startedAt}` : "";
+  React.useEffect(() => {
+    if (!runningKey) return undefined;
+    const t = setInterval(() => { refresh(); }, 10000);
+    return () => clearInterval(t);
+  }, [runningKey, refresh]);
+
   async function doAction(app, action, extra) {
     if (!api || !api.l3 || busyApp) return { ok: false, error: "busy" };
-    const labels = {
-      install: "installing…", update: "updating…", disable: "stopping…",
-      enable: "starting…", remove: "removing…", configure: "configuring…", health: "health check…",
-    };
+    // One action at a time, also across pages: the row's buttons are off
+    // while the manager reports a running action, and this is the guard for
+    // any other caller. A health check is included on purpose — its answer
+    // would be about an app that is being replaced.
+    if (running) return { ok: false, error: "busy" };
     setBusyApp(app.id);
-    setBusyLabel(labels[action] || "working…");
+    setBusyLabel(L3_BUSY_LABEL[action] || "working…");
     setOutcome(null);
     try {
       const r = await api.l3[action]({ appId: app.id, ...(extra || {}) });
@@ -573,6 +619,9 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 700 }}>{catalog.platform.name || "Shared backend"}</div>
               <L3StatusPill status={platformStatus ? platformStatus.status : null} />
+              {running && (running.action === "install" || running.action === "update") && (
+                <span className="pill gray">{L3_BUSY_LABEL[running.action]}</span>
+              )}
               <div className="spacer" style={{ flex: 1 }} />
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
                 installed: <span className="kbd">{(platformStatus && platformStatus.installedVersion) || "—"}</span>
@@ -586,24 +635,32 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
               {(platformStatus ? platformStatus.parts : catalog.platform.cfApps).map((p) => (
                 <span key={p.name} style={{ marginRight: 12 }}>
                   <span className="kbd">{p.name}</span>
-                  {" "}{p.exists === false ? "absent" : ((p.state || "").toLowerCase() || "")}
+                  {" "}{p.exists === false ? "absent" : (p.staging ? "staging" : ((p.state || "").toLowerCase() || ""))}
                 </span>
               ))}
             </div>
           </div>
         )}
 
-        {catalog && catalog.apps && catalog.apps.map((app) => (
-          <L3AppRow
-            key={app.id}
-            app={app}
-            status={statuses[app.id]}
-            busy={busyApp === app.id}
-            busyLabel={busyLabel}
-            figafSystems={figafSystems}
-            onAction={(action, extra) => doAction(app, action, extra)}
-          />
-        ))}
+        {catalog && catalog.apps && catalog.apps.map((app) => {
+          // One lifecycle action at a time in the whole manager: every deploy
+          // touches the shared backend, so a run on ANY app blocks this row.
+          const mine = busyApp === app.id || (running && running.appId === app.id);
+          const label = mine
+            ? (busyLabel || L3_BUSY_LABEL[running && running.action] || "working…")
+            : (running ? `waiting — ${L3_BUSY_LABEL[running.action] || "an action"} ${running.appId}` : "");
+          return (
+            <L3AppRow
+              key={app.id}
+              app={app}
+              status={statuses[app.id]}
+              busy={busyApp === app.id || !!running}
+              busyLabel={label}
+              figafSystems={figafSystems}
+              onAction={(action, extra) => doAction(app, action, extra)}
+            />
+          );
+        })}
 
         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
           <button className="btn" onClick={refresh} disabled={refreshing || !!busyApp}>

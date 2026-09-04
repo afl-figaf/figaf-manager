@@ -89,7 +89,8 @@ the audit log.
 
 | Operation | Behind it |
 |---|---|
-| `l3:catalog`, `l3:status` | catalog + live state per CF app from `cf curl /v3/apps` (scoped to the targeted space), installed version from the env var `FIGAF_APP_VERSION` |
+| `l3:catalog`, `l3:status` | catalog + live state per CF app from `cf curl /v3/apps` (scoped to the targeted space), installed version from the env var `FIGAF_APP_VERSION`, the in-flight action (`running`), and per part `staging` (a STOPPED part with a build in `STAGING`, one `cf curl /v3/builds`) |
+| `l3:running` | the lifecycle action running now, or null. No cf call. For a page that did not start it (reload, second tab, second session) |
 | `l3:services`, `l3:provisionServices({plans, only, waitOnly})` | `cf service <name>`; `cf create-service` for missing instances, poll every 10 s until `succeeded` (15 min limit); a `failed` instance is deleted and created again. With `waitOnly`, only those names are awaited; the others are started and reported as `pending` |
 | `l3:bindManagerService`, `l3:restartSelf` | `cf bind-service <manager> <name>`; `cf restart <manager>` (fire-and-forget) |
 | `l3:ensureXsuaa({updateOnly})` | create or `cf update-service figaf-l3l4-xsuaa` with the composed document (section 5) |
@@ -103,6 +104,19 @@ the audit log.
 
 Install / update algorithm:
 
+0. One lifecycle action at a time. `l3:install`, `l3:update`, `l3:disable`,
+   `l3:enable`, `l3:remove` and `l3:configure` share one lock, held in module
+   scope (so it covers every browser session of the container; an entry older
+   than 30 minutes is treated as gone). A second action is refused with
+   `{ ok:false, busy:true, running, error }` and changes nothing. Why: the
+   console's own busy state lives in ONE page, and a fresh install keeps the
+   CF app STOPPED for the whole staging time — on 2026-09-04 Install was
+   pressed again while the shared backend was staging; the second push
+   replaced the package and Cloud Foundry dropped the running build.
+   While an action runs, the manager sends `l3:running` to every page of the
+   session (payload `null` when it ends), `l3:status` carries `running`, and
+   the console shows the status **Installing…** with every action button off
+   and a status refresh every 10 s.
 1. Refuse when a REQUIRED instance (any name in a cfApp's `services`) is
    missing: "create them first (Setup, step 3)".
 2. Role refresh: `l3:ensureXsuaa({ updateOnly: true })` — the shared XSUAA

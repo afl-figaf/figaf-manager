@@ -81,6 +81,8 @@ test("hints: session lost, quota, bind, start, checksum, no route; unknown text 
   assert.equal(hintFor("cf start x failed — see the staging log in the terminal: Start unsuccessful"), "start");
   assert.equal(hintFor("checksum mismatch for backend.zip — the release is corrupt"), "checksum");
   assert.equal(hintFor("could not resolve the route of figaf-l3l4-backend — is the platform base deployed and started?"), "no-route");
+  // Refused because another action is running (one action at a time, 2026-09-04)
+  assert.equal(hintFor("install of arch is already running (started 2 min ago) — wait until it finishes."), "busy");
   const d = f({ action: "remove", appName: "X", result: { ok: false, error: "something nobody expected" } });
   assert.equal(d.hintId, "default");
   assert.match(d.hint, /terminal drawer/);

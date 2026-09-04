@@ -7,7 +7,7 @@ was `spikes/app-manager-poc/FINDINGS.md` in the figaf-l3-l4 repo). Behavior
 is in `SPEC.md`, reasons are in figaf-l3-l4 `decisions/`, run records in
 figaf-l3-l4 `docs/d1/RUNBOOK-VIRGIN.md`. Platform-level notes (release model,
 Figaf API client scopes) live in figaf-l3-l4 `docs/SOLUTION.md`.
-Last edited 2026-09-03.
+Last edited 2026-09-04.
 
 ## Open items
 
@@ -74,6 +74,15 @@ Last edited 2026-09-03.
     global-setup refreshes the token once before copying, or seeds one
     session only. Part of the test-suite discussion.
 
+13. **`console-baseline.spec.js` step-4 assertion depends on the space**
+    (2026-09-04): "setup page: five steps ... the rest 'after step 1'" expects
+    step 4 (Shared backend and first app) to be blocked, but the checklist
+    marks it done as soon as the platform row is `running` — so the spec fails
+    in any space where the platform is already installed (our dev space since
+    2026-09-04). Fix: assert the blocked steps that do not depend on installed
+    apps, or run that spec against the fixture release. Part of the
+    test-suite discussion.
+
 ## Design notes still in force
 
 ### Desktop installer frozen (Arsenii, 2026-09-03)
@@ -95,6 +104,12 @@ design: the installed apps and their versions are read live from the space
 (`cf env <app>`, the release version env var), so nothing needs to be stored.
 For the Figaf-tool flows it is a gap: `vars.yml` and the update state under
 the session directory are lost, so a re-entered flow starts blank.
+
+One deliberate piece of memory was added on 2026-09-04: which lifecycle action
+is running now (`l3-apps.js`, module scope — one lock for every session of the
+container). It is gone after a restart, and that is acceptable: the console
+then falls back to Cloud Foundry itself, where a part with a build in
+`STAGING` still reads as `Installing…` (SPEC section 3).
 
 ### Auth roadmap (Arsenii, 2026-08-31, updated 2026-09-03)
 

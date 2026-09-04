@@ -47,6 +47,11 @@
       hint: "The manager's own manifest.yml was applied to the app push. This manager build is too old: builds from 2026-09-03 on push with --no-manifest. Deploy the current manager build, then try again.",
     },
     {
+      id: "busy",
+      re: /is already running \(started/i,
+      hint: "The manager runs one action at a time. Wait until the running action finishes - the app row shows its state - and try again. Do not deploy twice at once: the second push replaces the package Cloud Foundry is staging and both attempts fail.",
+    },
+    {
       id: "services-missing",
       re: /required service instance\(s\) missing/i,
       hint: "Create the base services first (Setup page, step 3), wait until every instance is Ready, then try again.",

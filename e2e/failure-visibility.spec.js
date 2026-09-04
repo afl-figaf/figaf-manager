@@ -95,3 +95,82 @@ test("a failed status refresh is shown too (the manager answers, the space listi
   await expect(panel).toContainText("Status refresh failed");
   await expect(panel).toContainText("Sign in again on Session & access");
 });
+
+
+// ─── one action at a time (2026-09-04) ──────────────────────────────────────
+// Live failure: Install was pressed a second time while the shared backend
+// was staging. Cloud Foundry keeps a freshly pushed app STOPPED for the whole
+// staging time, so the row invited the second click; the second push replaced
+// the package and the running build was dropped.
+
+test("a second lifecycle action is refused while one is running, and changes nothing", async ({ page }) => {
+  await page.goto("/#/apps");
+  await expect(page.locator("h1.pane-title")).toHaveText("Figaf L3 applications");
+
+  // Two installs fired together: the first takes the lock and spawns cf, the
+  // second must be refused. Retried a few times so a slow first spawn cannot
+  // make this flaky.
+  let pair = null;
+  for (let attempt = 0; attempt < 5 && !pair; attempt++) {
+    const results = await page.evaluate(async (appId) => {
+      const call = () => fetch("/rpc/l3%3Ainstall", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appId }),
+        credentials: "same-origin",
+      }).then((r) => r.json());
+      return Promise.all([call(), call()]);
+    }, APP_ID);
+    if (results.some((r) => r && r.busy)) pair = results;
+  }
+  expect(pair, "one of two parallel installs must be refused as busy").not.toBeNull();
+  const busy = pair.find((r) => r.busy);
+  expect(busy.ok).toBe(false);
+  expect(busy.error).toMatch(/install of b2b-archiving-setup-e2e is already running \(started/);
+  expect(busy.running.action).toBe("install");
+  // The other one is the normal early refusal of this fixture — no cf change.
+  const other = pair.find((r) => !r.busy);
+  expect(other.error).toMatch(/required service instance\(s\) missing/);
+
+  // Nothing runs any more, and the row is untouched.
+  const running = await page.evaluate(() =>
+    fetch("/rpc/l3%3Arunning", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", credentials: "same-origin" }).then((r) => r.json()));
+  expect(running.running).toBeNull();
+  await expect(page.locator(`.l3-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
+});
+
+test("a deploy started elsewhere shows as Installing… and every action button is off", async ({ page }) => {
+  // The manager reports the in-flight action with every status, so a page
+  // that did not start it (a reload, a second tab) shows it too. Simulated on
+  // the RPC seam — the same contract l3:status carries live.
+  await page.route("**/rpc/l3%3Astatus", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        running: { action: "install", appId: APP_ID, startedAt: Date.now() - 40_000 },
+        platform: {
+          id: "platform", name: "Platform base (e2e fixture)", status: "installing",
+          installedVersion: null, catalogVersion: "0.0.0-e2e",
+          parts: [{ name: "figaf-l3l4-e2e-backend", exists: true, state: "STOPPED", staging: true, route: null }],
+        },
+        apps: [{
+          id: APP_ID, name: "B2B Archiving Setup (e2e fixture)", status: "installing",
+          installedVersion: null, catalogVersion: "0.0.0-e2e",
+          parts: [{ name: "figaf-l3-e2e-frontend", exists: false, state: null, route: null }],
+        }],
+      }),
+    });
+  });
+  await page.goto("/#/apps");
+  const row = page.locator(`.l3-app-row[data-app="${APP_ID}"]`);
+  await expect(row).toContainText("Installing…");
+  await expect(row).toContainText("installing…");                 // the busy pill
+  await expect(page.locator("[data-platform-row]")).toContainText("staging");
+  // No button on the row may invite a second deploy.
+  for (const b of await row.getByRole("button").all()) {
+    expect(await b.isDisabled(), `${(await b.textContent()) || ""} must be disabled`).toBe(true);
+  }
+  await page.unroute("**/rpc/l3%3Astatus");
+});

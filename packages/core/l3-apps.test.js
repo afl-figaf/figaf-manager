@@ -13,7 +13,10 @@
 //      - l3:configure — whitelist enforced, values masked in logCmd/auditArgs,
 //        restart follows, unknown key rejected.
 //      - l3:disable stops in reverse order; l3:remove deletes in reverse order.
-//      - l3:status maps /v3 responses to app status + installed version.
+//      - l3:status maps /v3 responses to app status + installed version,
+//        reports the in-flight action and marks a part that is staging.
+//      - one lifecycle action at a time: a second install is refused and
+//        pushes nothing; the lock is released after a failure too.
 //      - l3:health hits <route><healthPath> via httpsText.
 
 const { test, beforeEach } = require("node:test");
@@ -25,6 +28,8 @@ const path = require("path");
 const {
   VERSION_ENV,
   APPS_DOMAIN_PLACEHOLDER,
+  runningAction,
+  resetRunningAction,
   loadCatalog,
   computeAppStatus,
   buildDestinationsEnv,
@@ -1175,4 +1180,151 @@ test("l3:install refuses with a pointer to Setup step 3 while a required instanc
   const r = await createL3Handlers(ctx)["l3:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.match(r.error, /required service instance\(s\) missing: db — create them first \(Setup, step 3\)/);
+});
+
+
+// --- C. one lifecycle action at a time --------------------------------------
+// Why these exist: on 2026-09-04 Install was pressed a second time while the
+// shared backend was staging (the CF app reads STOPPED for that whole time).
+// The second push uploaded a new package, Cloud Foundry dropped the running
+// build, and the install never finished.
+
+test("a second install is refused while the first one runs - and pushes nothing", async () => {
+  resetRunningAction();
+  const dir = makeChannelDir();
+  let releaseFirst;
+  const firstDone = new Promise((res) => { releaseFirst = res; });
+  const { ctx, calls, events } = makeCtx(dir, (args) => {
+    if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "" };  // fresh
+    if (args[0] === "service" && args[1] === "credstore") return { code: 1, stdout: "" };
+    if (args[0] === "app" && args[1] === "arch-backend") return { code: 0, stdout: "routes:   b.example.com\n" };
+    return { code: 0, stdout: "" };
+  });
+  // Hold the first install inside its first push.
+  const realRun = ctx.run;
+  let held = false;
+  ctx.run = async (cmd, args, opts) => {
+    if (!held && args[0] === "push") { held = true; await firstDone; }
+    return realRun(cmd, args, opts);
+  };
+  const handlers = createL3Handlers(ctx);
+
+  const first = handlers["l3:install"]({ appId: "arch" });
+  await new Promise((r) => setImmediate(r));            // let it reach the hold
+  assert.equal((runningAction() || {}).action, "install", "the manager must report the running action");
+  const running = await handlers["l3:running"]();
+  assert.equal(running.running.action, "install");
+  assert.equal(running.running.appId, "arch");
+
+  const pushesBefore = calls.filter((c) => c.args[0] === "push").length;
+  const second = await handlers["l3:install"]({ appId: "arch" });
+  assert.equal(second.ok, false);
+  assert.equal(second.busy, true);
+  assert.equal(second.running.action, "install");
+  assert.match(second.error, /already running/);
+  assert.equal(
+    calls.filter((c) => c.args[0] === "push").length, pushesBefore,
+    "the refused call must not push anything"
+  );
+
+  releaseFirst();
+  const r = await first;
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(runningAction(), null, "the lock is released when the action ends");
+  const runningEvents = events.filter((e) => e.channel === "l3:running");
+  assert.equal(runningEvents.length, 2, "one event on start, one on end");
+  assert.equal(runningEvents[0].payload.action, "install");
+  assert.equal(runningEvents[1].payload, null);
+});
+
+test("every lifecycle action shares the lock, and a failure releases it", async () => {
+  resetRunningAction();
+  const dir = makeChannelDir();
+  let release;
+  const held = new Promise((res) => { release = res; });
+  const { ctx } = makeCtx(dir, () => ({ code: 0, stdout: "" }));
+  const realRun = ctx.run;
+  let first = true;
+  ctx.run = async (cmd, args, opts) => {
+    if (first && args[0] === "stop") { first = false; await held; }
+    return realRun(cmd, args, opts);
+  };
+  const handlers = createL3Handlers(ctx);
+  const disable = handlers["l3:disable"]({ appId: "arch" });
+  await new Promise((r) => setImmediate(r));
+  for (const action of ["install", "update", "enable", "remove", "configure"]) {
+    const r = await handlers["l3:" + action]({ appId: "arch", env: { FIGAF_BASE_URL: "https://f" } });
+    assert.equal(r.busy, true, action + " must wait for the running disable");
+  }
+  release();
+  await disable;
+  assert.equal(runningAction(), null);
+
+  // A failing action must not leave the lock behind.
+  const bad = makeCtx(dir, (args) => (args[0] === "stop" ? { code: 1, stderr: "boom" } : { code: 0, stdout: "" }));
+  const h2 = createL3Handlers(bad.ctx);
+  const f = await h2["l3:disable"]({ appId: "arch" });
+  assert.equal(f.ok, false);
+  assert.equal(runningAction(), null, "the lock must be released after a failure too");
+});
+
+test("l3:status: a stopped part with a staging build reads as installing", async () => {
+  resetRunningAction();
+  const dir = makeChannelDir();
+  const { ctx } = makeCtx(dir, (args) => {
+    if (args[0] === "target") return { code: 0, stdout: "org: o\nspace: myspace\n" };
+    if (args[0] === "space") return { code: 0, stdout: "space-guid-1\n" };
+    if (args[0] === "curl" && /\/v3\/apps\?/.test(args[1])) {
+      return { code: 0, stdout: JSON.stringify({ resources: [
+        { name: "arch-backend", guid: "g1", state: "STOPPED" },
+      ] }) };
+    }
+    if (args[0] === "curl" && /\/v3\/builds\?app_guids=g1&states=STAGING/.test(args[1])) {
+      return { code: 0, stdout: JSON.stringify({ resources: [{ guid: "b1", state: "STAGING" }] }) };
+    }
+    if (args[0] === "curl" && /environment_variables$/.test(args[1])) {
+      return { code: 0, stdout: JSON.stringify({ var: { [VERSION_ENV]: "0.2.0" } }) };
+    }
+    if (args[0] === "curl" && /routes$/.test(args[1])) return { code: 0, stdout: JSON.stringify({ resources: [] }) };
+    return { code: 0, stdout: "" };
+  });
+  const r = await createL3Handlers(ctx)["l3:status"]();
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.platform.status, "installing");
+  assert.equal(r.platform.parts[0].staging, true);
+  assert.equal(r.running, null, "no action of THIS manager is running");
+  assert.equal(r.apps[0].status, "not-installed", "the app row has no CF app yet");
+});
+
+test("l3:status: a running install marks the app row and the shared backend", async () => {
+  resetRunningAction();
+  const dir = makeChannelDir();
+  let release;
+  const held = new Promise((res) => { release = res; });
+  const { ctx } = makeCtx(dir, (args) => {
+    if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "" };
+    if (args[0] === "service" && args[1] === "credstore") return { code: 1, stdout: "" };
+    if (args[0] === "app" && args[1] === "arch-backend") return { code: 0, stdout: "routes:   b.example.com\n" };
+    if (args[0] === "target") return { code: 0, stdout: "org: o\nspace: myspace\n" };
+    if (args[0] === "space") return { code: 0, stdout: "space-guid-1\n" };
+    if (args[0] === "curl" && /\/v3\/apps\?/.test(args[1])) return { code: 0, stdout: JSON.stringify({ resources: [] }) };
+    return { code: 0, stdout: "" };
+  });
+  const realRun = ctx.run;
+  let first = true;
+  ctx.run = async (cmd, args, opts) => {
+    if (first && args[0] === "push") { first = false; await held; }
+    return realRun(cmd, args, opts);
+  };
+  const handlers = createL3Handlers(ctx);
+  const install = handlers["l3:install"]({ appId: "arch" });
+  await new Promise((r) => setImmediate(r));
+  const st = await handlers["l3:status"]();
+  assert.equal(st.running.action, "install");
+  assert.equal(st.running.appId, "arch");
+  // Nothing exists in CF yet, but a deploy IS running - both rows must say so.
+  assert.equal(st.platform.status, "installing");
+  assert.equal(st.apps[0].status, "installing");
+  release();
+  await install;
 });
