@@ -21,10 +21,15 @@ Last edited 2026-09-04.
    talk with Alex.
 3. **Remove + reinstall repeatability** check (remove exists; reinstall after
    remove not yet done by hand).
-4. **R2 artifact store**: bucket + scoped credentials from Daniel (figaf-l3-l4
-   decision 0003); then the catalog fetch from R2
-   (`host.resolveL3ArtifactsDir()` is the seam) and the manager's own release
-   publishing.
+4. **Release store, what is left** (the store itself is in use since
+   2026-09-04, figaf-l3-l4 decision 0010): Daniel's confirmation that public
+   downloads of L3 builds are acceptable; a custom domain instead of
+   `r2.dev` (Cloudflare: rate-limited, not for production; a change of
+   `FIGAF_L3_RELEASE_URL`); signed `release.json` later; the manager's own
+   release publishing. Owed run: the install smoke against a manager whose
+   source is the R2 URL (the smoke runs from the local build today), and one
+   **Update installation** in the dev space (figaf-l3-l4 `docs/SOLUTION.md`
+   3.4).
 5. **Space Auditor** for the management user in the Figaf-tool spaces, so
    cross-space discovery of Figaf-tool deployments works under the technical
    user (a single-space user sees only its own space; manual URL entry is the
@@ -83,6 +88,18 @@ Last edited 2026-09-04.
     apps, or run that spec against the fixture release. Part of the
     test-suite discussion.
 
+14. **No target guard on the L3 lifecycle handlers** (2026-09-04): the sign-in
+    now pins the session to the manager's own org/space (SPEC section 5.3), so
+    the normal path cannot install into the wrong space any more. The handlers
+    themselves still trust the session: `l3:install`, `l3:update` and the
+    remove/disable actions run `cf` against whatever space the session is
+    targeting, and **Switch Org** can move it away (the Figaf-tool flows need
+    that button). Only self-update checks (`update:selfTarget` compares the
+    session against `VCAP_APPLICATION`). Fix: reuse that comparison as a
+    pre-condition in `l3-apps.js` and refuse with a clear message, instead of
+    installing somewhere else. Small, and worth doing before a customer runs
+    the console.
+
 ## Design notes still in force
 
 ### Desktop installer frozen (Arsenii, 2026-09-03)
@@ -124,7 +141,7 @@ impossible: the first cf login is also the authorization moment.
 
 ### Naming rules confirmed
 
-Release / artifact store (not "channel"); `figaf-l3l4-` = shared by L3 and
+Release / release store (not "channel"); `figaf-l3l4-` = shared by L3 and
 L4; `figaf-l3-<app-id>` = one L3 frontend; the shared backend connector is
 "Shared backend" in the UI, CF app `figaf-l3l4-backend`; "approuter", not
 "authentication proxy". Frozen identifiers: figaf-l3-l4 decisions 0008 and 0009.

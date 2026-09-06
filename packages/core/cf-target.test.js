@@ -4,7 +4,7 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { parseCfApi, parseCfTarget, normalizeApiUrl } = require("./cf-target");
+const { parseCfApi, parseCfTarget, normalizeApiUrl, resolveSelfPin, explainPinnedLoginFailure } = require("./cf-target");
 
 // ── Captured live from cf-cli v8.18 (cf api) ──────────────────────────────
 const SAMPLE_CF_API = [
@@ -88,4 +88,69 @@ test("normalizeApiUrl strips trailing slash and lowercases scheme+host", () => {
   );
   assert.equal(normalizeApiUrl(""), "");
   assert.equal(normalizeApiUrl(null), "");
+});
+
+// ── resolveSelfPin: the manager's own space as the automatic CF target ──────
+
+const SELF = {
+  apiUrl: "https://api.cf.eu10-004.hana.ondemand.com",
+  orgName: "Figaf ApS_figafpartner-1",
+  spaceName: "figaf-l3-l4",
+};
+
+test("resolveSelfPin: hosted manager, login to its own endpoint -> pin its org/space", () => {
+  assert.deepEqual(resolveSelfPin(SELF, SELF.apiUrl), {
+    org: "Figaf ApS_figafpartner-1",
+    space: "figaf-l3-l4",
+  });
+});
+
+test("resolveSelfPin: a trailing slash or upper case on the endpoint still pins", () => {
+  assert.deepEqual(resolveSelfPin(SELF, "https://API.cf.eu10-004.hana.ondemand.com/"), {
+    org: "Figaf ApS_figafpartner-1",
+    space: "figaf-l3-l4",
+  });
+});
+
+test("resolveSelfPin: another CF landscape -> no pin (the picker stays, Figaf-tool flow)", () => {
+  assert.equal(resolveSelfPin(SELF, "https://api.cf.us10-001.hana.ondemand.com"), null);
+});
+
+test("resolveSelfPin: desktop mode (no self target) -> no pin", () => {
+  assert.equal(resolveSelfPin(null, SELF.apiUrl), null);
+});
+
+test("resolveSelfPin: incomplete VCAP target -> no pin", () => {
+  assert.equal(resolveSelfPin({ apiUrl: SELF.apiUrl, orgName: "O" }, SELF.apiUrl), null);
+  assert.equal(resolveSelfPin({ orgName: "O", spaceName: "S" }, SELF.apiUrl), null);
+});
+
+test("resolveSelfPin: no requested endpoint -> no pin", () => {
+  assert.equal(resolveSelfPin(SELF, ""), null);
+  assert.equal(resolveSelfPin(SELF, null), null);
+});
+
+// ── explainPinnedLoginFailure ───────────────────────────────────────────────
+
+const PIN = { org: "Figaf ApS_figafpartner-1", space: "figaf-l3-l4" };
+
+test("explainPinnedLoginFailure: space not found -> names the space and the fix", () => {
+  const msg = explainPinnedLoginFailure("FAILED\nSpace 'figaf-l3-l4' not found\n", PIN);
+  assert.match(msg, /figaf-l3-l4/);
+  assert.match(msg, /Space Developer/);
+});
+
+test("explainPinnedLoginFailure: org not found -> names the org and the fix", () => {
+  const msg = explainPinnedLoginFailure("FAILED\nOrganization 'Figaf ApS_figafpartner-1' not found\n", PIN);
+  assert.match(msg, /Figaf ApS_figafpartner-1/);
+  assert.match(msg, /administrator/);
+});
+
+test("explainPinnedLoginFailure: a rejected passcode is NOT reported as a missing role", () => {
+  assert.equal(explainPinnedLoginFailure("Credentials were rejected, please try again.", PIN), null);
+  assert.equal(explainPinnedLoginFailure("Invalid passcode", PIN), null);
+});
+
+test("explainPinnedLoginFailure: no pin -> no message (the picker explained itself)", () => {
+  assert.equal(explainPinnedLoginFailure("Space 'x' not found", null), null);
 });

@@ -27,9 +27,9 @@ module.exports = defineConfig({
   },
   projects: [
     {
-      // The console against the bundled release (read-only).
+      // The console against the locally built release (read-only).
       name: "console",
-      testIgnore: ["**/failure-visibility.spec.js", "**/*.mutating.spec.js"],
+      testIgnore: ["**/failure-visibility.spec.js", "**/release-store.spec.js", "**/*.mutating.spec.js"],
       use: { baseURL: "http://127.0.0.1:8087", storageState: "e2e/.auth/state.json" },
     },
     {
@@ -38,6 +38,13 @@ module.exports = defineConfig({
       name: "failure-visibility",
       testMatch: ["**/failure-visibility.spec.js"],
       use: { baseURL: "http://127.0.0.1:8088", storageState: "e2e/.auth/state-failure.json" },
+    },
+    {
+      // The release store (decision 0010): the manager on :8089 reads a
+      // remote store served from e2e/fixtures/store on :8090.
+      name: "release-store",
+      testMatch: ["**/release-store.spec.js"],
+      use: { baseURL: "http://127.0.0.1:8089", storageState: "e2e/.auth/state-remote.json" },
     },
   ],
 });

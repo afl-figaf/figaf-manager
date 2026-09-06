@@ -64,6 +64,12 @@ function createHost({ sessionId }) {
 
     getDeployTargetForSelf: () => (VCAP_TARGET ? { ...VCAP_TARGET } : null),
 
+    // Same switch server.js injects into the page as window.figafConsoleUI:
+    // the console frame is the default, FIGAF_CONSOLE_UI=0 restores Alex's
+    // classic wizard. The orchestrator needs it because the console installs
+    // into its OWN space while the wizard deploys where the operator picks.
+    isConsoleUI: () => process.env.FIGAF_CONSOLE_UI !== "0",
+
     resolveBinary(name) {
       // The bundled bin/ binaries are Linux builds (packed into the cloud
       // zip). A CF container is always Linux, so win32 can only be a dev
@@ -90,16 +96,28 @@ function createHost({ sessionId }) {
     }),
 
     /**
-     * L3 App Manager (PoC): directory holding catalog.json + per-app zip
-     * artifacts. Bundled into the cockpit zip by build-zip.js; in dev it is
-     * apps/figaf-manager/l3-artifacts/ (populated by the build-artifacts
-     * script in the figaf-l3-l4 repo). FIGAF_L3_ARTIFACTS_DIR overrides.
-     * Returns null when no channel is present — the l3:* handlers then
-     * report a friendly "no artifact channel" error.
+     * Where the L3 platform releases come from (figaf-l3-l4 decision 0010).
+     * Exactly one source, in this order:
+     *   1. FIGAF_L3_ARTIFACTS_DIR  a local directory holding ONE release in the
+     *      flat shape build.js writes (development, e2e fixtures);
+     *   2. FIGAF_L3_RELEASE_URL    the artifact store (manifest.yml; the bucket
+     *      layout of figaf-l3-l4 release/publish.js: index.json, <version>/…);
+     *   3. l3-artifacts/ next to this file, when a developer built a release
+     *      into the checkout and set nothing (development convenience; the
+     *      shipped zip does not contain it any more).
+     * Returns { kind:"local", dir } | { kind:"remote", url, cacheDir } | null.
+     * With null the l3:* handlers report "no release source configured".
      */
-    resolveL3ArtifactsDir() {
-      const dir = process.env.FIGAF_L3_ARTIFACTS_DIR || path.join(__dirname, "l3-artifacts");
-      return fs.existsSync(path.join(dir, "catalog.json")) ? dir : null;
+    resolveL3ReleaseSource() {
+      const dir = process.env.FIGAF_L3_ARTIFACTS_DIR;
+      if (dir) return { kind: "local", dir, origin: "FIGAF_L3_ARTIFACTS_DIR" };
+      const url = (process.env.FIGAF_L3_RELEASE_URL || "").trim();
+      if (url) {
+        return { kind: "remote", url: url.replace(/\/+$/, ""), cacheDir: path.join(os.tmpdir(), "figaf-l3-releases"), origin: "FIGAF_L3_RELEASE_URL" };
+      }
+      const bundled = path.join(__dirname, "l3-artifacts");
+      if (fs.existsSync(path.join(bundled, "catalog.json"))) return { kind: "local", dir: bundled, origin: "l3-artifacts/ next to the server" };
+      return null;
     },
 
     /**

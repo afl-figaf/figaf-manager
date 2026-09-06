@@ -80,6 +80,13 @@ test("hints: session lost, quota, bind, start, checksum, no route; unknown text 
   assert.equal(hintFor("bind-service db failed — does the service instance exist in this space?: Service instance db not found"), "bind");
   assert.equal(hintFor("cf start x failed — see the staging log in the terminal: Start unsuccessful"), "start");
   assert.equal(hintFor("checksum mismatch for backend.zip — the release is corrupt"), "checksum");
+  // The release store (decision 0010): unreachable store, failed download, version rules.
+  assert.equal(hintFor("cannot read https://store.example/l3/index.json: getaddrinfo ENOTFOUND store.example"), "store-unreachable");
+  assert.equal(hintFor("download of backend.zip failed: HTTP 404"), "store-unreachable");
+  assert.equal(hintFor("No release source configured: set FIGAF_L3_RELEASE_URL (the release store) or FIGAF_L3_ARTIFACTS_DIR (a local release directory)"), "store-unreachable");
+  assert.equal(hintFor("version 0.4.0 is lower than the installed 0.4.1 — rollback is not supported (forward-only migrations); choose 0.4.1 or higher"), "version-rule");
+  assert.equal(hintFor("version 9.9.9 is not in the release store (available: 0.4.1)"), "version-rule");
+  assert.equal(hintFor("nothing is installed yet — install an app first; Install uses the latest release"), "version-rule");
   assert.equal(hintFor("could not resolve the route of figaf-l3l4-backend — is the platform base deployed and started?"), "no-route");
   // Refused because another action is running (one action at a time, 2026-09-04)
   assert.equal(hintFor("install of arch is already running (started 2 min ago) — wait until it finishes."), "busy");

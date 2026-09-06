@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld("figaf", {
   cf: {
     loginStart: (apiUrl) => ipcRenderer.invoke("cf:loginStart", { apiUrl }),
     suggestedApiUrl: () => ipcRenderer.invoke("cf:suggestedApiUrl"),
+    ownTarget: (apiUrl) => ipcRenderer.invoke("cf:ownTarget", { apiUrl }),
     submitPasscode: (code) => ipcRenderer.invoke("cf:submitPasscode", { code }),
     selectOrg: (index) => ipcRenderer.invoke("cf:selectOrg", { index }),
     selectSpace: (index) => ipcRenderer.invoke("cf:selectSpace", { index }),
@@ -137,9 +138,10 @@ contextBridge.exposeInMainWorld("figaf", {
   // the handlers work too when an artifact channel dir is configured via
   // host.resolveL3ArtifactsDir (not implemented yet → friendly error).
   l3: {
-    catalog:   () => ipcRenderer.invoke("l3:catalog"),
+    catalog:   (a) => ipcRenderer.invoke("l3:catalog", a || {}),
     status:    () => ipcRenderer.invoke("l3:status"),
     running:   () => ipcRenderer.invoke("l3:running"),
+    releases:  (a) => ipcRenderer.invoke("l3:releases", a || {}),
     figafSystems: () => ipcRenderer.invoke("l3:figafSystems"),
     services:           ()  => ipcRenderer.invoke("l3:services"),
     provisionServices:  (a) => ipcRenderer.invoke("l3:provisionServices", a || {}),

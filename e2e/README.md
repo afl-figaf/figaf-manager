@@ -24,14 +24,20 @@ manager process. It is the gate that would have stopped the 2026-09-03
 release. Do not skip it because "only docs changed in the manager" — the
 zip is what ships.
 
-Servers started by global-setup (choose with `E2E_SERVERS=main,failure`):
+Servers started by global-setup (choose with `E2E_SERVERS=main,failure,remote`):
 
 - `main` on :8087 — the bundled release (`apps/figaf-manager/l3-artifacts`).
+  It is a LOCAL release source (`FIGAF_L3_ARTIFACTS_DIR`).
   Project `console` (read-only specs) and the install smoke run here.
 - `failure` on :8088 — the fixture release `e2e/fixtures/release-missing-service`.
   Its platform base needs a service instance that does not exist, so every
   Install is refused BEFORE any cf change. Project `failure-visibility` runs
   here: a real failure, zero side effects.
+- `remote` on :8089 — a REMOTE release source: `FIGAF_L3_RELEASE_URL` points
+  at a static file server on :8090 that serves `e2e/fixtures/store` (the
+  bucket layout, versions 0.0.1 and 0.0.2; regenerate with
+  `node e2e/tools/make-fixture-store.js`). Project `release-store` runs here:
+  the same code path as Cloudflare R2, no internet, no cf change.
 
 Run:
 
@@ -46,9 +52,11 @@ Prerequisites on the dev machine:
   space (today: org `Figaf ApS_figafpartner-1`, space `figaf-l3-l4`).
 - Node deps installed at the repo root (`npm install`).
 - For the install smoke: the release built into `l3-artifacts/`
-  (`release/build-artifacts.ps1` in the figaf-l3-l4 repo) and a space WITHOUT the
+  (`node release/build.js --version x.y.z` in the figaf-l3-l4 repo) and a space WITHOUT the
   release's CF apps (the smoke refuses to start otherwise) but WITH the base
-  service instances (`figaf-l3l4-db`, `-xsuaa`, `-credstore`).
+  service instances (`figaf-l3l4-db`, `-xsuaa`, `-credstore`). The smoke
+  installs from the LOCAL build on purpose: it gates a release before it is
+  published to the store (figaf-l3-l4 `release/README.md`).
 
 ## How auth works here (all real, nothing bypassed)
 

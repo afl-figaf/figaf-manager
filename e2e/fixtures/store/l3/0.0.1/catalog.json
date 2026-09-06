@@ -1,0 +1,54 @@
+{
+  "releaseVersion": "0.0.1",
+  "services": [
+    {
+      "name": "figaf-l3l4-e2e-missing",
+      "offering": "postgresql-db",
+      "plan": "free",
+      "purpose": "E2E FIXTURE - this instance must never exist; its absence makes every Install fail early, before any cf change"
+    },
+    {
+      "name": "figaf-l3l4-e2e-xsuaa",
+      "offering": "xsuaa",
+      "plan": "application",
+      "configFile": "xs-security.json",
+      "purpose": "E2E FIXTURE - a config file the store must deliver with the catalog"
+    }
+  ],
+  "platform": {
+    "name": "Platform base (e2e store fixture)",
+    "cfApps": [
+      {
+        "name": "figaf-l3l4-e2e-store-backend",
+        "artifact": "backend.zip",
+        "sha256": "2424b4b910d934f2eb1da01c5c99aaa5d096e15c0a9303a051f1eb5658977b41",
+        "buildpack": "nodejs_buildpack",
+        "memory": "64M",
+        "services": [
+          "figaf-l3l4-e2e-missing"
+        ]
+      }
+    ]
+  },
+  "apps": [
+    {
+      "id": "b2b-archiving-setup-e2e-store",
+      "name": "B2B Archiving Setup (e2e store fixture)",
+      "version": "0.0.1",
+      "description": "Fixture release 0.0.1 served from a local release store for release-store.spec.js. Install is always refused (required service missing).",
+      "cfApps": [
+        {
+          "name": "figaf-l3-e2e-store-frontend",
+          "artifact": "b2b-archiving-setup-e2e-store.zip",
+          "sha256": "285516afb4a055f7a414338755ffb5fa23aff5535e22363ec5bf05be36b48a73",
+          "buildpack": "nodejs_buildpack",
+          "memory": "64M",
+          "services": [
+            "figaf-l3l4-e2e-missing"
+          ]
+        }
+      ],
+      "healthPath": "/health"
+    }
+  ]
+}

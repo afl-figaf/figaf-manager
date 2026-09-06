@@ -1,0 +1,16 @@
+{
+  "latest": "0.0.2",
+  "updatedAt": "2026-09-04T12:00:00.000Z",
+  "versions": [
+    {
+      "version": "0.0.2",
+      "publishedAt": "2026-09-02T12:00:00.000Z",
+      "catalog": "l3/0.0.2/catalog.json"
+    },
+    {
+      "version": "0.0.1",
+      "publishedAt": "2026-09-01T12:00:00.000Z",
+      "catalog": "l3/0.0.1/catalog.json"
+    }
+  ]
+}

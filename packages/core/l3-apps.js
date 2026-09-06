@@ -3,12 +3,16 @@
 // remove / configure / health for Figaf L3 applications.
 //
 // Architecture:
-//   - An artifact-store directory (host.resolveL3ArtifactsDir()) holds one
-//     RELEASE: catalog.json plus one zip artifact per CF app. ("Release" =
-//     the versioned set; the store is where releases live — the word
-//     "channel" is retired, 2026-09-01.) For the PoC the release is bundled
-//     inside the manager build; the seam is this one host method, so a
-//     remote store (Cloudflare R2, GitHub releases) is a later swap.
+//   - Releases come from a RELEASE STORE (release-store.js; figaf-l3-l4
+//     decision 0010): the artifact store behind FIGAF_L3_RELEASE_URL, or a
+//     local directory for development. host.resolveL3ReleaseSource() names
+//     the one source. A RELEASE is catalog.json plus one zip per CF app,
+//     downloaded on demand and verified against its checksums.
+//   - ONE VERSION PER INSTALLATION: the installed version is what the shared
+//     backend reports (FIGAF_APP_VERSION). Install deploys an app at that
+//     version (latest on an empty space); Update moves the whole installation
+//     — shared backend first, then every installed frontend — to a chosen
+//     higher version. Never downwards (rollback is decommissioned).
 //   - Catalog v2 (release 0.3.0+): a `platform` block holds the SHARED
 //     BACKEND CONNECTOR's CF apps; each catalog "app" holds only its
 //     frontend(s). Install/update deploy the platform FIRST, then the app —
@@ -32,8 +36,13 @@
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const { loadCatalog, chooseVersion, createReleaseStore } = require("./release-store");
 
 const VERSION_ENV = "FIGAF_APP_VERSION";
+const NO_SOURCE_ERROR = "No release source configured: set FIGAF_L3_RELEASE_URL (the release store) or FIGAF_L3_ARTIFACTS_DIR (a local release directory)";
+// How long the installed platform version is remembered between the cf calls
+// of one page load (catalog, status and services are asked together).
+const INSTALLED_MEMO_MS = 5_000;
 // Landscape-independent releases (decision 0008, figaf-l3-l4 repo): a service
 // config file in the release (xs-security.json) may carry this placeholder in
 // its redirect URI; provisionServices fills it with the cfapps domain of the
@@ -85,54 +94,7 @@ function agoText(ms) {
 
 // ─── pure helpers (unit-tested in l3-apps.test.js) ──────────────────────────
 
-/** Read + validate <dir>/catalog.json. Returns { ok, catalog } or { ok:false, error }. */
-function loadCatalog(dir) {
-  const file = path.join(dir, "catalog.json");
-  if (!fs.existsSync(file)) return { ok: false, error: `catalog.json not found in ${dir}` };
-  let parsed;
-  try {
-    // strip a UTF-8 BOM — Windows-side writers (PowerShell 5.1) often add one
-    parsed = JSON.parse(fs.readFileSync(file, "utf8").replace(/^﻿/, ""));
-  } catch (e) {
-    return { ok: false, error: `catalog.json is not valid JSON: ${e.message}` };
-  }
-  if (!parsed || !Array.isArray(parsed.apps)) {
-    return { ok: false, error: "catalog.json must have an 'apps' array" };
-  }
-  if (parsed.platform != null) {
-    if (!Array.isArray(parsed.platform.cfApps) || parsed.platform.cfApps.length === 0) {
-      return { ok: false, error: "catalog 'platform' needs a non-empty cfApps array" };
-    }
-    for (const c of parsed.platform.cfApps) {
-      if (!c.name || !c.artifact) {
-        return { ok: false, error: "catalog 'platform' has a cfApp without name/artifact" };
-      }
-    }
-  }
-  for (const app of parsed.apps) {
-    if (!app.id || !app.version || !Array.isArray(app.cfApps) || app.cfApps.length === 0) {
-      return { ok: false, error: `catalog app '${app.id || "?"}' needs id, version and a non-empty cfApps array` };
-    }
-    for (const c of app.cfApps) {
-      if (!c.name || !c.artifact) {
-        return { ok: false, error: `catalog app '${app.id}' has a cfApp without name/artifact` };
-      }
-    }
-  }
-  // Catalog v3: service INSTANCES the manager creates when missing.
-  if (parsed.services != null) {
-    if (!Array.isArray(parsed.services)) return { ok: false, error: "catalog 'services' must be an array" };
-    for (const s of parsed.services) {
-      if (!s.name || !s.offering || !s.plan) {
-        return { ok: false, error: `catalog service '${s.name || "?"}' needs name, offering and plan` };
-      }
-      if (s.plans != null && (!Array.isArray(s.plans) || !s.plans.includes(s.plan))) {
-        return { ok: false, error: `catalog service '${s.name}': 'plans' must be an array containing the default plan` };
-      }
-    }
-  }
-  return { ok: true, catalog: parsed };
-}
+// loadCatalog lives in release-store.js (re-exported below for the tests).
 
 /**
  * Map `cf service <name>` output to one status word.
@@ -146,6 +108,19 @@ function serviceStatusFromCf(exitCode, stdout) {
   if (/in progress/.test(op)) return "in-progress";
   if (/failed/.test(op)) return "failed";
   return "unknown";
+}
+
+/**
+ * Catalog v4: a service entry may be OPTIONAL and carry a `group`. Optional
+ * services exist in the catalog but are NOT part of "create the base
+ * services" - the admin asks for a whole group ("pipo" = on-premise PI/PO
+ * through the SAP Cloud Connector) or for one instance by name. A required
+ * service is always wanted; an optional one only when its group is listed.
+ */
+function wantedService(service, groups) {
+  if (!service || !service.optional) return true;
+  const asked = Array.isArray(groups) ? groups : [];
+  return asked.includes(service.group || "");
 }
 
 /**
@@ -251,16 +226,94 @@ function validateConfigEnv(app, env) {
 
 /**
  * @param {object} ctx
- * @param {object} ctx.host        HostAdapter (needs resolveL3ArtifactsDir + getUserDataDir)
+ * @param {object} ctx.host        HostAdapter (needs resolveL3ReleaseSource + getUserDataDir)
  * @param {Function} ctx.run       orchestrator subprocess helper
  * @param {Function} ctx.log       cli:line logger (source, type, text)
  * @param {Function} ctx.send      event emitter to the renderer
  * @param {Function} ctx.resolveCf () => cf binary path
  * @param {Function} ctx.extractZip (zipPath, destDir) => Promise
  * @param {Function} ctx.httpsText (url) => Promise<string>
+ * @param {Function} ctx.httpsJson (url) => Promise<object>            release store reads
+ * @param {Function} ctx.httpsDownload (url, destPath) => Promise      release store downloads
  */
 function createL3Handlers(ctx) {
   const { host, run, log, send, resolveCf, extractZip, httpsText } = ctx;
+
+  // ─── the release store ────────────────────────────────────────────────────
+  let storeInst = null;
+  let storeKey = null;
+  function releaseSource() {
+    if (typeof host.resolveL3ReleaseSource === "function") return host.resolveL3ReleaseSource();
+    // Older host adapters: a directory is a local source.
+    if (typeof host.resolveL3ArtifactsDir === "function") {
+      const dir = host.resolveL3ArtifactsDir();
+      return dir ? { kind: "local", dir } : null;
+    }
+    return null;
+  }
+  /** The store of the configured source, created once per source. null = none configured. */
+  function store() {
+    const src = releaseSource();
+    if (!src) return null;
+    const key = JSON.stringify(src);
+    if (!storeInst || storeKey !== key) {
+      storeInst = createReleaseStore({ source: src, fetchJson: ctx.httpsJson, download: ctx.httpsDownload, log });
+      storeKey = key;
+    }
+    return storeInst;
+  }
+
+  // The installed platform version: FIGAF_APP_VERSION on the shared backend
+  // CF app named by the catalog. null when the backend is not deployed. Two
+  // cf calls, remembered for INSTALLED_MEMO_MS; forgotten after every action.
+  let installedMemo = null; // { at, name, value }
+  async function installedPlatformVersion(catalog) {
+    const platform = platformPseudoApp(catalog);
+    if (!platform) return null;
+    const name = platform.cfApps[0].name;
+    if (installedMemo && installedMemo.name === name && Date.now() - installedMemo.at < INSTALLED_MEMO_MS) return installedMemo.value;
+    // `silent`: a backend that is not deployed yet is a normal state, not an
+    // error; its "App not found" must not become a red line in the drawer
+    // (the Release panel shows the result: installed "—").
+    let value = null;
+    const g = await run(resolveCf(), ["app", name, "--guid"], { source: "cf", quiet: true, silent: true });
+    const guid = g.code === 0 ? (g.stdout || "").trim().split(/\r?\n/).filter(Boolean).pop() : null;
+    if (guid) {
+      const e = await run(resolveCf(), ["curl", `/v3/apps/${guid}/environment_variables`], { source: "cf", quiet: true, silent: true });
+      if (e.code === 0) { try { value = (JSON.parse(e.stdout).var || {})[VERSION_ENV] || null; } catch { value = null; } }
+    }
+    installedMemo = { at: Date.now(), name, value };
+    return value;
+  }
+
+  /**
+   * The release an action works with (decision 0010). Reads the store's
+   * index, finds the installed version (from the space), applies the version
+   * rule of `purpose` ("install" | "update" | "read", see chooseVersion) to
+   * `version` (optional, from the UI), and resolves that release: its catalog
+   * and config files in a local directory.
+   * Returns { ok, version, dir, catalog, release, installed, latest, source, note? }
+   * or { ok:false, error }.
+   */
+  async function currentRelease({ version, purpose = "read", refresh } = {}) {
+    const s = store();
+    if (!s) return { ok: false, error: NO_SOURCE_ERROR };
+    const idx = await s.index({ refresh });
+    if (!idx.ok) return { ok: false, error: idx.error };
+    // The latest catalog names the platform CF app; frozen names make any
+    // catalog fine for that (decision 0008). An explicit refresh also shows
+    // the verification of the cached files in the terminal.
+    const latestRel = await s.resolve(idx.latest, { verbose: !!refresh });
+    if (!latestRel.ok) return latestRel;
+    const installed = await installedPlatformVersion(latestRel.catalog);
+    const versions = idx.versions.map((v) => v.version);
+    const pick = chooseVersion({ requested: version, installed, latest: idx.latest, versions, purpose });
+    if (!pick.ok) return pick;
+    if (pick.note) log("l3", "warn", pick.note);
+    const rel = pick.version === idx.latest ? latestRel : await s.resolve(pick.version, { verbose: !!refresh });
+    if (!rel.ok) return rel;
+    return { ...rel, installed, latest: idx.latest, versions: idx.versions, source: s.describe(), note: pick.note };
+  }
   // Polling knobs (tests inject a no-op sleep and a short deadline).
   const sleep = ctx.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const POLL_MS = ctx.pollIntervalMs != null ? ctx.pollIntervalMs : 10_000;
@@ -356,14 +409,15 @@ function createL3Handlers(ctx) {
    * updateOnly: do nothing when the instance is missing (before install and
    * update, where the required-services check reports a missing instance).
    */
-  async function ensureXsuaa({ updateOnly } = {}) {
+  async function ensureXsuaa({ updateOnly, version } = {}) {
     const inst = managerXsuaa.SHARED_INSTANCE;
-    const dir = artifactsDir();
+    let dir = null;
     let catalog = null;
-    if (dir) {
-      const c = loadCatalog(dir);
-      if (!c.ok) return { ok: false, instance: inst, error: c.error };
-      catalog = c.catalog;
+    if (store()) {
+      const rel = await currentRelease({ version });
+      if (!rel.ok) return { ok: false, instance: inst, error: rel.error };
+      dir = rel.dir;
+      catalog = rel.catalog;
     }
     const probe = await run(resolveCf(), ["service", inst], { source: "cf", quiet: true });
     let status = serviceStatusFromCf(probe.code, probe.stdout);
@@ -404,19 +458,13 @@ function createL3Handlers(ctx) {
     return { ok: true, instance: inst, created, updated: !created };
   }
 
-  function artifactsDir() {
-    if (typeof host.resolveL3ArtifactsDir !== "function") return null;
-    return host.resolveL3ArtifactsDir();
-  }
-
-  function requireApp(appId) {
-    const dir = artifactsDir();
-    if (!dir) return { error: "No L3 artifact store on this host (l3-artifacts/ missing)" };
-    const c = loadCatalog(dir);
-    if (!c.ok) return { error: c.error };
-    const app = c.catalog.apps.find((a) => a.id === appId);
-    if (!app) return { error: `unknown app id '${appId}'` };
-    return { dir, app, catalog: c.catalog };
+  /** The release (per `opts`, see currentRelease) and the catalog app `appId` in it. */
+  async function requireApp(appId, opts) {
+    const rel = await currentRelease(opts);
+    if (!rel.ok) return { error: rel.error };
+    const app = rel.catalog.apps.find((a) => a.id === appId);
+    if (!app) return { error: `unknown app id '${appId}' in release ${rel.version}` };
+    return { rel, dir: rel.dir, app, catalog: rel.catalog };
   }
 
   function phase(appId, cfApp, step, state, detail) {
@@ -519,6 +567,7 @@ function createL3Handlers(ctx) {
       return await fn();
     } finally {
       currentAction = null;
+      installedMemo = null; // the action may have changed the installed version
       send("l3:running", null);
     }
   }
@@ -528,12 +577,24 @@ function createL3Handlers(ctx) {
    * start) or in-place update (env refresh, push). Returns { ok } or
    * { ok:false, error, step, cfApp, command?, detail? }.
    */
-  async function deployPart(app, cfApp, channelDir) {
+  async function deployPart(app, cfApp, rel) {
     const name = cfApp.name;
+
+    // The artifact: from the store when not cached yet (remote), verified
+    // against the catalog's sha256 by the store. A failure here is the step
+    // "download": nothing was pushed.
+    phase(app.id, name, "download", "running");
+    const got = await store().ensureArtifact(rel, cfApp.artifact);
+    if (!got.ok) {
+      phase(app.id, name, "download", "error", got.error);
+      return { ok: false, error: got.error, step: "download", cfApp: name, command: `GET ${cfApp.artifact} from ${rel.source ? rel.source.location : "the release store"}` };
+    }
+    phase(app.id, name, "download", "ok");
+    const channelDir = rel.dir;
 
     // Verify the artifact against its release checksum BEFORE extracting.
     if (cfApp.sha256) {
-      const zipPath = path.join(channelDir, cfApp.artifact);
+      const zipPath = got.path;
       let actual;
       try {
         actual = crypto.createHash("sha256").update(fs.readFileSync(zipPath)).digest("hex");
@@ -633,50 +694,97 @@ function createL3Handlers(ctx) {
     return missing;
   }
 
-  async function deployAll(appId) {
-    const req = requireApp(appId);
-    if (req.error) return { ok: false, error: req.error };
-    if (Array.isArray(req.catalog.services)) {
-      const missing = await missingRequiredServices(req.catalog, req.app);
-      if (missing.length) {
-        return {
-          ok: false,
-          error: `required service instance(s) missing: ${missing.join(", ")} — create them first (Setup, step 3)`,
-        };
+  /**
+   * What every deploy needs before the first push: the required service
+   * instances exist, and the shared XSUAA instance carries the roles of the
+   * release being deployed (decision 0009; update only — a missing instance
+   * is reported first). Returns null or a failed result.
+   */
+  async function preflight(rel, apps) {
+    if (Array.isArray(rel.catalog.services)) {
+      const names = new Set();
+      for (const app of apps) for (const m of await missingRequiredServices(rel.catalog, app)) names.add(m);
+      if (names.size) {
+        return { ok: false, error: `required service instance(s) missing: ${[...names].join(", ")} — create them first (Setup, step 3)` };
+      }
+      if (rel.catalog.services.some((s) => s.offering === "xsuaa")) {
+        const x = await ensureXsuaa({ updateOnly: true, version: rel.version });
+        if (!x.ok) {
+          const inst = x.instance || managerXsuaa.SHARED_INSTANCE;
+          return { ok: false, error: `role refresh of ${inst} failed: ${x.error}`, step: "roles", cfApp: inst, command: `cf update-service ${inst} -c xs-security.json` };
+        }
       }
     }
-    // One XSUAA instance (decision 0009): refresh its roles from the release
-    // before anything is deployed, so a new app's role collections exist when
-    // its frontend starts. Update only — a missing instance was reported above.
-    if (Array.isArray(req.catalog.services) && req.catalog.services.some((s) => s.offering === "xsuaa")) {
-      const x = await ensureXsuaa({ updateOnly: true });
-      if (!x.ok) {
-        const inst = x.instance || managerXsuaa.SHARED_INSTANCE;
-        return { ok: false, error: `role refresh of ${inst} failed: ${x.error}`, step: "roles", cfApp: inst, command: `cf update-service ${inst} -c xs-security.json` };
-      }
-    }
+    return null;
+  }
+
+  /** Shared backend FIRST, then the given apps' CF apps, all from one release. */
+  async function deploySet(rel, apps) {
     // Shared backend FIRST (catalog v2): the shared connector is deployed /
     // updated before any frontend, so the only mixed state that ever exists
     // is "new backend + old frontend" — the state the backward-compatibility
     // gate (decision 0005) covers. Idempotent: an already-current connector
     // is simply pushed again (same as the app "Re-deploy").
-    const platform = platformPseudoApp(req.catalog);
+    const platform = platformPseudoApp(rel.catalog);
     if (platform) {
       for (const cfApp of platform.cfApps) {
-        const r = await deployPart(platform, cfApp, req.dir);
+        const r = await deployPart(platform, cfApp, rel);
         if (!r.ok) return { ...r, failedApp: cfApp.name };
       }
     }
-    for (const cfApp of req.app.cfApps) {
-      const r = await deployPart(req.app, cfApp, req.dir);
-      if (!r.ok) return { ...r, failedApp: cfApp.name };
+    for (const app of apps) {
+      for (const cfApp of app.cfApps) {
+        const r = await deployPart(app, cfApp, rel);
+        if (!r.ok) return { ...r, failedApp: cfApp.name };
+      }
     }
+    return { ok: true };
+  }
+
+  /**
+   * Install (or re-deploy) ONE app at the installed version — latest on an
+   * empty space (decision 0010). `version` may only name that same version.
+   */
+  async function deployAll(appId, { version } = {}) {
+    const req = await requireApp(appId, { version, purpose: "install" });
+    if (req.error) return { ok: false, error: req.error };
+    log("l3", "dim", `release ${req.rel.version} from ${req.rel.source.label}`);
+    const pre = await preflight(req.rel, [req.app]);
+    if (pre) return pre;
+    const r = await deploySet(req.rel, [req.app]);
+    if (!r.ok) return r;
     return { ok: true, version: req.app.version };
+  }
+
+  /**
+   * Move the WHOLE installation to `version` (decision 0010): the shared
+   * backend, then every frontend that is installed in the space, in catalog
+   * order. Only upwards; equal = re-deploy everything. Apps that are not
+   * installed are not installed by this.
+   */
+  async function updateInstallation(version) {
+    const rel = await currentRelease({ version, purpose: "update" });
+    if (!rel.ok) return { ok: false, error: rel.error };
+    log("l3", "line", `Updating the installation from ${rel.installed} to ${rel.version} (${rel.source.label}) …`);
+    const installedApps = [];
+    for (const app of rel.catalog.apps) {
+      let present = false;
+      for (const c of app.cfApps) if (await cfAppExists(c.name)) present = true;
+      if (present) installedApps.push(app);
+    }
+    log("l3", "dim", installedApps.length
+      ? `installed apps to update: ${installedApps.map((a) => a.id).join(", ")}`
+      : "no app frontend is installed; only the shared backend is updated");
+    const pre = await preflight(rel, installedApps);
+    if (pre) return pre;
+    const r = await deploySet(rel, installedApps);
+    if (!r.ok) return r;
+    return { ok: true, version: rel.version, from: rel.installed, apps: installedApps.map((a) => a.id) };
   }
 
   /** stop/start/delete every CF app of a catalog app. Reverse order for teardown. */
   async function forEachPart(appId, argsFor, { reverse } = {}) {
-    const req = requireApp(appId);
+    const req = await requireApp(appId);
     if (req.error) return { ok: false, error: req.error };
     const parts = reverse ? [...req.app.cfApps].reverse() : req.app.cfApps;
     for (const cfApp of parts) {
@@ -700,7 +808,7 @@ function createL3Handlers(ctx) {
 
   /** l3:configure body — see the handler. */
   async function configure(appId, env) {
-    const req = requireApp(appId);
+    const req = await requireApp(appId);
     if (req.error) return { ok: false, error: req.error };
     const v = validateConfigEnv(req.app, env);
     if (!v.ok) return v;
@@ -714,6 +822,52 @@ function createL3Handlers(ctx) {
     const r = await run(resolveCf(), ["restart", target], { source: "cf" });
     if (r.code !== 0) return { ok: false, error: `cf restart ${target} failed` };
     return { ok: true, applied: v.entries.length };
+  }
+
+  /**
+   * Bind one OPTIONAL service instance to the shared backend and restart it.
+   *
+   * Why this exists (decision 0011): `optionalServices` are bound while the
+   * backend is pushed. An instance created LATER - the PI/PO pair from the
+   * Base services panel - would otherwise stay unused until the next deploy,
+   * and an Update installation is refused when nothing newer is in the store.
+   * So the panel offers this instead: bind, then restart, because a Cloud
+   * Foundry binding only reaches the app after a restart.
+   *
+   * Only names the catalog lists in the platform's `optionalServices` are
+   * accepted; nothing else may ever be bound to the shared backend.
+   */
+  async function bindPlatformService(name) {
+    const wanted = String(name || "").trim();
+    if (!wanted) return { ok: false, error: "a service name is required" };
+    const rel = await currentRelease();
+    if (!rel.ok) return { ok: false, error: rel.error };
+    const platform = platformPseudoApp(rel.catalog);
+    if (!platform) return { ok: false, error: "this release declares no shared backend" };
+    const cfApp = platform.cfApps[0];
+    const allowed = cfApp.optionalServices || [];
+    if (!allowed.includes(wanted)) {
+      return { ok: false, error: `${wanted} is not an optional service of the shared backend (allowed: ${allowed.join(", ") || "none"})` };
+    }
+    const probe = await run(resolveCf(), ["service", wanted], { source: "cf", quiet: true });
+    if (serviceStatusFromCf(probe.code, probe.stdout) !== "ready") {
+      return { ok: false, error: `the service instance ${wanted} is not ready yet — create it first and wait for it` };
+    }
+    const target = cfApp.name;
+    if (!(await cfAppExists(target))) {
+      return { ok: false, error: `${target} is not deployed — install the platform first; a later install binds ${wanted} on its own` };
+    }
+    const bind = await run(resolveCf(), ["bind-service", target, wanted], { source: "cf" });
+    const already = /already bound/i.test(`${bind.stdout}\n${bind.stderr}`);
+    if (bind.code !== 0 && !already) {
+      return { ok: false, error: `cf bind-service ${target} ${wanted} failed: ${cfTail(bind)}`, step: "bind", cfApp: target };
+    }
+    const restart = await run(resolveCf(), ["restart", target], { source: "cf" });
+    if (restart.code !== 0) {
+      return { ok: false, error: `${wanted} is bound, but cf restart ${target} failed: ${cfTail(restart)}`, step: "restart", cfApp: target };
+    }
+    log("l3", "ok", `${wanted} bound to ${target}${already ? " (was already bound)" : ""} and ${target} restarted`);
+    return { ok: true, service: wanted, cfApp: target, alreadyBound: already };
   }
 
   /**
@@ -738,15 +892,19 @@ function createL3Handlers(ctx) {
    * restricts the run. waitOnly: optional list of names to WAIT for; the
    * other created instances are started and reported as `pending` (Setup
    * step 1 starts the database and moves on - it takes minutes and nothing
-   * in that step needs it). Progress lines go to the terminal drawer.
+   * in that step needs it). groups: optional list of OPTIONAL service groups
+   * to include (catalog v4, e.g. ["pipo"]); optional services are otherwise
+   * left alone - see wantedService(). Progress lines go to the terminal
+   * drawer.
    */
-  async function provisionServices({ plans, only, waitOnly } = {}) {
-      const dir = artifactsDir();
-      if (!dir) return { ok: false, error: "No L3 artifact store on this host" };
-      const c = loadCatalog(dir);
-      if (!c.ok) return c;
+  async function provisionServices({ plans, only, waitOnly, groups } = {}) {
+      const rel = await currentRelease();
+      if (!rel.ok) return { ok: false, error: rel.error };
+      const dir = rel.dir;
+      const c = { catalog: rel.catalog };
       let declared = c.catalog.services || [];
       if (Array.isArray(only)) declared = declared.filter((s) => only.includes(s.name));
+      else declared = declared.filter((s) => wantedService(s, groups));
       if (declared.length === 0) {
         return { ok: true, created: [], note: Array.isArray(only) ? "nothing to create for the requested services" : "this release declares no services" };
       }
@@ -836,11 +994,9 @@ function createL3Handlers(ctx) {
   }
 
   async function bindManagerService(name) {
-      const dir = artifactsDir();
-      if (!dir) return { ok: false, error: "No L3 artifact store on this host" };
-      const c = loadCatalog(dir);
-      if (!c.ok) return c;
-      const s = (c.catalog.services || []).find((x) => x.name === name);
+      const rel = await currentRelease();
+      if (!rel.ok) return { ok: false, error: rel.error };
+      const s = (rel.catalog.services || []).find((x) => x.name === name);
       if (!s || !s.bindToManager) return { ok: false, error: `${name || "?"} is not a manager-bound service in this release` };
       const self = selfAppName();
       if (!self) return { ok: false, error: "cannot determine the manager's own app name (not running in CF?)" };
@@ -850,17 +1006,24 @@ function createL3Handlers(ctx) {
   }
 
   return {
-    async "l3:catalog"() {
-      const dir = artifactsDir();
-      if (!dir) return { ok: false, error: "No L3 artifact store on this host (l3-artifacts/ missing)" };
-      const c = loadCatalog(dir);
-      if (!c.ok) return c;
+    /**
+     * The catalog of the release this installation works with: the installed
+     * version, or latest on an empty space (`version` names another one for
+     * a read). Carries where the release came from.
+     */
+    async "l3:catalog"({ version } = {}) {
+      const rel = await currentRelease({ version });
+      if (!rel.ok) return { ok: false, error: rel.error };
+      const c = { catalog: rel.catalog };
       const platform = platformPseudoApp(c.catalog);
       return {
         ok: true,
         // releaseVersion is the name; releases built before 2026-09-01 carry
         // only the legacy field channelVersion (kept as a read fallback).
-        releaseVersion: c.catalog.releaseVersion || c.catalog.channelVersion || null,
+        releaseVersion: rel.version,
+        source: rel.source,
+        installed: rel.installed,
+        latest: rel.latest,
         platform: platform ? { name: platform.name, cfApps: platform.cfApps.map((p) => ({ name: p.name })) } : null,
         apps: c.catalog.apps.map((a) => ({
           id: a.id,
@@ -875,11 +1038,38 @@ function createL3Handlers(ctx) {
       };
     },
 
+    /**
+     * The versions the store offers, against what is installed (decision
+     * 0010). `refresh` re-reads index.json now. For the release panel.
+     */
+    async "l3:releases"({ refresh } = {}) {
+      const rel = await currentRelease({ refresh });
+      if (!rel.ok) return { ok: false, error: rel.error, source: store() ? store().describe() : null };
+      const { compareSemver } = require("./release-config");
+      const versions = rel.versions.map((v) => {
+        const cmp = rel.installed ? compareSemver(v.version, rel.installed) : null;
+        let selectable = false;
+        let reason = null;
+        if (!rel.installed) reason = "nothing installed yet — Install uses the latest release";
+        else if (cmp < 0) reason = "older than the installed version — rollback is not supported";
+        else selectable = true;
+        return { version: v.version, publishedAt: v.publishedAt, installed: v.version === rel.installed, latest: v.version === rel.latest, selectable, reason };
+      });
+      return {
+        ok: true,
+        source: rel.source,
+        installed: rel.installed,
+        latest: rel.latest,
+        current: rel.version,
+        updateAvailable: !!(rel.installed && compareSemver(rel.latest, rel.installed) > 0),
+        versions,
+      };
+    },
+
     async "l3:status"() {
-      const dir = artifactsDir();
-      if (!dir) return { ok: false, error: "No L3 artifact store on this host" };
-      const c = loadCatalog(dir);
-      if (!c.ok) return c;
+      const rel = await currentRelease();
+      if (!rel.ok) return { ok: false, error: rel.error };
+      const c = { catalog: rel.catalog };
 
       // Scope the app listing to the targeted space; fall back to unscoped.
       let spaceGuid = null;
@@ -942,7 +1132,8 @@ function createL3Handlers(ctx) {
       const platformRow = platform ? apps.shift() : null;
       // `running` travels with the status so ANY page — also one that just
       // reloaded — knows an action is in flight and keeps its buttons off.
-      return { ok: true, platform: platformRow, apps, running };
+      // `release` says which version the rows were computed against.
+      return { ok: true, platform: platformRow, apps, running, release: { version: rel.version, installed: rel.installed, latest: rel.latest } };
     },
 
     /**
@@ -952,10 +1143,9 @@ function createL3Handlers(ctx) {
      * the renderer combines it with login:storedUserStatus.bindingPresent).
      */
     async "l3:services"() {
-      const dir = artifactsDir();
-      if (!dir) return { ok: false, error: "No L3 artifact store on this host" };
-      const c = loadCatalog(dir);
-      if (!c.ok) return c;
+      const rel = await currentRelease();
+      if (!rel.ok) return { ok: false, error: rel.error };
+      const c = { catalog: rel.catalog };
       const self = selfAppName();
       const services = [];
       for (const s of c.catalog.services || []) {
@@ -969,6 +1159,7 @@ function createL3Handlers(ctx) {
         services.push({
           name: s.name, offering: s.offering, plan: s.plan, plans: s.plans || [s.plan],
           purpose: s.purpose || "", bindToManager: !!s.bindToManager,
+          optional: !!s.optional, group: s.group || "", sharedWith: s.sharedWith || "",
           exists: status !== "missing", status, boundToManager,
         });
       }
@@ -978,7 +1169,10 @@ function createL3Handlers(ctx) {
     /**
      * Create every MISSING catalog service, then wait until all are ready.
      * plans: optional { <name>: <plan> } overrides, validated against the
-     * catalog's allowed plans. Progress lines go to the terminal drawer.
+     * catalog's allowed plans. only: create just these instances by name (the
+     * Base services panel uses it for one optional instance). groups: include
+     * the optional services of these groups. Progress lines go to the
+     * terminal drawer.
      */
     async "l3:provisionServices"(args) {
       return provisionServices(args || {});
@@ -1000,11 +1194,10 @@ function createL3Handlers(ctx) {
      * the IAS sign-in and no second passcode is needed.
      */
     async "l3:prepareManagerServices"({ plans } = {}) {
-      const dir = artifactsDir();
-      if (!dir) return { ok: true, created: [], bound: [], note: "no release on this host - nothing to prepare" };
-      const c = loadCatalog(dir);
-      if (!c.ok) return c;
-      const targets = (c.catalog.services || []).filter((s) => s.bindToManager);
+      if (!store()) return { ok: true, created: [], bound: [], note: "no release source on this host - nothing to prepare" };
+      const rel = await currentRelease();
+      if (!rel.ok) return { ok: false, error: rel.error };
+      const targets = (rel.catalog.services || []).filter((s) => s.bindToManager);
       if (!targets.length) return { ok: true, created: [], bound: [], note: "this release declares no manager-bound service" };
       const self = selfAppName();
       if (!self) return { ok: false, error: "cannot determine the manager's own app name (not running in CF?)" };
@@ -1032,12 +1225,13 @@ function createL3Handlers(ctx) {
      * with IAS and stores the management user (Setup step 3 shows it).
      * Result: { ok, created, bound, pending, failed, error?, note? }.
      */
-    async "l3:prepareSpaceServices"({ plans } = {}) {
-      const dir = artifactsDir();
-      if (!dir) return { ok: true, created: [], bound: [], pending: [], failed: [], note: "no release on this host - nothing to prepare" };
-      const c = loadCatalog(dir);
-      if (!c.ok) return c;
-      const targets = (c.catalog.services || []).filter((s) => s.offering !== "xsuaa");
+    async "l3:prepareSpaceServices"({ plans, groups } = {}) {
+      if (!store()) return { ok: true, created: [], bound: [], pending: [], failed: [], note: "no release source on this host - nothing to prepare" };
+      const rel = await currentRelease();
+      if (!rel.ok) return { ok: false, error: rel.error };
+      const targets = (rel.catalog.services || [])
+        .filter((s) => s.offering !== "xsuaa")
+        .filter((s) => wantedService(s, groups));
       if (!targets.length) return { ok: true, created: [], bound: [], pending: [], failed: [], note: "this release declares no service instances besides XSUAA" };
       const toBind = targets.filter((s) => s.bindToManager);
       const self = selfAppName();
@@ -1073,6 +1267,16 @@ function createL3Handlers(ctx) {
     },
 
     /**
+     * Bind an OPTIONAL catalog service to the shared backend and restart it
+     * (decision 0011). Under the same lock as a deploy: it restarts the shared
+     * backend, so it must not overlap an install.
+     */
+    async "l3:bindPlatformService"({ name } = {}) {
+      if (!name) return { ok: false, error: "name required" };
+      return exclusive("bind-platform-service", String(name), () => bindPlatformService(name));
+    },
+
+    /**
      * Restart the manager itself so new bindings take effect. Fire-and-forget:
      * this process is stopped by the restart, so the command never "returns".
      */
@@ -1093,18 +1297,36 @@ function createL3Handlers(ctx) {
       return { ok: true, running: runningAction() };
     },
 
-    async "l3:install"({ appId } = {}) {
+    /**
+     * Install one app at the installed version (latest on an empty space).
+     * `version` is accepted only when it IS that version — moving the
+     * installation is Update's job (decision 0010).
+     */
+    async "l3:install"({ appId, version } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
       return exclusive("install", appId, async () => {
         log("l3", "line", `Installing ${appId} …`);
-        return reportOutcome("install", appId, await deployAll(appId));
+        return reportOutcome("install", appId, await deployAll(appId, { version }));
       });
     },
 
-    async "l3:update"({ appId } = {}) {
-      if (!appId) return { ok: false, error: "appId required" };
+    /**
+     * Two shapes (decision 0010):
+     *   { version }  move the WHOLE installation to `version` (shared backend,
+     *                then every installed frontend); upwards only. Locked as
+     *                "platform".
+     *   { appId }    re-deploy ONE app at the installed version (the row's
+     *                Re-deploy button; the shared backend is pushed again first,
+     *                as with Install).
+     */
+    async "l3:update"({ appId, version } = {}) {
+      if (version) {
+        return exclusive("update", "platform", async () =>
+          reportOutcome("update", `installation to ${version}`, await updateInstallation(version)));
+      }
+      if (!appId) return { ok: false, error: "appId or version required" };
       return exclusive("update", appId, async () => {
-        log("l3", "line", `Updating ${appId} …`);
+        log("l3", "line", `Re-deploying ${appId} …`);
         return reportOutcome("update", appId, await deployAll(appId));
       });
     },
@@ -1204,8 +1426,73 @@ function createL3Handlers(ctx) {
       return exclusive("configure", appId, () => configure(appId, env));
     },
 
+    /**
+     * Ask the shared backend whether a BTP destination exists (decision 0011).
+     * The manager is not bound to the destination service - the backend is -
+     * so a PI/PO connection is verified by delegation: one call proves the
+     * binding, the destination and its Cloud Connector settings at once.
+     *
+     * Returns { ok, found, proxyType, locationId, ... }. `ok:false` means the
+     * check itself could not run (backend not deployed, not bound, no route);
+     * `ok:true, found:false` means the backend looked and saw no such
+     * destination.
+     */
+    async "l3:destinationCheck"({ destinationName } = {}) {
+      const name = String(destinationName || "").trim();
+      if (!name) return { ok: false, error: "destinationName is required" };
+      const rel = await currentRelease();
+      if (!rel.ok) return { ok: false, error: rel.error };
+      const platform = platformPseudoApp(rel.catalog);
+      if (!platform) return { ok: false, error: "this release declares no shared backend" };
+      const target = platform.cfApps[0].name;
+      const base = await routeUrl(target);
+      if (!base) {
+        return {
+          ok: false,
+          error: `${target} has no route - the shared backend is not deployed yet`,
+          hint: "Install the platform first (Setup step 4); the destination check runs inside the backend.",
+        };
+      }
+      const url = `${base}/health/destination?name=${encodeURIComponent(name)}`;
+      log("l3", "line", `GET ${url}`);
+      const get = ctx.httpsBody || (async (u) => ({ status: 200, body: await httpsText(u) }));
+      let body = null;
+      let status = 0;
+      try {
+        const r = await get(url);
+        status = r.status;
+        try { body = JSON.parse(r.body); } catch { body = null; }
+      } catch (e) {
+        return { ok: false, error: `could not reach ${target}: ${e.message}`, url };
+      }
+      if (status === 404 && !body) {
+        return {
+          ok: false, url, httpStatus: status,
+          error: "this shared backend has no /health/destination endpoint",
+          hint: "Update the installation to a release that supports PI/PO connections.",
+        };
+      }
+      if (!body || typeof body !== "object") {
+        return { ok: false, url, httpStatus: status, error: `unexpected answer from ${target} (HTTP ${status})` };
+      }
+      return {
+        ok: body.ok !== false,
+        found: !!body.found,
+        name: body.name || name,
+        proxyType: body.proxyType || "",
+        locationId: body.locationId || "",
+        destinationServiceBound: body.destinationServiceBound !== false,
+        connectivityServiceBound: body.connectivityServiceBound !== false,
+        warning: body.warning || null,
+        error: body.ok === false ? (body.error || `HTTP ${status}`) : undefined,
+        hint: body.hint || undefined,
+        httpStatus: status,
+        url,
+      };
+    },
+
     async "l3:health"({ appId } = {}) {
-      const req = requireApp(appId);
+      const req = await requireApp(appId);
       if (req.error) return { ok: false, error: req.error };
       if (!req.app.healthPath) return { ok: false, error: "app declares no healthPath" };
       const target = req.app.configTargetCfApp || req.app.cfApps[0].name;
@@ -1236,6 +1523,7 @@ function createL3Handlers(ctx) {
 module.exports = {
   APPS_DOMAIN_PLACEHOLDER,
   VERSION_ENV,
+  NO_SOURCE_ERROR,
   runningAction,
   resetRunningAction,
   loadCatalog,
@@ -1246,5 +1534,6 @@ module.exports = {
   cliFailureDetail,
   validateConfigEnv,
   serviceStatusFromCf,
+  wantedService,
   createL3Handlers,
 };

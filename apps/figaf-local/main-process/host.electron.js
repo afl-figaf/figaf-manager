@@ -59,6 +59,9 @@ function createHost({ getWindow }) {
     // update:selfTarget / update:pushSelf to short-circuit cleanly.
     getDeployTargetForSelf: () => null,
 
+    // The desktop app is the one-time installer wizard, never the console.
+    isConsoleUI: () => false,
+
     resolveBinary(name) {
       const paths = loadCliPaths();
       return paths[name] || name;

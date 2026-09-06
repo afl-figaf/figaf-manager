@@ -36,6 +36,7 @@ const {
   buildPushArgs,
   validateConfigEnv,
   serviceStatusFromCf,
+  wantedService,
   createL3Handlers,
 } = require("./l3-apps");
 
@@ -104,7 +105,8 @@ function makeCtx(channelDir, respond) {
       host: {
         isHosted: true,
         getUserDataDir: () => userDir,
-        resolveL3ArtifactsDir: () => channelDir,
+        // A local release directory is the development source (decision 0010).
+        resolveL3ReleaseSource: () => (channelDir ? { kind: "local", dir: channelDir } : null),
       },
       run: async (cmd, args, opts = {}) => {
         calls.push({ cmd, args, opts });
@@ -291,7 +293,10 @@ test("l3:disable / l3:remove touch ONLY the app's own CF apps — the shared pla
   const dels = calls.filter((c) => c.args[0] === "delete").map((c) => c.args[1]);
   assert.deepEqual(dels, ["arch-frontend"]);
   assert.ok(calls.every((c) => c.args[0] !== "delete" || c.args[2] === "-f"));
-  assert.ok(!calls.some((c) => c.args.includes("arch-backend")), "the platform connector must never be stopped/deleted by app actions");
+  // Read-only probes (the installed-version lookup asks `cf app arch-backend
+  // --guid`) are fine; no state-changing command may name the connector.
+  const mutating = calls.filter((c) => ["stop", "start", "delete", "push", "restart"].includes(c.args[0]));
+  assert.ok(!mutating.some((c) => c.args.includes("arch-backend")), "the platform connector must never be stopped/deleted by app actions");
 });
 
 test("l3:status: rolls up states, reads FIGAF_APP_VERSION and routes", async () => {
@@ -631,15 +636,22 @@ test("l3:figafSystems: finds app+router pairs running figaf/app images, returns 
   ]);
 });
 
-test("handlers report a friendly error when the host has no artifact store", async () => {
+test("handlers report a friendly error when the host has no release source", async () => {
   const { ctx } = makeCtx(null, () => ({ code: 0, stdout: "" }));
-  ctx.host.resolveL3ArtifactsDir = () => null;
   const handlers = createL3Handlers(ctx);
-  for (const ch of ["l3:catalog", "l3:status"]) {
+  for (const ch of ["l3:catalog", "l3:status", "l3:releases"]) {
     const r = await handlers[ch]({});
     assert.equal(r.ok, false);
-    assert.match(r.error, /artifact store/);
+    assert.match(r.error, /No release source configured.*FIGAF_L3_RELEASE_URL/);
   }
+  // An older host adapter that only knows the directory seam still works.
+  const dir = makeChannelDir();
+  const { ctx: legacy } = makeCtx(null, () => ({ code: 0, stdout: "" }));
+  delete legacy.host.resolveL3ReleaseSource;
+  legacy.host.resolveL3ArtifactsDir = () => dir;
+  const c = await createL3Handlers(legacy)["l3:catalog"]({});
+  assert.equal(c.ok, true);
+  assert.equal(c.source.kind, "local");
 });
 
 // ─── D. landscape-independent release (decision 0008) ────────────────────────
@@ -1141,7 +1153,7 @@ test("l3:prepareSpaceServices: instances that exist are left alone; an already b
   assert.ok(!calls.some((c) => c.args[0] === "create-service"));
 
   const { ctx: ctx2 } = makeCtx(dir, () => null);
-  ctx2.host.resolveL3ArtifactsDir = () => null;
+  ctx2.host.resolveL3ReleaseSource = () => null;
   const r2 = await createL3Handlers(ctx2)["l3:prepareSpaceServices"]({});
   assert.equal(r2.ok, true);
   assert.match(r2.note, /nothing to prepare/);
@@ -1327,4 +1339,273 @@ test("l3:status: a running install marks the app row and the shared backend", as
   assert.equal(st.apps[0].status, "installing");
   release();
   await install;
+});
+
+// ─── catalog v4: optional services + the PI/PO destination check (0011) ──────
+// Optional services (connectivity / destination for on-premise PI/PO) exist in
+// the catalog but are never created by the normal "prepare the space" run. The
+// admin asks for the group, or for one instance by name from Base services.
+
+const CATALOG_V4 = {
+  ...CATALOG,
+  releaseVersion: "0.5.0",
+  // Same shape as the real release: the two optional instances are also in the
+  // shared backend's optionalServices, so a push binds them when they exist.
+  platform: {
+    ...CATALOG.platform,
+    cfApps: [{ ...CATALOG.platform.cfApps[0], optionalServices: ["credstore", "figaf-connectivity", "figaf-destination"] }],
+  },
+  services: [
+    { name: "db", offering: "postgresql-db", plan: "free", plans: ["free", "standard"], purpose: "database" },
+    { name: "xsuaa", offering: "xsuaa", plan: "application", configFile: "xs-security.json", purpose: "roles" },
+    { name: "credstore", offering: "credstore", plan: "free", config: { authentication: { type: "basic" } }, bindToManager: true },
+    { name: "figaf-connectivity", offering: "connectivity", plan: "lite", optional: true, group: "pipo", sharedWith: "figaf-tool", purpose: "Cloud Connector tunnel" },
+    { name: "figaf-destination", offering: "destination", plan: "lite", optional: true, group: "pipo", sharedWith: "figaf-tool", purpose: "PI/PO destinations" },
+  ],
+};
+
+function makeV4Dir() {
+  const dir = makeChannelDir(CATALOG_V4);
+  fs.writeFileSync(path.join(dir, "xs-security.json"), "{\"xsappname\":\"figaf-l3l4\"}");
+  return dir;
+}
+
+function servicesResponder(state) {
+  return (args) => {
+    if (args[0] === "create-service") { state[args[3]] = "create succeeded"; return { code: 0, stdout: "" }; }
+    if (args[0] === "service") { const st = state[args[1]]; return st ? { code: 0, stdout: `status:    ${st}\n` } : { code: 1, stdout: "" }; }
+    if (args[0] === "bind-service") return { code: 0, stdout: "OK" };
+    return null;
+  };
+}
+
+test("wantedService: required always, optional only when its group is asked for", () => {
+  const required = { name: "db" };
+  const optional = { name: "figaf-destination", optional: true, group: "pipo" };
+  assert.equal(wantedService(required, undefined), true, "a required service is always wanted");
+  assert.equal(wantedService(required, ["pipo"]), true);
+  assert.equal(wantedService(optional, undefined), false, "an optional service is skipped by default");
+  assert.equal(wantedService(optional, []), false);
+  assert.equal(wantedService(optional, ["other"]), false);
+  assert.equal(wantedService(optional, ["pipo"]), true);
+});
+
+test("l3:prepareSpaceServices: the optional PI/PO services are NOT created by default", async () => {
+  const dir = makeV4Dir();
+  const { ctx, calls } = makeCtx(dir, servicesResponder({}));
+  ctx.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
+  ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
+  const r = await createL3Handlers(ctx)["l3:prepareSpaceServices"]({ plans: {} });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const created = calls.filter((c) => c.args[0] === "create-service").map((c) => c.args[3]).sort();
+  assert.deepEqual(created, ["credstore", "db"]);
+});
+
+test("l3:prepareSpaceServices: groups:['pipo'] adds connectivity and destination", async () => {
+  const dir = makeV4Dir();
+  const { ctx, calls } = makeCtx(dir, servicesResponder({}));
+  ctx.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
+  ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
+  const r = await createL3Handlers(ctx)["l3:prepareSpaceServices"]({ plans: {}, groups: ["pipo"] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const created = calls.filter((c) => c.args[0] === "create-service");
+  assert.deepEqual(created.map((c) => c.args[3]).sort(), ["credstore", "db", "figaf-connectivity", "figaf-destination"]);
+  assert.deepEqual(
+    created.find((c) => c.args[3] === "figaf-connectivity").args,
+    ["create-service", "connectivity", "lite", "figaf-connectivity"]
+  );
+  assert.ok(!r.bound.includes("figaf-destination"), "shared services are not bound to the manager");
+});
+
+test("l3:provisionServices: `only` creates one optional instance (the Base services repair path)", async () => {
+  const dir = makeV4Dir();
+  const { ctx, calls } = makeCtx(dir, servicesResponder({}));
+  ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
+  const r = await createL3Handlers(ctx)["l3:provisionServices"]({ only: ["figaf-destination"] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(calls.filter((c) => c.args[0] === "create-service").map((c) => c.args[3]), ["figaf-destination"]);
+});
+
+test("l3:provisionServices: without `only` or `groups` the optional services stay untouched", async () => {
+  const dir = makeV4Dir();
+  const { ctx, calls } = makeCtx(dir, servicesResponder({}));
+  ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
+  await createL3Handlers(ctx)["l3:provisionServices"]({});
+  const created = calls.filter((c) => c.args[0] === "create-service").map((c) => c.args[3]);
+  assert.ok(!created.includes("figaf-connectivity"), created.join(","));
+  assert.ok(!created.includes("figaf-destination"), created.join(","));
+});
+
+test("l3:services: reports optional, group and sharedWith so the panel can show them apart", async () => {
+  const dir = makeV4Dir();
+  const { ctx } = makeCtx(dir, (args) => {
+    if (args[0] === "service") return { code: 1, stdout: "" }; // everything missing
+    return null;
+  });
+  const r = await createL3Handlers(ctx)["l3:services"]();
+  assert.equal(r.ok, true);
+  const dest = r.services.find((s) => s.name === "figaf-destination");
+  assert.equal(dest.optional, true);
+  assert.equal(dest.group, "pipo");
+  assert.equal(dest.sharedWith, "figaf-tool");
+  const db = r.services.find((s) => s.name === "db");
+  assert.equal(db.optional, false);
+  assert.equal(db.group, "");
+});
+
+// l3:destinationCheck — the manager asks the shared backend, because only the
+// backend is bound to the destination service (decision 0011).
+
+function backendRouteResponder(args) {
+  if (args[0] === "app" && args[1] === "arch-backend") {
+    return { code: 0, stdout: "routes:   arch-backend.cfapps.example\n" };
+  }
+  return null;
+}
+
+test("l3:destinationCheck: asks the backend and passes its answer through", async () => {
+  const dir = makeV4Dir();
+  const { ctx, events } = makeCtx(dir, backendRouteResponder);
+  httpsBodyResult = {
+    status: 200,
+    body: JSON.stringify({ ok: true, found: true, name: "PO_TPM_DEV", proxyType: "OnPremise", locationId: "pi-dev", warning: null }),
+  };
+  const r = await createL3Handlers(ctx)["l3:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
+  assert.equal(r.ok, true);
+  assert.equal(r.found, true);
+  assert.equal(r.proxyType, "OnPremise");
+  assert.equal(r.locationId, "pi-dev");
+  const asked = events.filter((e) => e.channel === "httpsBody").map((e) => e.payload);
+  assert.ok(asked.some((u) => u.endsWith("/health/destination?name=PO_TPM_DEV")), asked.join(","));
+});
+
+test("l3:destinationCheck: a name is required and nothing is called", async () => {
+  const dir = makeV4Dir();
+  const { ctx, events } = makeCtx(dir, backendRouteResponder);
+  const r = await createL3Handlers(ctx)["l3:destinationCheck"]({ destinationName: "  " });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /destinationName is required/);
+  assert.equal(events.filter((e) => e.channel === "httpsBody").length, 0);
+});
+
+test("l3:destinationCheck: no backend route -> ok:false with the install hint", async () => {
+  const dir = makeV4Dir();
+  const { ctx } = makeCtx(dir, (args) => {
+    if (args[0] === "app" && args[1] === "arch-backend") return { code: 1, stdout: "" }; // not deployed
+    return null;
+  });
+  const r = await createL3Handlers(ctx)["l3:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not deployed yet/);
+  assert.match(r.hint, /Install the platform/);
+});
+
+test("l3:destinationCheck: an old backend without the endpoint says so", async () => {
+  const dir = makeV4Dir();
+  const { ctx } = makeCtx(dir, backendRouteResponder);
+  httpsBodyResult = { status: 404, body: "Cannot GET /health/destination" };
+  const r = await createL3Handlers(ctx)["l3:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /no [/]health[/]destination endpoint/);
+  assert.match(r.hint, /Update the installation/);
+  httpsBodyResult = { status: 200, body: "{\"ok\":true}" };
+});
+
+test("l3:destinationCheck: the backend's own failure (503) is reported as a failed check", async () => {
+  const dir = makeV4Dir();
+  const { ctx } = makeCtx(dir, backendRouteResponder);
+  httpsBodyResult = {
+    status: 503,
+    body: JSON.stringify({ ok: false, error: "this backend is not bound to a destination service instance", hint: "Create the PI/PO services" }),
+  };
+  const r = await createL3Handlers(ctx)["l3:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not bound to a destination service/);
+  assert.match(r.hint, /Create the PI[/]PO services/);
+  httpsBodyResult = { status: 200, body: "{\"ok\":true}" };
+});
+
+// l3:bindPlatformService — the repair path for an optional instance created
+// AFTER the backend was deployed (decision 0011). A binding only reaches a CF
+// app after a restart, so it binds and restarts.
+
+function bindResponder(state) {
+  return (args) => {
+    if (args[0] === "service") { const st = state[args[1]]; return st ? { code: 0, stdout: `status:    ${st}\n` } : { code: 1, stdout: "" }; }
+    if (args[0] === "app" && args[1] === "arch-backend") return { code: 0, stdout: "routes:   arch-backend.cfapps.example\n" };
+    if (args[0] === "bind-service") return { code: 0, stdout: "OK" };
+    if (args[0] === "restart") return { code: 0, stdout: "OK" };
+    return null;
+  };
+}
+
+test("l3:bindPlatformService: binds the instance to the shared backend, then restarts it", async () => {
+  const dir = makeV4Dir();
+  const { ctx, calls } = makeCtx(dir, bindResponder({ "figaf-destination": "create succeeded" }));
+  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-destination" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.cfApp, "arch-backend");
+  assert.deepEqual(calls.find((c) => c.args[0] === "bind-service").args, ["bind-service", "arch-backend", "figaf-destination"]);
+  assert.deepEqual(calls.find((c) => c.args[0] === "restart").args, ["restart", "arch-backend"]);
+});
+
+test("l3:bindPlatformService: only the catalog's optional services may be bound", async () => {
+  const dir = makeV4Dir();
+  const { ctx, calls } = makeCtx(dir, bindResponder({ "figaf-l3l4-secret": "create succeeded" }));
+  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-l3l4-secret" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not an optional service of the shared backend/);
+  assert.ok(!calls.some((c) => c.args[0] === "bind-service"), "nothing is bound");
+});
+
+test("l3:bindPlatformService: an instance that is not ready is refused", async () => {
+  const dir = makeV4Dir();
+  const { ctx, calls } = makeCtx(dir, bindResponder({})); // missing
+  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-destination" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not ready yet/);
+  assert.ok(!calls.some((c) => c.args[0] === "bind-service"));
+});
+
+test("l3:bindPlatformService: no backend deployed -> says a later install binds it anyway", async () => {
+  const dir = makeV4Dir();
+  const { ctx, calls } = makeCtx(dir, (args) => {
+    if (args[0] === "service") return { code: 0, stdout: "status:    create succeeded\n" };
+    if (args[0] === "app") return { code: 1, stdout: "" };
+    return null;
+  });
+  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-connectivity" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /is not deployed/);
+  assert.ok(!calls.some((c) => c.args[0] === "bind-service"));
+});
+
+test("l3:bindPlatformService: an already bound instance is fine; the restart still runs", async () => {
+  const dir = makeV4Dir();
+  const { ctx, calls } = makeCtx(dir, (args) => {
+    if (args[0] === "service") return { code: 0, stdout: "status:    create succeeded\n" };
+    if (args[0] === "app" && args[1] === "arch-backend") return { code: 0, stdout: "routes:   b.example\n" };
+    if (args[0] === "bind-service") return { code: 1, stdout: "", stderr: "FAILED\nApp arch-backend is already bound to service figaf-destination" };
+    if (args[0] === "restart") return { code: 0, stdout: "OK" };
+    return null;
+  });
+  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-destination" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.alreadyBound, true);
+  assert.ok(calls.some((c) => c.args[0] === "restart"));
+});
+
+test("l3:bindPlatformService: a failed restart is reported, and says the binding is in place", async () => {
+  const dir = makeV4Dir();
+  const { ctx } = makeCtx(dir, (args) => {
+    if (args[0] === "service") return { code: 0, stdout: "status:    create succeeded\n" };
+    if (args[0] === "app" && args[1] === "arch-backend") return { code: 0, stdout: "routes:   b.example\n" };
+    if (args[0] === "bind-service") return { code: 0, stdout: "OK" };
+    if (args[0] === "restart") return { code: 1, stdout: "", stderr: "FAILED\ninsufficient memory" };
+    return null;
+  });
+  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-destination" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /is bound, but cf restart/);
+  assert.equal(r.step, "restart");
 });

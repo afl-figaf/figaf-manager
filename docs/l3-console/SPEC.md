@@ -8,27 +8,92 @@ are in the figaf-l3-l4 repo (`decisions/`); the human install procedure is
 figaf-l3-l4 `docs/d1/MANUAL-RUNBOOK.md`; run records are figaf-l3-l4
 `docs/d1/RUNBOOK-VIRGIN.md`; what to do when an action fails is
 `TROUBLESHOOTING.md` and what is still open is `OPEN-ITEMS.md` (this folder).
-Last edited 2026-09-03 (evening: Setup page, plans asked in step 1, database
-started in step 1).
+Last edited 2026-09-04 (the release store and one version per installation,
+figaf-l3-l4 decision 0010; the CF sign-in targets the manager's own space by
+itself, section 5.3).
 
-Not decided here: whether a zip release installed by the manager
-replaces the MTAR as the delivery unit (GOVERNANCE decision 2). That is
-decision 0007, a team decision.
+Delivery unit: the versioned platform release installed by the manager, not
+an MTAR (figaf-l3-l4 `decisions/0007-delivery-unit-platform-release.md`,
+accepted 2026-09-06; the governance text follows).
 
 ## 1. Purpose
 
-A BTP-hosted manager app installs, updates, disables, enables, removes and
-checks L3 applications in its own Cloud Foundry space from a browser, with
-every CLI command visible, and without stored personal credentials. It also
-creates the service instances the platform needs, sets up its own persistent
-sign-in, and holds the system connections the apps use.
+A BTP-hosted manager app lists the releases of the L3 platform in the Figaf
+release store, installs, updates, disables, enables, removes and checks L3
+applications in its own Cloud Foundry space from a browser, with every CLI
+command and every download visible, and without stored personal credentials.
+It also creates the service instances the platform needs, sets up its own
+persistent sign-in, and holds the system connections the apps use.
 
-## 2. Release and catalog (v3)
+## 2. Release, catalog (v3) and the release store
 
-A RELEASE is a versioned set: `catalog.json` plus one zip per CF app. It lives
-in an ARTIFACT STORE (today: bundled in the manager zip at `l3-artifacts/`;
-later: Cloudflare R2, decision 0003). The word "channel" is retired.
-figaf-l3-l4 `release/build-artifacts.ps1` builds a release from the playground.
+A RELEASE is a versioned set: `catalog.json`, `release.json` (checksums and
+the source commit), `xs-security.json` and one zip per CF app. Releases live
+in the RELEASE STORE (figaf-l3-l4 decision 0010): the Cloudflare R2 bucket
+behind a public URL, written only by figaf-l3-l4 `release/publish.js`. The
+word "channel" is retired. figaf-l3-l4 `release/build.js` builds
+a release; the developer procedure is figaf-l3-l4 `release/README.md`.
+
+### 2.1 The release source
+
+Exactly one source per manager process, named on the L3 Applications page:
+
+| Setting | Kind | Used for |
+|---|---|---|
+| `FIGAF_L3_RELEASE_URL` (manifest.yml, e.g. `https://pub-<id>.r2.dev/l3`) | remote | every shipped manager; a custom domain or a mirror is a change of this value |
+| `FIGAF_L3_ARTIFACTS_DIR` (a directory with ONE release in the flat build shape) | local | development, the e2e fixtures, the install smoke; wins over the URL when set |
+| `l3-artifacts/` next to `host.cloud.js`, nothing set | local | a developer's `npm start` after a local build |
+
+The manager zip bundles NO release any more (`build-zip.js` refuses to build
+without the URL in `manifest.yml`). No fallback from one source to another.
+
+Store layout (the contract with figaf-l3-l4): `<url>/index.json` =
+`{ latest, versions: [{ version, publishedAt }] }`; `<url>/<version>/` holds
+`catalog.json`, `release.json`, `xs-security.json`, the zips. Versions are
+immutable.
+
+### 2.2 Read, verify, cache (`packages/core/release-store.js`)
+
+- `index.json` is read on every page load (remembered 30 s; **Refresh
+  releases** reads it now). It is the only object that changes.
+- A version's small files (`catalog.json`, the `configFile`s) are downloaded
+  once into `<tmp>/figaf-l3-releases/<version>/` and checked against the
+  sha256 in `release.json` every time they are used. Zips are downloaded when
+  an install or update needs them and checked against the sha256 in the
+  catalog before extraction. A mismatch deletes the file and fails the
+  action; nothing half-verified is used. At most 4 versions stay cached.
+- Every network read is one dim line in the terminal drawer: `>> GET <url>`,
+  then `<file> <bytes>, sha256 ok`. Cached, verified files add no line (the
+  page reads the release on every status refresh); **Refresh releases**
+  shows their verification (`… sha256 ok (cached)`). The installed-version
+  probe (`cf app <backend> --guid`) runs silently: a backend that is not
+  deployed yet is a normal state, shown as installed "—", not a red line.
+- The store is not reachable: every page read fails with `cannot read
+  <url>/index.json: <reason>`; the Release panel says so; Install and Update
+  are refused; nothing in the space changes.
+
+### 2.3 One version per installation
+
+- The INSTALLED version is `FIGAF_APP_VERSION` on the shared backend CF app
+  (read live, remembered 5 s, forgotten after every action). The manager
+  stores nothing.
+- **Install app X** deploys the app at the installed version; on an empty
+  space at `latest`. A `version` argument is accepted only when it names
+  exactly that version.
+- **Update installation to V** (`l3:update { version }`): the shared backend,
+  then every frontend that is installed in the space, in catalog order.
+  Only `V >= installed`; equal = re-deploy everything. Apps not installed are
+  not installed by it. On the page: with a newer version in the store, a
+  dropdown of the newer versions and the primary button **Update
+  installation to V**; when up to date, the text "Up to date. Nothing newer
+  than X in the store." and the plain repair button **Re-deploy everything
+  at X** (same call, `V = installed`). Both ask for a confirmation.
+- **Re-deploy** (`l3:update { appId }`): one app again, at the installed
+  version (shared backend pushed first, as with Install).
+- Before an installation exists, `latest` is used for the service instances
+  and the roles (Setup step 1).
+- `l3:releases` returns the source, installed, latest, `updateAvailable`, and
+  per version whether Update may choose it and why not.
 
 ```json
 {
@@ -89,14 +154,16 @@ the audit log.
 
 | Operation | Behind it |
 |---|---|
-| `l3:catalog`, `l3:status` | catalog + live state per CF app from `cf curl /v3/apps` (scoped to the targeted space), installed version from the env var `FIGAF_APP_VERSION`, the in-flight action (`running`), and per part `staging` (a STOPPED part with a build in `STAGING`, one `cf curl /v3/builds`) |
+| `l3:catalog({version?})`, `l3:status` | the catalog of the installation's version (installed, else latest; section 2.3) with `source`, `installed`, `latest`; live state per CF app from `cf curl /v3/apps` (scoped to the targeted space), installed version from the env var `FIGAF_APP_VERSION`, the in-flight action (`running`), per part `staging` (a STOPPED part with a build in `STAGING`, one `cf curl /v3/builds`), and `release` (the version the rows were computed against) |
+| `l3:releases({refresh?})` | the release store: `source`, `installed`, `latest`, `current`, `updateAvailable`, `versions[]` with `selectable` / `reason` (section 2.3). `refresh` re-reads `index.json` now. No cf call beyond the installed-version probe |
 | `l3:running` | the lifecycle action running now, or null. No cf call. For a page that did not start it (reload, second tab, second session) |
 | `l3:services`, `l3:provisionServices({plans, only, waitOnly})` | `cf service <name>`; `cf create-service` for missing instances, poll every 10 s until `succeeded` (15 min limit); a `failed` instance is deleted and created again. With `waitOnly`, only those names are awaited; the others are started and reported as `pending` |
 | `l3:bindManagerService`, `l3:restartSelf` | `cf bind-service <manager> <name>`; `cf restart <manager>` (fire-and-forget) |
 | `l3:ensureXsuaa({updateOnly})` | create or `cf update-service figaf-l3l4-xsuaa` with the composed document (section 5) |
 | `l3:prepareSpaceServices({plans})` | Setup step 1: create every missing catalog instance except XSUAA with the plans the person chose; wait only for the manager-bound ones (Credential Store) and bind them, no restart; the database is started and left creating (`pending`) (section 5.2) |
 | `l3:prepareManagerServices` | legacy: the wizard frame's SSO upgrade (Credential Store only, default plan). Not used by the console |
-| `l3:install`, `l3:update` | see below |
+| `l3:install({appId, version?})` | one app at the installed version (latest on an empty space); see below |
+| `l3:update({version})` / `l3:update({appId})` | installation-wide update to `version` (lock name `platform`) / re-deploy of one app at the installed version; see below and section 2.3 |
 | `l3:disable`, `l3:enable`, `l3:remove` | `cf stop` / `cf start` / `cf delete -f -r` of the app's own CF apps, frontend first on teardown |
 | `l3:health` | HTTPS GET `<route><healthPath>` on `configTargetCfApp`; a non-2xx answer WITH a body is a result, not a failure |
 | `l3:configure` | `cf set-env` (whitelisted keys, masked) + restart; kept for rare infrastructure fixes, no form in the UI (behavior settings live in the app, decision 0006) |
@@ -117,19 +184,26 @@ Install / update algorithm:
    session (payload `null` when it ends), `l3:status` carries `running`, and
    the console shows the status **Installing…** with every action button off
    and a status refresh every 10 s.
-1. Refuse when a REQUIRED instance (any name in a cfApp's `services`) is
+1. Resolve the release (section 2.3): the version rule decides which one;
+   its catalog and config files are downloaded and verified. A version that
+   the rule refuses (unknown, lower than installed, not the installed one for
+   Install) is a failed result before any cf call.
+2. Refuse when a REQUIRED instance (any name in a cfApp's `services`) is
    missing: "create them first (Setup, step 3)".
-2. Role refresh: `l3:ensureXsuaa({ updateOnly: true })` — the shared XSUAA
-   instance gets the roles of the current release and of the manager. A
-   failure stops the install (step `roles`).
-3. Shared backend first, then the app's CF apps. Per CF app: verify sha256,
-   extract, `cf push <name> -p <dir> -b <buildpack> -m -k --no-start
-   --no-manifest` (fresh) or `cf push` without `--no-start` (update);
-   `cf bind-service` for `services` and for `optionalServices` that exist;
-   `cf set-env` for `env`, `FIGAF_APP_VERSION`, and for frontends the
-   approuter `destinations` JSON pointing at the live backend route
+3. Role refresh: `l3:ensureXsuaa({ updateOnly: true, version })` — the shared
+   XSUAA instance gets the roles of the release being deployed and of the
+   manager. A failure stops the install (step `roles`).
+4. Shared backend first, then the app's CF apps (Update installation: then
+   every installed app's CF apps). Per CF app: download the zip from the
+   store when not cached and verify its sha256 (step `download`; a failure
+   pushes nothing for that part), verify sha256 again, extract, `cf push
+   <name> -p <dir> -b <buildpack> -m -k --no-start --no-manifest` (fresh) or
+   `cf push` without `--no-start` (update); `cf bind-service` for `services`
+   and for `optionalServices` that exist; `cf set-env` for `env`,
+   `FIGAF_APP_VERSION` (the release version), and for frontends the approuter
+   `destinations` JSON pointing at the live backend route
    (`forwardAuthToken: true`); `cf start`.
-4. `--no-manifest` is mandatory (push isolation): without it the cf CLI
+5. `--no-manifest` is mandatory (push isolation): without it the cf CLI
    applies the manager's own `manifest.yml`, which a cockpit upload leaves in
    the container (live failure 2026-09-03).
 
@@ -154,6 +228,45 @@ Reusing an existing PostgreSQL instance works by NAME: an instance called
 `figaf-l3l4-db` is bound, never re-created. Only an instance dedicated to this
 platform may be reused (a previous installation, or an empty pre-created
 one), never the Figaf tool's database or one another application writes to.
+
+### 4.1 Optional services: on-premise PI/PO (catalog v4, decision 0011)
+
+A catalog service may carry `optional: true` and a `group`. Optional instances
+are never created by the normal runs: `l3:prepareSpaceServices` and
+`l3:provisionServices` skip them unless the caller passes `groups: ["pipo"]`
+or names the instance in `only`. They also never count as "missing": an
+installation without a PI/PO system is complete, so they do not hold step 3
+open and do not block step 4 (`setup-checklist.js` filters them out).
+
+Today one group, `pipo`, with two instances:
+
+| Instance | Offering / plan | Why |
+|---|---|---|
+| `figaf-connectivity` | `connectivity` / `lite` | the SAP Cloud Connector tunnel |
+| `figaf-destination` | `destination` / `lite` | the destinations of PI/PO systems |
+
+Both are SHARED with the Figaf tool (decision 0012), under Alex's names: an
+instance that already exists is reused, never replaced, and nothing here ever
+updates its configuration or deletes it. Both are in the shared backend's
+`optionalServices`, so the backend binds them when they exist and starts
+without them when they do not.
+
+Two ways in:
+
+- **Setup step 1** — one checkbox, OFF by default, next to the service plans.
+  Ticking it adds `groups: ["pipo"]` to the run, so the instances exist before
+  the backend is ever pushed and no later restart is needed.
+- **Base services (step 3)** — a separate "Optional: on-premise PI/PO systems"
+  block with one **Create** button per instance
+  (`l3:provisionServices({ only: [name] })`) and, once the instance is ready,
+  **Bind to backend & restart** (`l3:bindPlatformService`). The second button
+  exists because `optionalServices` are bound while the backend is PUSHED: an
+  instance created later would stay unused, and an Update installation is
+  refused when the store holds nothing newer. It binds the instance to the
+  shared backend and restarts it (a CF binding only reaches an app after a
+  restart), takes the same lock as a deploy, and accepts only names the
+  catalog lists in the platform's `optionalServices`. A fresh install binds
+  them on its own.
 
 ## 5. Sign-in and access
 
@@ -219,6 +332,28 @@ IAS sign-in succeeds.
 - **Cloud Foundry login**: required; one-time SSO passcode, or automatic with
   the management user. The gate shows Cloud Foundry first and required, BTP
   second and optional.
+- **Neither CF sign-in asks for an org or a space** (2026-09-04). The console
+  installs into the manager's OWN space (section 1), and the hosted manager
+  reads that space from `VCAP_APPLICATION`, so both sign-ins target it
+  themselves: the stored user with `cf target -o -s`, the passcode with
+  `cf login -o <org> -s <space>`. The pin is computed by `resolveSelfPin`
+  (`packages/core/cf-target.js`) and the card shows the fixed target instead
+  of a picker (`cf:ownTarget`). A pinned login that fails because the person
+  has no role in that space says so and names the fix (Space Developer);
+  a rejected passcode is never reported that way
+  (`explainPinnedLoginFailure`). The org/space picker of `cf login` stays for
+  the three cases the pin does not cover:
+  1. the desktop app - no `VCAP_APPLICATION`, nothing to pin to;
+  2. a login to a CF endpoint that is not the manager's own - the Figaf tool
+     may live on another landscape;
+  3. Alex's classic wizard frame (`FIGAF_CONSOLE_UI=0`), which deploys the
+     Figaf tool into a space the operator picks, so the manager's own space
+     would be the wrong answer there. `host.isConsoleUI()` decides, and a
+     host without that method keeps the picker.
+
+  **Switch Org** on Session & access still moves a signed-in session to
+  another org/space on purpose (the Figaf-tool flows need it) - the L3
+  lifecycle handlers do not check the target yet, see OPEN-ITEMS 14.
 - **SAP BTP login**: optional; only for the automatic role assignment and for
   Figaf-tool deployments. Forgotten on every restart.
 - **Management user**: a technical CF user (Space Developer, no 2FA) stored
@@ -287,20 +422,61 @@ them. Credential Store namespace `figaf-connections`:
   clientSecret, verifiedAt }`, from a pasted `it-rt` `api` service key
   (`uaa` and `oauth` key shapes accepted). Verified: token + `GET
   /api/v1/$metadata`.
+- `<agentId>/pipo` — one per on-premise PI/PO system (decision 0011):
+  `{ kind: "pipo", agentId, agentSystemId, agentName, destinationName,
+  proxyType, locationId, verifiedAt }`. **No secret**: the PI user and password
+  live in the BTP destination, the tunnel in the SAP Cloud Connector, and the
+  Cloud Connector location id in the destination's `CloudConnectorLocationId`
+  property. The person types only the destination name.
+
+Which kind an agent gets is decided by its Figaf platform: `PRO` = on-premise
+PI/PO (`/pipo`), everything else = cloud tenant (`/api`). One system is never
+both.
+
+**Who creates the destination.** The customer, in the BTP cockpit
+(Connectivity > Destinations). The manager never writes destinations: the
+Cloud Connector mapping is a manual on-premise step anyway, so both halves of
+the setup stay in one place. The runbook carries the steps.
+
+**How a PI/PO entry is verified.** By delegation, because the manager is not
+bound to the destination service and the shared backend is. `savePipoSystem`
+calls `l3:destinationCheck`, which GETs `<backend route>/health/destination?name=…`.
+The backend answers from its own binding (`srv/lib/destinations.js`), with a
+fixed set of safe fields only — never `User`, `Password` or `authTokens`, and
+any user:password part of the URL is stripped. One call proves the binding,
+the destination and its Cloud Connector settings at once.
+
+Three outcomes, three different messages:
+
+| Backend answer | Stored? | The person sees |
+|---|---|---|
+| `ok:false` (no binding, no route, no token) | no | why the CHECK failed, plus what to repair |
+| `ok:true, found:false` | no | "the shared backend does not see a destination called X", plus how to create it |
+| `ok:true, found:true` | yes | stored; a `warning` (ProxyType not OnPremise, no location id, connectivity not bound) is shown next to the success |
+
+A found destination is stored even with a warning: the name is right, the
+setup around it is not finished. A destination that is not found is never
+stored — the name IS the whole entry, so an unverified one would be a guess.
 
 Handlers (`packages/core/connections.js`): `connections:figafStatus` (masked),
 `saveFigaf`, `deleteFigaf`, `listAgents` (live from the Figaf tool, 60 s
-cache), `saveSystem`, `deleteSystem`. RPC audit redacts the secret fields.
-UI: `screen-connections.jsx` (`#/connections`), Figaf card + one row per
-agent with Connect / Replace / Disconnect.
+cache; reads `/pipo` for `PRO` agents and `/api` for the rest),
+`saveSystem`, `deleteSystem`, `savePipoSystem`, `deletePipoSystem`. RPC audit
+redacts the secret fields. UI: `screen-connections.jsx` (`#/connections`),
+Figaf card + one row per agent with Connect / Replace key or Change
+destination / Disconnect, and — only when a `PRO` agent is listed and the
+`pipo` instances are not ready — a hint pointing at Setup > Base services.
 
 App side (playground backend `srv/lib/platform-connections.js`): reads the
 entries with a 60 s cache; credential source is an explicit SELECTOR in the
 wizard ("App Manager connection" default when stored, "Enter key manually"
 as a deliberate override); the backend enforces the source and never mixes
 them; no source = legacy precedence for old frontends (decision 0005 gate).
-Only the `api` kind is manager-managed today; DMS / Service Manager /
-Destination keys stay in the app (next 0006 phase). API client scopes stay
+The `api` and `pipo` kinds are manager-managed; DMS / Service Manager /
+Destination keys stay in the app (next 0006 phase). The reader side of `pipo`
+is `platformConn.pipoConnection(agentId)`, and `/health/connections` reports a
+`pipo` section: one destination lookup per stored entry, neutral when the
+installation has none. API client scopes stay
 installation-level: the catalog will declare per app the Figaf scopes it
 needs; never per-app credentials (design note in figaf-l3-l4 `docs/SOLUTION.md` 2.5).
 
@@ -327,9 +503,9 @@ with Alex's standard release.
 
 Every action ends with a visible result. Handler result on failure:
 `{ ok:false, error, step?, cfApp?, command?, detail?, failedApp? }` — where
-it failed (`extract` / `push` / `bind` / `env` / `start` / `stop` / `delete`
-/ `roles`), the exact command (masked), the CLI's last lines (`detail`, up to
-400 characters). Console: a red **Failed** panel (`packages/ui/action-outcome.js`)
+it failed (`download` / `extract` / `push` / `bind` / `env` / `start` /
+`stop` / `delete` / `roles`), the exact command (masked; for `download` the
+file and the store), the CLI's last lines (`detail`, up to 400 characters). Console: a red **Failed** panel (`packages/ui/action-outcome.js`)
 with action + app, where, error, command, a plain-English hint for known
 patterns, buttons Show CLI output / Copy report / Dismiss; it survives the
 status refresh. Terminal drawer: one summary line, green `<action> <app>:
@@ -354,8 +530,8 @@ JSON record. Procedure: `TROUBLESHOOTING.md`.
 
 | Tier | Command | Touches CF? | When |
 |---|---|---|---|
-| Unit (`node:test`, handlers with a fake `run`; UI models `setup-checklist`, `prepare-space`, `action-outcome`, `sso-role-assign` with a fake window/api) | `npm test` (root); `node --test apps/figaf-manager/cloud/*.test.js` (cloud) | no | every change |
-| E2E read-only (console specs + `failure-visibility` against a fixture release whose install is refused) | `npm run test:e2e` | reads | every UI or handler change, before every commit |
+| Unit (`node:test`, handlers with a fake `run`; the release store with an in-memory bucket; UI models `setup-checklist`, `prepare-space`, `action-outcome`, `sso-role-assign` with a fake window/api) | `npm test` (root); `node --test apps/figaf-manager/cloud/*.test.js` (cloud) | no | every change |
+| E2E read-only (console specs against the local build; `failure-visibility` against a fixture release whose install is refused; `release-store` against a fixture store served on 127.0.0.1, the remote code path without internet) | `npm run test:e2e` | reads | every UI or handler change, before every commit |
 | E2E install smoke (mutating: real install through the console into the dev space, then remove) | `npm run test:e2e:install` | installs, removes | **before every manager build that is pushed or uploaded** |
 
 Rules: a new console action gets its failure path in `failure-visibility.spec.js`;
@@ -365,7 +541,12 @@ a row in `TROUBLESHOOTING.md`. Known: one pre-existing cloud test
 
 ## 12. Out of scope today / backlog
 
-- Remote artifact store (R2) and the manager's own release publishing.
+- Release store hardening: a signature on `release.json` checked with a
+  public key inside the manager; a download token header if the bucket
+  stops being public; a custom domain instead of `r2.dev` (a change of
+  `FIGAF_L3_RELEASE_URL`). The manager's own release publishing.
+- Apps installed in the space but absent from the target catalog are not
+  reported by Update installation (the new catalog does not know them).
 - Migration of legacy installations from `figaf-manager-xsuaa` to the shared
   instance.
 - Role assignment to users (no API; cockpit, or `btp assign` by a person).

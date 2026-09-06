@@ -161,6 +161,7 @@
     cf: {
       loginStart:           function (apiUrl) { return rpc("cf:loginStart", { apiUrl: apiUrl }); },
       suggestedApiUrl:      function ()  { return rpc("cf:suggestedApiUrl"); },
+      ownTarget:            function (apiUrl) { return rpc("cf:ownTarget", { apiUrl: apiUrl }); },
       submitPasscode:       function (code) { return rpc("cf:submitPasscode", { code: code }); },
       selectOrg:            function (index) { return rpc("cf:selectOrg", { index: index }); },
       selectSpace:          function (index) { return rpc("cf:selectSpace", { index: index }); },
@@ -227,14 +228,18 @@
 
     // L3 App Manager (PoC) — catalog-driven install/manage of L3 apps.
     l3: {
-      catalog:   function ()  { return rpc("l3:catalog"); },
+      catalog:   function (a) { return rpc("l3:catalog", a || {}); },
       status:    function ()  { return rpc("l3:status"); },
       running:   function ()  { return rpc("l3:running"); },
+      // The release store (decision 0010): source, installed / latest / every version.
+      releases:  function (a) { return rpc("l3:releases", a || {}); },
       figafSystems: function () { return rpc("l3:figafSystems"); },
       // Catalog v3: base service instances created by the manager.
       services:           function ()  { return rpc("l3:services"); },
       provisionServices:  function (a) { return rpc("l3:provisionServices", a || {}); },
       bindManagerService: function (a) { return rpc("l3:bindManagerService", a || {}); },
+      // Bind an optional instance (PI/PO) to the shared backend + restart it.
+      bindPlatformService: function (a) { return rpc("l3:bindPlatformService", a || {}); },
       restartSelf:        function ()  { return rpc("l3:restartSelf"); },
       // One XSUAA instance + secure access first (decision 0009).
       ensureXsuaa:            function (a) { return rpc("l3:ensureXsuaa", a || {}); },
@@ -247,6 +252,8 @@
       remove:    function (a) { return rpc("l3:remove", a || {}); },
       configure: function (a) { return rpc("l3:configure", a || {}); },
       health:    function (a) { return rpc("l3:health", a || {}); },
+      // PI/PO (decision 0011): the shared backend checks a BTP destination.
+      destinationCheck: function (a) { return rpc("l3:destinationCheck", a || {}); },
     },
 
     // System connections (decision 0006): Figaf tool + SAP systems in the
@@ -259,6 +266,9 @@
       listAgents:   function ()  { return rpc("connections:listAgents"); },
       saveSystem:   function (a) { return rpc("connections:saveSystem", a || {}); },
       deleteSystem: function (a) { return rpc("connections:deleteSystem", a || {}); },
+      // On-premise PI/PO (decision 0011): a destination name, no secret.
+      savePipoSystem:   function (a) { return rpc("connections:savePipoSystem", a || {}); },
+      deletePipoSystem: function (a) { return rpc("connections:deletePipoSystem", a || {}); },
     },
 
     connect: {

@@ -6,6 +6,13 @@ const os = require("os");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
 const https = require("https");
+const http = require("http");
+
+// Plain HTTP is accepted for the local machine only (the e2e harness serves
+// a fixture release store on 127.0.0.1). Everything else goes over HTTPS.
+function httpClientFor(url) {
+  return /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(String(url)) ? http : https;
+}
 const dbSchemas = require("./db-schemas");
 const { redactServiceKeyLine } = require("./redact-service-key");
 const {
@@ -19,7 +26,13 @@ const {
   classifyAssignResult,
 } = require("./saml-connect");
 const { parseGlobalAccountTree } = require("./btp-target");
-const { parseCfApi, parseCfTarget, normalizeApiUrl } = require("./cf-target");
+const {
+  parseCfApi,
+  parseCfTarget,
+  normalizeApiUrl,
+  resolveSelfPin,
+  explainPinnedLoginFailure,
+} = require("./cf-target");
 const { patchManifestName } = require("./manifest-patch");
 const releaseConfig = require("./release-config");
 const { createL3Handlers } = require("./l3-apps");
@@ -104,6 +117,14 @@ const DEPLOYMENT_ZIP_URL =
  *   CLI is targeted at the same landscape + org + space before `cf push`.
  *   Returns null on desktop (the desktop self-update opens the GitHub release
  *   page for a manual portable download, rather than redeploying).
+ *
+ * @property {() => boolean} [isConsoleUI]
+ *   Is this host running the L3 console frame (not Alex's classic wizard)?
+ *   Cloud: FIGAF_CONSOLE_UI !== "0". Desktop: false. It decides whether the
+ *   CF sign-in may pin itself to the manager's own org/space: the console
+ *   installs the L3 apps into its OWN space, while the wizard deploys the
+ *   Figaf tool into a space the operator picks. A host without the method
+ *   counts as "not the console", so the picker stays.
  */
 
 function patchManifestService(text, serviceName, enable) {
@@ -293,7 +314,7 @@ function createOrchestrator({ host, send, audit }) {
   function httpsJson(url) {
     return new Promise((resolve, reject) => {
       const netHandle = auditor.beginNet({ url, method: "GET" });
-      https.get(url, { headers: { "User-Agent": "Figaf-Manager" } }, (res) => {
+      httpClientFor(url).get(url, { headers: { "User-Agent": "Figaf-Manager" } }, (res) => {
         let data = "";
         res.on("data", (c) => { data += c; });
         res.on("end", () => {
@@ -356,7 +377,7 @@ function createOrchestrator({ host, send, audit }) {
           "User-Agent": "Figaf-Manager",
           "Cookie": "eula_3_2_agreed=tools.hana.ondemand.com/developer-license-3_2.txt",
         };
-        https.get(currentUrl, { headers }, (res) => {
+        httpClientFor(currentUrl).get(currentUrl, { headers }, (res) => {
           finalStatus = res.statusCode;
           if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
             res.resume();
@@ -558,6 +579,17 @@ function createOrchestrator({ host, send, audit }) {
     }
   }
 
+  // The manager's own CF coordinates, but ONLY where pinning the sign-in to
+  // them is right: the L3 console installs into its own space, while Alex's
+  // classic wizard (FIGAF_CONSOLE_UI=0) deploys the Figaf tool into a space
+  // the operator picks. Everything else (desktop, another landscape) is
+  // handled by resolveSelfPin. Returning null keeps the org/space picker.
+  function selfTargetForPin() {
+    const console_ = host.isConsoleUI ? host.isConsoleUI() : false;
+    if (!console_) return null;
+    return (host.getDeployTargetForSelf && host.getDeployTargetForSelf()) || null;
+  }
+
   // Commit an enumerated subaccount entry as the active target: runs
   // `btp target --subaccount <guid>` so the CLI's notion of the target stays
   // in sync with our state, then writes state.landscape/subaccount/org and
@@ -711,6 +743,10 @@ function createOrchestrator({ host, send, audit }) {
       resolveCf: () => resolveCf(),
       extractZip: (zip, dest) => extractZip(zip, dest),
       httpsText: (url) => httpsText(url),
+      // The release store (decision 0010): index.json / catalog reads and the
+      // artifact downloads go through the audited helpers above.
+      httpsJson: (url) => httpsJson(url),
+      httpsDownload: (url, dest) => httpsDownload(url, dest),
       // GET that resolves body + status even on non-2xx — health endpoints
       // (e.g. /health/connections) return 503 WITH a diagnostic JSON body.
       httpsBody: (url) => new Promise((resolve, reject) => {
@@ -730,7 +766,13 @@ function createOrchestrator({ host, send, audit }) {
     // Store; L3 app backends read them at runtime. Implemented in
     // connections.js; requires the manager to be BOUND to the credstore
     // instance (same precondition as the stored management user).
-    ...createConnectionsHandlers({ log }),
+    // probeDestination: a PI/PO entry (decision 0011) is verified by the
+    // shared backend, the only side bound to the destination service. The
+    // arrow resolves `handlers` lazily - it is called long after this literal.
+    ...createConnectionsHandlers({
+      log,
+      probeDestination: (name) => handlers["l3:destinationCheck"]({ destinationName: name }),
+    }),
 
     // stored management user + session resume (L3 App Manager PoC) ───────────
     // "Option B" (Aug 31 decision): the manager's cf login can come from a
@@ -1500,13 +1542,25 @@ function createOrchestrator({ host, send, audit }) {
         try { state.cfLoginProc.kill(); } catch {}
       }
       const cfBin = resolveCf();
-      const proc = spawn(cfBin, ["login", "-a", target, "--sso"], { shell: false, windowsHide: true, env: cliEnv() });
+      // In the L3 console the manager's own space is the only correct install
+      // target, and the hosted manager knows it from VCAP_APPLICATION - so
+      // `-o`/`-s` answer the CLI's org/space prompts for us (cf-target.js
+      // resolveSelfPin). A null pin means the interactive picker below still
+      // applies: desktop, a login to another landscape, or Alex's classic
+      // wizard, which deploys the Figaf tool into a space the operator picks.
+      const pin = resolveSelfPin(selfTargetForPin(), target);
+      const args = ["login", "-a", target, "--sso"];
+      if (pin) args.push("-o", pin.org, "-s", pin.space);
+      const proc = spawn(cfBin, args, { shell: false, windowsHide: true, env: cliEnv() });
       state.cfLoginProc = proc;
       state.cfOrgList = null;
       state.cfSpaceList = null;
       state.cfWaitingForOrgChoice = false;
       state.cfWaitingForSpaceChoice = false;
-      log("cmd", "cmd", `${cfBin} login -a ${target} --sso`);
+      log("cmd", "cmd", `${cfBin} ${args.join(" ")}`);
+      if (pin) {
+        log("cf", "line", `Target fixed to this manager's own location: org ${pin.org}, space ${pin.space} (nothing to choose).`);
+      }
 
       // Parse cf's interactive picker for "Select an org:" / "Select a space:".
       // The CLI writes the prompt header, then numbered lines, then "<thing>
@@ -1515,6 +1569,11 @@ function createOrchestrator({ host, send, audit }) {
       // tail of stdout, surface a choice event, and feed the user's pick back
       // through stdin via cf:selectOrg / cf:selectSpace.
       let stdoutTail = "";
+      // Last few KB of stdout+stderr. A pinned login has no picker to correct
+      // a wrong target in, so the close handler classifies the failure from
+      // this tail and says what to do about it.
+      let failTail = "";
+      const keepTail = (chunk) => { failTail = (failTail + chunk).slice(-4096); };
       let collecting = null; // "org" | "space" | null
       let entries = [];
       const ENTRY_RE = /^\s*(\d+)\.\s+(.+?)\s*$/;
@@ -1544,6 +1603,7 @@ function createOrchestrator({ host, send, audit }) {
 
       proc.stdout.on("data", (buf) => {
         const chunk = buf.toString();
+        keepTail(chunk);
         // split() always returns a trailing element even when the chunk has no
         // final newline, so the unterminated "Org (enter to skip):" prompt
         // shows up here as a regular line. Match it inline rather than via the
@@ -1586,7 +1646,9 @@ function createOrchestrator({ host, send, audit }) {
         }
       });
       proc.stderr.on("data", (buf) => {
-        for (const line of buf.toString().split(/\r?\n/)) {
+        const chunk = buf.toString();
+        keepTail(chunk);
+        for (const line of chunk.split(/\r?\n/)) {
           if (line.length) log("cf", "err", line);
         }
       });
@@ -1596,11 +1658,24 @@ function createOrchestrator({ host, send, audit }) {
         state.cfSpaceList = null;
         state.cfWaitingForOrgChoice = false;
         state.cfWaitingForSpaceChoice = false;
-        if (code === 0) { state.cfLoginKind = "passcode"; send("cf:loggedIn", {}); }
-        else send("cf:loginFailed", { code });
+        if (code === 0) {
+          state.cfLoginKind = "passcode";
+          if (pin) {
+            // `cf login -o -s` already targeted it; mirror it into our state
+            // so the setup steps do not have to wait for cf:targetOrgSpace.
+            state.org = pin.org;
+            state.space = pin.space;
+            log("cf", "ok", `Signed in - org ${pin.org}, space ${pin.space} (this manager's own space)`);
+          }
+          send("cf:loggedIn", {});
+        } else {
+          const explained = explainPinnedLoginFailure(failTail, pin);
+          if (explained) log("cf", "err", explained);
+          send("cf:loginFailed", { code, error: explained || null });
+        }
         state.cfLoginProc = null;
       });
-      return { ok: true, apiUrl: target };
+      return { ok: true, apiUrl: target, pinned: pin };
     },
 
     // CF-only login (skip BTP): suggest a default CF API endpoint for the
@@ -1609,6 +1684,16 @@ function createOrchestrator({ host, send, audit }) {
     async "cf:suggestedApiUrl"() {
       try { return { ok: true, apiUrl: host.getDeployTargetForSelf?.()?.apiUrl || "" }; }
       catch { return { ok: true, apiUrl: "" }; }
+    },
+
+    // The manager's own org/space, when a passcode login to `apiUrl` will be
+    // pinned to them (cf-target.js resolveSelfPin). The sign-in card shows
+    // this as fixed information instead of an org/space picker.
+    // `{ ok: true, pinned: null }` means the picker still applies.
+    async "cf:ownTarget"({ apiUrl } = {}) {
+      const self = selfTargetForPin();
+      const requested = apiUrl || (self && self.apiUrl) || null;
+      return { ok: true, pinned: resolveSelfPin(self, requested) };
     },
 
     async "cf:submitPasscode"({ code }) {

@@ -174,3 +174,49 @@ test("a deploy started elsewhere shows as Installing… and every action button 
   }
   await page.unroute("**/rpc/l3%3Astatus");
 });
+
+
+// ─── Update installation (release store, decision 0010) ─────────────────────
+// The fixture server is a LOCAL release source with one version and an empty
+// space (nothing installed). Update installation must be refused before any
+// cf change, and the refusal must be visible like every other failed action.
+
+test("a refused Update installation is visible: panel with the version rule, terminal line, report; nothing changes", async ({ page }) => {
+  // The real l3:releases of this fixture offers nothing to update (nothing is
+  // installed). Pretend the fixture version is installed and up to date, so
+  // the panel shows the repair action "Re-deploy everything" (the same
+  // l3:update {version} call as an update); the real handler then refuses it
+  // - the failure path.
+  await page.route("**/rpc/l3%3Areleases", async (route) => {
+    await route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify({
+        ok: true, source: { kind: "local", location: "fixture", label: "fixture (local directory, development)" },
+        installed: "0.0.0-e2e", latest: "0.0.0-e2e", current: "0.0.0-e2e", updateAvailable: false,
+        versions: [{ version: "0.0.0-e2e", publishedAt: null, installed: true, latest: true, selectable: true, reason: null }],
+      }),
+    });
+  });
+  await page.goto("/#/apps");
+  const panel = page.locator("[data-release-panel]");
+  await expect(panel.locator("[data-release-uptodate]")).toContainText("Up to date. Nothing newer than 0.0.0-e2e");
+  await expect(panel.locator("[data-release-target]")).toHaveCount(0); // up to date: no dropdown, no "Update installation"
+  await expect(panel.getByRole("button", { name: /^Update installation/ })).toHaveCount(0);
+  await panel.getByRole("button", { name: "Re-deploy everything at 0.0.0-e2e" }).click();
+  const done = page.waitForResponse(isRpc("l3:update"));
+  await panel.getByRole("button", { name: "Confirm: re-deploy everything at 0.0.0-e2e" }).click();
+  const result = await (await done).json();
+  expect(result.ok).toBe(false);
+  expect(result.error).toMatch(/nothing is installed yet/);
+
+  const outcome = page.locator('[data-outcome="error"]');
+  await expect(outcome).toBeVisible();
+  await expect(outcome).toContainText("Update of installation to 0.0.0-e2e failed");
+  await expect(outcome).toContainText("nothing is installed yet");
+  await expect(outcome).toContainText("One version per installation");
+  await outcome.getByRole("button", { name: "Show CLI output" }).click();
+  await expect(page.locator(".terminal")).toBeVisible();
+  await expect(page.locator(".terminal")).toContainText("update installation to 0.0.0-e2e FAILED");
+  await expect(page.locator(`.l3-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
+  await page.unroute("**/rpc/l3%3Areleases");
+});

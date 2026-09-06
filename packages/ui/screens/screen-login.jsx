@@ -45,6 +45,10 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
   const [subaccountChoice, setSubaccountChoice] = React.useState(null);
   const [orgChoice, setOrgChoice] = React.useState(null);
   const [spaceChoice, setSpaceChoice] = React.useState(null);
+  // The manager's own org/space when the passcode login will be pinned to them
+  // (server side: cf-target.js resolveSelfPin). null = the operator still gets
+  // the org/space picker (desktop, or a login to another CF landscape).
+  const [ownTarget, setOwnTarget] = React.useState(null);
   const [cfSwitchingOrg, setCfSwitchingOrg] = React.useState(false);
   // Stored management user (SAP Credential Store) — probed once; the server
   // caches the probe, so re-renders don't burn credstore rate limit.
@@ -111,22 +115,38 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
 
   React.useEffect(() => {
     const api = fg();
+    if (!api || !api.cf || !api.cf.ownTarget || cfLoggedIn) return;
+    let alive = true;
+    (async () => {
+      try {
+        const r = await api.cf.ownTarget(login.apiUrl || "");
+        if (alive) setOwnTarget((r && r.ok && r.pinned) || null);
+      } catch (e) { /* backend without the handler: keep the picker */ }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line
+  }, [login.apiUrl, cfLoggedIn]);
+
+  React.useEffect(() => {
+    const api = fg();
     if (!api) return;
     const offCf1 = api.on("cf:loggedIn", () => {
       setOrgChoice(null);
       setSpaceChoice(null);
       setCfSwitchingOrg(false);
-      setLogin({ cfStatus: "done" });
+      setLogin({ cfStatus: "done", cfError: "" });
       (async () => {
         const t = await api.cf.targetOrgSpace();
         if (t && t.ok) setLogin({ org: t.org, space: t.space, user: t.user || login.user });
       })();
     });
-    const offCf2 = api.on("cf:loginFailed", () => {
+    const offCf2 = api.on("cf:loginFailed", (p) => {
       setOrgChoice(null);
       setSpaceChoice(null);
       setCfSwitchingOrg(false);
-      setLogin({ cfStatus: "error" });
+      // A pinned login can fail for a reason the operator can fix (no role in
+      // the manager's own space). The server explains it - show that text.
+      setLogin({ cfStatus: "error", cfError: (p && p.error) || "" });
     });
     const offCfOrgChoice = api.on("cf:orgChoice", (p) => setOrgChoice(p));
     const offCfSpaceChoice = api.on("cf:spaceChoice", (p) => setSpaceChoice(p));
@@ -411,7 +431,7 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
     if (!apiUrl && landscape) {
       apiUrl = `https://api.${landscape.replace(/^cf-/, "cf.")}.hana.ondemand.com`;
     }
-    setLogin({ passcodeRequested: true });
+    setLogin({ passcodeRequested: true, cfError: "" });
     // Open the passcode page only when we know the landscape. On a custom /
     // sovereign host we couldn't derive it — skip the auto-open (the operator
     // fetches the passcode from their own SSO page) but never block login.
@@ -423,7 +443,7 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
     const api = fg();
     if (!api) return;
     if (!login.passcode || login.passcode.length < 4) return;
-    setLogin({ cfStatus: "running" });
+    setLogin({ cfStatus: "running", cfError: "" });
     // Success path: cf process closes → cf:loggedIn / cf:loginFailed events flip
     // cfStatus. If the handler itself reports failure (e.g. cf already exited,
     // bad shim wiring) we have to flip back here — otherwise the button is
@@ -689,6 +709,11 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
 
           {cfReady && !cfLoggedIn && !cfSwitchingOrg && (
             <div className="slide-in">
+              {login.cfError && (
+                <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 8, fontSize: 12, lineHeight: 1.5, background: "var(--fg-red-soft, #fdecea)", color: "var(--fg-red, #c0392b)" }}>
+                  {login.cfError}
+                </div>
+              )}
               {!login.passcodeRequested ? (
                 <div>
                   {/* The stored management user comes FIRST: when it exists, one
@@ -733,6 +758,17 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
                       />
                       <div className="field-hint">
                         From the BTP cockpit, open your subaccount → <span className="kbd">Cloud Foundry · Environment</span> and copy the API endpoint.
+                      </div>
+                    </div>
+                  )}
+                  {ownTarget && (
+                    <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 8, fontSize: 12, lineHeight: 1.5, background: "var(--fg-blue-soft, #eef4ff)", color: "var(--ink-2)" }}>
+                      <div style={{ fontWeight: 600, color: "var(--ink-0)" }}>
+                        Target: <span className="kbd">{ownTarget.org}</span> / <span className="kbd">{ownTarget.space}</span>
+                      </div>
+                      <div style={{ marginTop: 3 }}>
+                        This manager runs in that space and installs the L3 applications there. The
+                        sign-in targets it for you, so there is no org or space to choose.
                       </div>
                     </div>
                   )}

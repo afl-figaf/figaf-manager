@@ -1,8 +1,8 @@
 # App Manager — when an action fails
 
 Purpose: the fixed procedure for a failed action in the Figaf App Manager
-console (Install, Update, Disable, Enable, Remove, Health, Base services,
-Connections). Written after the 2026-09-03 failure, where an install failed
+console (Install, Update installation, Re-deploy, Disable, Enable, Remove,
+Health, Base services, Connections, reading the release store). Written after the 2026-09-03 failure, where an install failed
 and the person saw "no logs, nothing". This file says where the evidence is,
 who does what, and how a failure becomes a fix and a test.
 
@@ -108,7 +108,11 @@ known and the installing person agrees.
 | `cf curl /v3/apps failed — are you logged in and targeted?` / `Not logged in` | The Cloud Foundry session of the manager ended (restart, expiry). | Session & access -> sign in again (stored management user, or passcode). |
 | `cf start <app> failed — see the staging log in the terminal: Start unsuccessful` | The app crashed on start (bad env, missing binding, code error). | Terminal drawer for the staging log; `cf logs <app> --recent` for the app's own output. |
 | `... memory limit ...` / `insufficient resources` | The space's memory quota is full. | Remove unused apps or raise the quota (BTP cockpit -> space -> quota). |
-| `checksum mismatch for <artifact> — the release is corrupt` | The release inside the manager zip is damaged or was changed after the catalog was written. | Build the release and the manager zip again (`build-artifacts.ps1`, `npm run build:manager`), deploy the new zip. |
+| `checksum mismatch for <file>: release.json says … the download is …` / `checksum mismatch for <artifact> — the release is corrupt` | A file in the release store does not match the checksum published with it (damaged upload, or changed after publishing). The manager deleted the download; nothing was deployed. | Press **Refresh releases** and try again. If it repeats, Figaf publishes the release again as a NEW version (`release/publish.js` refuses to overwrite). With a local release directory: build the release again. |
+| `cannot read <url>/index.json: …` (panel: "The release store cannot be read") | The space cannot reach the release store URL (`FIGAF_L3_RELEASE_URL` in the manager's `manifest.yml`), or the store has no `index.json` under that prefix. | Open the URL in a browser; check egress from the space; compare the URL with the one figaf-l3-l4 `release/README.md` names. Nothing was changed. |
+| `download of <file> failed: HTTP 404` | The version's catalog names a file the store does not hold (an unfinished publish, or a store that was edited by hand). | `node release/publish.js --verify <version>` in figaf-l3-l4 shows which file is missing; publish the release again as a new version. |
+| `No release source configured: set FIGAF_L3_RELEASE_URL …` | The manager runs without `FIGAF_L3_RELEASE_URL` (a `manifest.yml` older than 2026-09-04) and without a local release directory. | Deploy the current manager build; its `manifest.yml` carries the store URL. |
+| `version X is not in the release store (available: …)` / `… lower than the installed … rollback is not supported` / `Install uses the installed version …` / `nothing is installed yet — install an app first` | The version rule of decision 0010: one version per installation. Install adds an app at the installed version (latest on an empty space); Update installation moves everything upwards. | Press **Refresh releases**; choose a version the Release panel offers. |
 | `<action> of <app> is already running (started <time> ago)` | A second action was started while one was running (a page reload, a second tab, or a second sign-in). The manager runs one lifecycle action at a time. | Wait until the running action ends - the app row shows `Installing…` and the parts show `staging`. Nothing was changed by the refused call. |
 | The row says `Installing…` and every button is off, but you started nothing | Cloud Foundry is staging a build of this app (a fresh install keeps the CF app STOPPED until staging and start are through), or another page started the action. | Wait. The page refreshes itself every 10 s while an action runs. `cf logs <app> --recent` shows the staging output. |
 | `could not resolve the route of figaf-l3l4-backend` | The frontend was deployed while the platform base has no route (not started, or deleted by hand). | Install again (the platform base is deployed first, every time). |

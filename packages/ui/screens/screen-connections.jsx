@@ -124,10 +124,53 @@ function ConnSystemForm({ agent, busy, onSave, onCancel }) {
   );
 }
 
+// On-premise PI/PO (decision 0011). No credential is typed here: the PI user
+// and password live in the BTP destination, the tunnel in the SAP Cloud
+// Connector. The person gives the destination NAME; the shared backend checks
+// it, because only the backend is bound to the destination service.
+function ConnPipoForm({ agent, busy, onSave, onCancel }) {
+  const current = (agent.connection && agent.connection.destinationName) || "";
+  const [name, setName] = React.useState(current);
+  const suggestion = `PO_TPM_${agent.systemId || agent.id}`;
+  return (
+    <div style={{ marginTop: 10, padding: 12, border: "1px solid var(--line)", borderRadius: 8 }} data-pipo-form={agent.id}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+        Connect {agent.name || agent.systemId || agent.id} (on-premise PI/PO)
+      </div>
+      <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 10 }}>
+        Give the name of the BTP destination for this PI/PO system. You create that destination once in the BTP
+        cockpit (Connectivity &gt; Destinations): <span className="kbd">ProxyType: OnPremise</span>, the PI user and
+        password, and the property <span className="kbd">CloudConnectorLocationId</span> when more than one Cloud
+        Connector is attached. The manager stores only the NAME - no secret. The shared backend then checks that the
+        destination exists and reports its settings.
+      </div>
+      <input
+        className="input is-mono"
+        autoComplete="off"
+        spellCheck={false}
+        style={{ width: "100%" }}
+        placeholder={suggestion}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={() => onSave(name)}>
+          {busy ? "Checking…" : "Check & save"}
+        </button>
+        <button className="btn" disabled={busy} onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 function ConnAgentRow({ agent, busy, onConnect, onDisconnect }) {
   const [showForm, setShowForm] = React.useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = React.useState(false);
   const connected = agent.connected === true;
+  // Two kinds of system (decision 0011): a cloud Integration Suite tenant is
+  // connected with a service key, an on-premise PI/PO system with the name of
+  // a BTP destination. `kind` comes from the agent's Figaf platform.
+  const isPipo = agent.kind === "pipo";
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -142,15 +185,18 @@ function ConnAgentRow({ agent, busy, onConnect, onDisconnect }) {
         <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
           {connected && agent.connection && (
             <>
-              <span className="kbd">{agent.connection.baseUrl}</span>
-              {agent.connection.verifiedAt && <> · verified {new Date(agent.connection.verifiedAt).toLocaleString()}</>}
+              <span className="kbd">
+                {isPipo ? agent.connection.destinationName : agent.connection.baseUrl}
+              </span>
+              {isPipo && agent.connection.locationId && <> · location {agent.connection.locationId}</>}
+              {agent.connection.verifiedAt && <> · checked {new Date(agent.connection.verifiedAt).toLocaleString()}</>}
             </>
           )}
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
         <button className="btn" disabled={busy} onClick={() => setShowForm((s) => !s)}>
-          {connected ? "Replace key" : "Connect"}
+          {connected ? (isPipo ? "Change destination" : "Replace key") : "Connect"}
         </button>
         {connected && !confirmDisconnect && (
           <button className="btn" disabled={busy} onClick={() => setConfirmDisconnect(true)}>Disconnect</button>
@@ -165,13 +211,24 @@ function ConnAgentRow({ agent, busy, onConnect, onDisconnect }) {
           </>
         )}
       </div>
-      {showForm && (
+      {showForm && !isPipo && (
         <ConnSystemForm
           agent={agent}
           busy={busy}
           onCancel={() => setShowForm(false)}
           onSave={async (keyJson) => {
             const r = await onConnect(keyJson);
+            if (r && r.ok) setShowForm(false);
+          }}
+        />
+      )}
+      {showForm && isPipo && (
+        <ConnPipoForm
+          agent={agent}
+          busy={busy}
+          onCancel={() => setShowForm(false)}
+          onSave={async (destinationName) => {
+            const r = await onConnect(destinationName);
             if (r && r.ok) setShowForm(false);
           }}
         />
@@ -187,6 +244,14 @@ function ScreenConnections({ ctx, onBack }) {
   const [showFigafForm, setShowFigafForm] = React.useState(false);
   const [busy, setBusy] = React.useState(null);          // "figaf" | agentId | null
   const [lastError, setLastError] = React.useState(null);
+  // A stored connection can still carry a real problem (decision 0011): a PI/PO
+  // destination that exists but has the wrong ProxyType, no location id, or no
+  // connectivity binding yet. It is saved AND said out loud.
+  const [lastWarning, setLastWarning] = React.useState(null);
+  // The PI/PO services are optional (decision 0011). Their state is only
+  // interesting when this installation actually has a PI/PO system, so it is
+  // read after the agent list, and only then.
+  const [pipoServices, setPipoServices] = React.useState(null);
 
   const api = typeof window !== "undefined" ? window.figaf : null;
 
@@ -227,16 +292,24 @@ function ScreenConnections({ ctx, onBack }) {
     } finally { setBusy(null); }
   }
 
-  async function connectSystem(agent, keyJson) {
+  // One entry point for both kinds: a cloud tenant is saved with a service key,
+  // an on-premise PI/PO system with a destination name (decision 0011).
+  async function connectSystem(agent, input) {
     setBusy(agent.id);
     setLastError(null);
+    setLastWarning(null);
     try {
-      const r = await api.connections.saveSystem({
-        agentId: agent.id, agentSystemId: agent.systemId, agentName: agent.name,
-        serviceKeyJson: keyJson,
-      });
-      if (r && r.ok) await refresh();
-      else setLastError(`${agent.name || agent.id}: ${(r && r.error) || "save failed"}`);
+      const common = { agentId: agent.id, agentSystemId: agent.systemId, agentName: agent.name };
+      const r = agent.kind === "pipo"
+        ? await api.connections.savePipoSystem({ ...common, destinationName: input })
+        : await api.connections.saveSystem({ ...common, serviceKeyJson: input });
+      if (r && r.ok) {
+        if (r.warning) setLastWarning(`${agent.name || agent.id}: ${r.warning}`);
+        await refresh();
+      } else {
+        const hint = r && r.hint ? ` — ${r.hint}` : "";
+        setLastError(`${agent.name || agent.id}: ${(r && r.error) || "save failed"}${hint}`);
+      }
       return r;
     } finally { setBusy(null); }
   }
@@ -245,13 +318,32 @@ function ScreenConnections({ ctx, onBack }) {
     setBusy(agent.id);
     setLastError(null);
     try {
-      const r = await api.connections.deleteSystem({ agentId: agent.id });
+      const r = agent.kind === "pipo"
+        ? await api.connections.deletePipoSystem({ agentId: agent.id })
+        : await api.connections.deleteSystem({ agentId: agent.id });
       if (r && r.ok) await refresh();
       else setLastError(`${agent.name || agent.id}: ${(r && r.error) || "disconnect failed"}`);
     } finally { setBusy(null); }
   }
 
   const figafConfigured = figaf && figaf.configured;
+  const agentList = (agents && agents.list) || [];
+  const hasPipoAgent = agentList.some((a) => a.kind === "pipo");
+
+  React.useEffect(() => {
+    if (!hasPipoAgent || !api || !api.l3 || !api.l3.services) return;
+    let cancelled = false;
+    api.l3.services()
+      .then((r) => {
+        if (cancelled) return;
+        const list = (r && r.ok && r.services) || [];
+        setPipoServices(list.filter((s) => s.group === "pipo"));
+      })
+      .catch(() => { if (!cancelled) setPipoServices(null); });
+    return () => { cancelled = true; };
+  }, [hasPipoAgent]);
+
+  const pipoMissing = (pipoServices || []).filter((s) => s.status !== "ready");
 
   return (
     <>
@@ -270,6 +362,24 @@ function ScreenConnections({ ctx, onBack }) {
         {lastError && (
           <div style={{ marginBottom: 12, padding: 10, border: "1px solid var(--fg-red, #c0392b)", borderRadius: 8, fontSize: 13 }}>
             {lastError}
+          </div>
+        )}
+
+        {hasPipoAgent && pipoServices !== null && pipoMissing.length > 0 && (
+          <div data-pipo-hint="" style={{ marginBottom: 12, padding: 10, border: "1px solid var(--line)", borderRadius: 8, fontSize: 13 }}>
+            <strong>PI/PO systems need two more service instances.</strong> This installation lists an on-premise
+            PI or PO system, but {pipoMissing.map((s) => s.name).join(" and ")} {pipoMissing.length > 1 ? "are" : "is"} not
+            ready yet. Create {pipoMissing.length > 1 ? "them" : "it"} in <span className="kbd">Setup &gt; Base services</span>,
+            then update the installation so the shared backend binds {pipoMissing.length > 1 ? "them" : "it"}. Without
+            that the backend cannot reach a PI system through the SAP Cloud Connector.
+            <a className="btn-link" style={{ marginLeft: 8 }} href="#/setup">Open Setup</a>
+          </div>
+        )}
+
+        {lastWarning && (
+          <div data-conn-warning="" style={{ marginBottom: 12, padding: 10, border: "1px solid var(--line)", borderRadius: 8, fontSize: 13 }}>
+            <strong>Saved, with a warning.</strong> {lastWarning}
+            <button className="btn-link" style={{ marginLeft: 8 }} onClick={() => setLastWarning(null)}>Dismiss</button>
           </div>
         )}
 

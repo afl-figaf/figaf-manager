@@ -251,16 +251,17 @@ async function stage() {
   fs.copyFileSync(path.join(APP_DIR, "host.cloud.js"),    path.join(STAGE_DIR, "host.cloud.js"));
   fs.copyFileSync(path.join(APP_DIR, "manifest.yml"),     path.join(STAGE_DIR, "manifest.yml"));
 
-  // L3 App Manager (PoC): bundle the artifact channel (catalog.json + per-app
-  // zips) when present. Each artifact is one zip file, so the cockpit's
-  // 5,000-resource cap is not a concern here.
-  const l3Dir = path.join(APP_DIR, "l3-artifacts");
-  if (fs.existsSync(path.join(l3Dir, "catalog.json"))) {
-    log("[stage] Bundling l3-artifacts/ (L3 app channel)…");
-    copyDir(l3Dir, path.join(STAGE_DIR, "l3-artifacts"));
-  } else {
-    log("[stage] l3-artifacts/ not present — L3 App Manager ships without a channel.");
+  // L3 releases are NOT bundled (figaf-l3-l4 decision 0010): the manager reads
+  // them from the release store named by FIGAF_L3_RELEASE_URL in manifest.yml.
+  // A developer's l3-artifacts/ in the checkout is a local source for
+  // `npm start` and the e2e install smoke only.
+  const manifest = fs.readFileSync(path.join(APP_DIR, "manifest.yml"), "utf8");
+  const releaseUrl = /^\s*FIGAF_L3_RELEASE_URL:\s*(\S+)/m.exec(manifest);
+  if (!releaseUrl) {
+    console.error("\nmanifest.yml must set FIGAF_L3_RELEASE_URL (the L3 release store) — the zip ships no bundled release.");
+    process.exit(1);
   }
+  log(`[stage] L3 releases come from ${releaseUrl[1]} (manifest.yml); nothing bundled.`);
 
   // Staged package.json strategy for @figaf/* workspace packages:
   //

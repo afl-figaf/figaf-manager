@@ -16,9 +16,16 @@
 //                      POST /api/v1/agent/search):
 //                      { kind:"api", agentId, agentSystemId, agentName,
 //                        baseUrl, tokenUrl, clientId, clientSecret, verifiedAt }
+//   <agentId>/pipo   — Level 2, one per on-premise PI/PO system (Figaf agent
+//                      with platform "PRO"), decision 0011:
+//                      { kind:"pipo", agentId, agentSystemId, agentName,
+//                        destinationName, proxyType, locationId, verifiedAt }
+//                      NO SECRET: the PI user and password live in the BTP
+//                      destination, the tunnel in the SAP Cloud Connector.
 //
 // Every save VERIFIES the credentials against the real endpoint first
-// (Figaf: OAuth token + agent/search; SAP: OAuth token + GET /api/v1/$metadata)
+// (Figaf: OAuth token + agent/search; SAP: OAuth token + GET /api/v1/$metadata;
+// PI/PO: the shared backend reads the destination through its own binding)
 // and only stores what worked. No secret value is ever returned to the
 // renderer, logged, or echoed in an error message.
 //
@@ -54,6 +61,35 @@ function systemCredentialName(agentId) {
   const segment = encodeURIComponent(String(agentId || "").trim()).replace(/%/g, "_");
   if (!segment) throw new Error("agentId is required");
   return `${segment}/api`;
+}
+
+/**
+ * Credential name for one system's `pipo` entry (on-premise PI/PO, decision
+ * 0011). MUST match the reader side. Same agent id, different suffix: a system
+ * is either an Integration Suite tenant (`/api`) or a PI/PO system (`/pipo`).
+ */
+function pipoCredentialName(agentId) {
+  const segment = encodeURIComponent(String(agentId || "").trim()).replace(/%/g, "_");
+  if (!segment) throw new Error("agentId is required");
+  return `${segment}/pipo`;
+}
+
+/** Figaf agent platform that means "on-premise SAP PI/PO" (everything else is cloud). */
+function isPiPlatform(platform) {
+  return String(platform || "").toUpperCase() === "PRO";
+}
+
+/**
+ * A BTP destination name: what a person types in the cockpit. Kept strict so a
+ * typo fails here and not inside a runtime call.
+ */
+function cleanDestinationName(value) {
+  const name = String(value || "").trim();
+  if (!name) return { error: "the destination name is required" };
+  if (!/^[A-Za-z0-9._-]{1,200}$/.test(name)) {
+    return { error: "a destination name may only contain letters, digits, dot, underscore and hyphen" };
+  }
+  return { name };
 }
 
 /** Cloudflare Access service-token headers, when the Figaf tool sits behind Access. */
@@ -133,11 +169,17 @@ function parseServiceKey(text) {
  * @param {object}   [ctx.credstore]  credstore-client module (injectable for tests)
  * @param {Function} [ctx.fetchImpl]  fetch (injectable for tests)
  * @param {Function} [ctx.log]        cli:line logger (source, type, text)
+ * @param {Function} [ctx.probeDestination]  async (name) => { ok, found, proxyType,
+ *   locationId, error? }. Verification of a PI/PO entry is DELEGATED to the
+ *   shared backend (decision 0011): only the backend is bound to the
+ *   destination service, so only it can read a destination. Wired in
+ *   orchestrator.js to the l3:destinationCheck handler.
  */
 function createConnectionsHandlers(ctx = {}) {
   const credstore = ctx.credstore || credstoreClientDefault;
   const fetchImpl = ctx.fetchImpl || fetch;
   const log = ctx.log || (() => {});
+  const probeDestination = ctx.probeDestination || null;
 
   // name → { entry: object|null, at: epoch ms }. Spares the store's rate limit
   // when the agent list is refreshed; writes and deletes invalidate directly.
@@ -332,17 +374,29 @@ function createConnectionsHandlers(ctx = {}) {
       for (const raw of rawAgents.map(_mapAgent).filter((a) => a.id)) {
         let connected = null; // null = unknown (read failed or read budget spent)
         let connection = null;
+        const pi = isPiPlatform(raw.platform);
         if (reads < MAX_STATUS_READS) {
           reads++;
           try {
-            const entry = await _readEntry(binding, systemCredentialName(raw.id));
+            const name = pi ? pipoCredentialName(raw.id) : systemCredentialName(raw.id);
+            const entry = await _readEntry(binding, name);
             connected = Boolean(entry);
-            if (entry) connection = { baseUrl: entry.baseUrl || "", verifiedAt: entry.verifiedAt || null };
+            if (entry) {
+              connection = pi
+                ? {
+                    kind: "pipo",
+                    destinationName: entry.destinationName || "",
+                    locationId: entry.locationId || "",
+                    proxyType: entry.proxyType || "",
+                    verifiedAt: entry.verifiedAt || null,
+                  }
+                : { kind: "api", baseUrl: entry.baseUrl || "", verifiedAt: entry.verifiedAt || null };
+            }
           } catch {
             connected = null;
           }
         }
-        agents.push({ ...raw, connected, connection });
+        agents.push({ ...raw, kind: pi ? "pipo" : "api", connected, connection });
       }
       return { ok: true, figafBaseUrl: figaf.baseUrl || "", agents };
     },
@@ -407,6 +461,87 @@ function createConnectionsHandlers(ctx = {}) {
       log("connections", "line", `System connection removed (${id})`);
       return { ok: true };
     },
+
+    /**
+     * Verify + store one on-premise PI/PO system (Level 2, decision 0011).
+     * The person types the name of a BTP destination they created in the
+     * cockpit; NO credential is entered here and none is stored - the PI user
+     * lives in the destination, the tunnel in the SAP Cloud Connector, and the
+     * Cloud Connector location id in the destination's
+     * `CloudConnectorLocationId` property.
+     *
+     * Verification is delegated to the shared backend, the only side bound to
+     * the destination service. It reports whether the destination exists, its
+     * ProxyType and its location id. Nothing is stored when the check fails:
+     * the destination name IS the whole entry, so an unverified entry would be
+     * a guess.
+     */
+    async "connections:savePipoSystem"({ agentId, agentSystemId, agentName, destinationName } = {}) {
+      const binding = _binding();
+      if (!binding) return { ok: false, error: "the manager is not bound to a Credential Store instance" };
+      const id = String(agentId || "").trim();
+      if (!id) return { ok: false, error: "agentId is required" };
+      const dest = cleanDestinationName(destinationName);
+      if (dest.error) return { ok: false, error: dest.error };
+      if (!probeDestination) {
+        return { ok: false, error: "this build cannot check destinations - no backend probe is wired" };
+      }
+      let probe;
+      try {
+        probe = await probeDestination(dest.name);
+      } catch (e) {
+        probe = { ok: false, error: e.message };
+      }
+      if (!probe || !probe.ok) {
+        return {
+          ok: false,
+          error: `the destination could not be checked - nothing was stored: ${(probe && probe.error) || "unknown error"}`,
+          hint: (probe && probe.hint) || undefined,
+        };
+      }
+      if (!probe.found) {
+        return {
+          ok: false,
+          error: `the shared backend does not see a destination called "${dest.name}" - nothing was stored`,
+          hint: "Create it in the BTP cockpit (Connectivity > Destinations) with ProxyType OnPremise and the property CloudConnectorLocationId, then check again.",
+        };
+      }
+      const entry = {
+        kind: "pipo",
+        agentId: id,
+        agentSystemId: String(agentSystemId || "").trim(),
+        agentName: String(agentName || "").trim(),
+        destinationName: dest.name,
+        proxyType: String(probe.proxyType || ""),
+        locationId: String(probe.locationId || ""),
+        verifiedAt: new Date().toISOString(),
+      };
+      try {
+        await _writeEntry(binding, pipoCredentialName(id), entry, dest.name);
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
+      log("connections", "ok", `PI/PO connection stored (${entry.agentName || id} -> destination ${dest.name})`);
+      return {
+        ok: true, agentId: id, destinationName: dest.name,
+        proxyType: entry.proxyType, locationId: entry.locationId,
+        warning: probe.warning || null,
+      };
+    },
+
+    async "connections:deletePipoSystem"({ agentId } = {}) {
+      const binding = _binding();
+      if (!binding) return { ok: false, error: "the manager is not bound to a Credential Store instance" };
+      const id = String(agentId || "").trim();
+      if (!id) return { ok: false, error: "agentId is required" };
+      try {
+        await _deleteEntry(binding, pipoCredentialName(id));
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
+      log("connections", "line", `PI/PO connection removed (${id})`);
+      return { ok: true };
+    },
   };
 }
 
@@ -415,6 +550,9 @@ module.exports = {
   FIGAF_TOOL_CREDENTIAL,
   cleanUrl,
   systemCredentialName,
+  pipoCredentialName,
+  isPiPlatform,
+  cleanDestinationName,
   extractAgents,
   parseServiceKey,
   createConnectionsHandlers,

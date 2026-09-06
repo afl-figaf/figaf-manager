@@ -74,4 +74,55 @@ function normalizeApiUrl(url) {
   }
 }
 
-module.exports = { parseCfApi, parseCfTarget, normalizeApiUrl };
+// ── The manager's own space as the automatic CF target ──────────────────────
+// The L3 console installs, updates and removes applications in ITS OWN Cloud
+// Foundry space (SPEC section 1), and the hosted manager already knows that
+// space from VCAP_APPLICATION. So the passcode sign-in answers `cf login`'s
+// "Select an org / Select a space" prompts itself: the question has exactly
+// one correct answer, and a wrong pick would install the platform into the
+// wrong space (nothing downstream re-checks the target).
+//
+// resolveSelfPin returns the { org, space } to append to `cf login` as
+// `-o <org> -s <space>`, or null when the interactive picker must stay:
+//   - desktop mode, or a hosted runtime without VCAP — nothing to pin to;
+//   - an incomplete VCAP target;
+//   - a login to a CF endpoint that is NOT the manager's own. The Figaf tool
+//     may live on another landscape, where our org/space do not exist.
+function resolveSelfPin(self, apiUrl) {
+  if (!self || !self.apiUrl || !self.orgName || !self.spaceName) return null;
+  if (!apiUrl) return null;
+  if (normalizeApiUrl(apiUrl) !== normalizeApiUrl(self.apiUrl)) return null;
+  return { org: self.orgName, space: self.spaceName };
+}
+
+// A pinned login gives the operator no picker to correct a wrong target in,
+// so a targeting failure has to explain itself (the CLI only says "not
+// found"). Returns a plain-English message for the two failures the pin can
+// cause, else null — then the generic "login failed" path stands, so a wrong
+// or expired passcode is never reported as a missing role.
+const ORG_NOT_FOUND   = /organization\s+'?[^'\n]*'?\s+not found|no org(anization)?\s+with name/i;
+const SPACE_NOT_FOUND = /space\s+'?[^'\n]*'?\s+not found|no space\s+with name/i;
+
+function explainPinnedLoginFailure(output, pin) {
+  if (!pin) return null;
+  const text = String(output || "");
+  if (SPACE_NOT_FOUND.test(text)) {
+    return `Signed in, but the space ${pin.space} is not visible to this account. `
+      + `The manager itself runs in org ${pin.org}, space ${pin.space}, so that is the only install target. `
+      + `Ask a subaccount administrator to add you there as Space Developer, then sign in again.`;
+  }
+  if (ORG_NOT_FOUND.test(text)) {
+    return `Signed in, but the org ${pin.org} is not visible to this account. `
+      + `The manager itself runs in org ${pin.org}, space ${pin.space}, so that is the only install target. `
+      + `Ask a subaccount administrator to give you access there (Space Developer in ${pin.space} is enough), then sign in again.`;
+  }
+  return null;
+}
+
+module.exports = {
+  parseCfApi,
+  parseCfTarget,
+  normalizeApiUrl,
+  resolveSelfPin,
+  explainPinnedLoginFailure,
+};

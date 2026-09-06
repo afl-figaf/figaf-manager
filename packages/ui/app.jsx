@@ -45,6 +45,9 @@ function App() {
       cfOnly: false,
       passcodeRequested: false,
       passcode: "",
+      // Explanation of the last cf-login failure, when the server had one
+      // (for example: no role in the manager's own space).
+      cfError: "",
       user: "",
       landscape: "",
       apiUrl: "",

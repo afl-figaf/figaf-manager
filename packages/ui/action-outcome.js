@@ -59,7 +59,17 @@
     {
       id: "checksum",
       re: /checksum mismatch/i,
-      hint: "The release inside this manager build is damaged. Build the manager zip again and deploy it.",
+      hint: "A file of the release does not match its checksum: the store content is damaged or was changed after publishing. Nothing was deployed. Press Refresh releases and try again; if it repeats, report it to Figaf - the release must be published again as a new version.",
+    },
+    {
+      id: "store-unreachable",
+      re: /cannot read .*index\.json|No release source configured|download of .* failed/i,
+      hint: "The manager could not read the release store. Check that the space can reach the store URL (shown on the Release panel) over HTTPS, then press Refresh releases. Nothing was changed.",
+    },
+    {
+      id: "version-rule",
+      re: /not in the release store|rollback is not supported|Install uses the installed version|Install uses the latest release|nothing is installed yet|already at .* nothing newer/i,
+      hint: "One version per installation: Install adds an app at the installed version; Update installation moves everything to a newer release; older releases cannot be chosen. Pick a version the Release panel offers, or press Refresh releases.",
     },
     {
       id: "session",

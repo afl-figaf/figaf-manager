@@ -9,12 +9,16 @@
 //   assign-role      xsuaa:assignRoleCollection  optional; non-fatal
 //   services         l3:prepareSpaceServices     base services with the chosen plans;
 //                                                Credential Store awaited + bound, database
-//                                                started only; non-fatal
+//                                                started only; non-fatal. `groups`
+//                                                adds OPTIONAL service groups the
+//                                                person ticked (today: "pipo" =
+//                                                connectivity + destination for
+//                                                on-premise PI/PO, decision 0011).
 //   push-approuter   cf:pushManagerApprouter     skipped when already deployed
 //   map-route        cf:mapRoute                 approuter takes the public hostname
 //   restage          cf:restage                  bind manager to XSUAA, unmap, restage once
 //
-// Input:  { api, plans, autoAssign, assignTo, onPhase }
+// Input:  { api, plans, groups, autoAssign, assignTo, onPhase }
 // Output: { ok:true, restaging, alreadyBound, roleName, assignFailed, assignSkipped,
 //           assignedTo, servicesWarning, services }        - the manager is restaging
 //         { ok:false, phase, error }                        - stopped at `phase`
@@ -52,6 +56,7 @@
     var api = input.api;
     var onPhase = typeof input.onPhase === "function" ? input.onPhase : function () {};
     var plans = input.plans || {};
+    var groups = Array.isArray(input.groups) ? input.groups : [];
     var autoAssign = !!input.autoAssign;
     var assignTo = String(input.assignTo || "").trim();
     var mark = function (id, status, sub) { onPhase(id, status, sub); };
@@ -96,7 +101,7 @@
     mark("services", "running");
     try {
       services = api.l3 && api.l3.prepareSpaceServices
-        ? await api.l3.prepareSpaceServices({ plans: plans })
+        ? await api.l3.prepareSpaceServices({ plans: plans, groups: groups })
         : { ok: true, created: [], bound: [], pending: [], note: "not available in this build" };
     } catch (e) {
       services = { ok: false, error: (e && e.message) || "prepareSpaceServices failed" };

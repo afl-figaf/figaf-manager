@@ -9,6 +9,9 @@ const {
   CONNECTIONS_NAMESPACE,
   FIGAF_TOOL_CREDENTIAL,
   systemCredentialName,
+  pipoCredentialName,
+  isPiPlatform,
+  cleanDestinationName,
   parseServiceKey,
   createConnectionsHandlers,
 } = require("./connections");
@@ -262,4 +265,152 @@ test("deleteSystem removes the entry by encoded name", async () => {
   const r = await h["connections:deleteSystem"]({ agentId: "Demo Dev" });
   assert.equal(r.ok, true);
   assert.deepEqual(credstore.calls.deletes, ["Demo_20Dev/api"]);
+});
+
+// ─── PI/PO connections (decision 0011) ───────────────────────────────────────
+// A PI/PO entry holds NO secret: the PI user lives in the BTP destination, the
+// tunnel in the SAP Cloud Connector. The manager cannot read a destination
+// itself (it is not bound to the destination service), so verification is
+// delegated to the shared backend through ctx.probeDestination.
+
+test("pipoCredentialName / isPiPlatform / cleanDestinationName", () => {
+  assert.equal(pipoCredentialName("a1"), "a1/pipo");
+  assert.equal(pipoCredentialName("we ird/id"), "we_20ird_2Fid/pipo");
+  assert.throws(() => pipoCredentialName("  "), /agentId is required/);
+  assert.equal(isPiPlatform("PRO"), true);
+  assert.equal(isPiPlatform("pro"), true);
+  assert.equal(isPiPlatform("CPI"), false);
+  assert.equal(isPiPlatform(undefined), false);
+  assert.equal(cleanDestinationName(" PO_TPM_DEV ").name, "PO_TPM_DEV");
+  assert.ok(cleanDestinationName("").error);
+  assert.ok(cleanDestinationName("has space").error);
+  assert.ok(cleanDestinationName("semi;colon").error);
+});
+
+const PROBE_OK = async () => ({ ok: true, found: true, proxyType: "OnPremise", locationId: "pi-dev" });
+
+test("savePipoSystem stores the destination name under <agentId>/pipo, with no secret", async () => {
+  const credstore = fakeCredstore();
+  const h = createConnectionsHandlers({ credstore, fetchImpl: fakeFetch({}), probeDestination: PROBE_OK });
+  const r = await h["connections:savePipoSystem"]({
+    agentId: "a9", agentSystemId: "PO_DEV", agentName: "PO Dev", destinationName: " PO_TPM_DEV ",
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.destinationName, "PO_TPM_DEV");
+  assert.equal(r.locationId, "pi-dev");
+  assert.equal(credstore.calls.writes.length, 1);
+  const write = credstore.calls.writes[0];
+  assert.equal(write.name, "a9/pipo");
+  const entry = JSON.parse(write.value);
+  assert.equal(entry.kind, "pipo");
+  assert.equal(entry.agentId, "a9");
+  assert.equal(entry.destinationName, "PO_TPM_DEV");
+  assert.equal(entry.proxyType, "OnPremise");
+  assert.ok(entry.verifiedAt);
+  // The entry shape is a contract with the reader side: no credential fields.
+  assert.deepEqual(
+    Object.keys(entry).sort(),
+    ["agentId", "agentName", "agentSystemId", "destinationName", "kind", "locationId", "proxyType", "verifiedAt"]
+  );
+});
+
+test("savePipoSystem stores NOTHING when the backend cannot check", async () => {
+  const credstore = fakeCredstore();
+  const h = createConnectionsHandlers({
+    credstore, fetchImpl: fakeFetch({}),
+    probeDestination: async () => ({ ok: false, error: "no route on figaf-l3l4-backend", hint: "Install the platform first" }),
+  });
+  const r = await h["connections:savePipoSystem"]({ agentId: "a9", destinationName: "PO_TPM_DEV" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /nothing was stored/);
+  assert.match(r.error, /no route/);
+  assert.equal(r.hint, "Install the platform first");
+  assert.equal(credstore.calls.writes.length, 0);
+});
+
+test("savePipoSystem stores NOTHING when the destination does not exist", async () => {
+  const credstore = fakeCredstore();
+  const h = createConnectionsHandlers({
+    credstore, fetchImpl: fakeFetch({}),
+    probeDestination: async () => ({ ok: true, found: false }),
+  });
+  const r = await h["connections:savePipoSystem"]({ agentId: "a9", destinationName: "PO_TPM_TYPO" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /does not see a destination called "PO_TPM_TYPO"/);
+  assert.match(r.hint, /BTP cockpit/);
+  assert.equal(credstore.calls.writes.length, 0);
+});
+
+test("savePipoSystem passes a warning back but still stores (the destination exists)", async () => {
+  const credstore = fakeCredstore();
+  const h = createConnectionsHandlers({
+    credstore, fetchImpl: fakeFetch({}),
+    probeDestination: async () => ({ ok: true, found: true, proxyType: "Internet", locationId: "", warning: "ProxyType is \"Internet\"" }),
+  });
+  const r = await h["connections:savePipoSystem"]({ agentId: "a9", destinationName: "PO_TPM_DEV" });
+  assert.equal(r.ok, true);
+  assert.match(r.warning, /Internet/);
+  assert.equal(credstore.calls.writes.length, 1);
+});
+
+test("savePipoSystem rejects a bad destination name before calling the backend", async () => {
+  let probed = false;
+  const credstore = fakeCredstore();
+  const h = createConnectionsHandlers({
+    credstore, fetchImpl: fakeFetch({}),
+    probeDestination: async () => { probed = true; return { ok: true, found: true }; },
+  });
+  const r = await h["connections:savePipoSystem"]({ agentId: "a9", destinationName: "PO TPM DEV" });
+  assert.equal(r.ok, false);
+  assert.equal(probed, false);
+  assert.equal(credstore.calls.writes.length, 0);
+});
+
+test("savePipoSystem refuses when no backend probe is wired", async () => {
+  const credstore = fakeCredstore();
+  const h = createConnectionsHandlers({ credstore, fetchImpl: fakeFetch({}) });
+  const r = await h["connections:savePipoSystem"]({ agentId: "a9", destinationName: "PO_TPM_DEV" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /no backend probe/);
+  assert.equal(credstore.calls.writes.length, 0);
+});
+
+test("deletePipoSystem removes the /pipo entry only", async () => {
+  const credstore = fakeCredstore({ "a9/pipo": JSON.stringify({ kind: "pipo" }), "a9/api": JSON.stringify({ kind: "api" }) });
+  const h = createConnectionsHandlers({ credstore, fetchImpl: fakeFetch({}) });
+  const r = await h["connections:deletePipoSystem"]({ agentId: "a9" });
+  assert.equal(r.ok, true);
+  assert.deepEqual(credstore.calls.deletes, ["a9/pipo"]);
+});
+
+test("listAgents reads /pipo for a PRO agent and /api for the others", async () => {
+  const stored = {
+    [FIGAF_TOOL_CREDENTIAL]: FIGAF_ENTRY,
+    "a1/api": JSON.stringify({ kind: "api", baseUrl: "https://t1.example", verifiedAt: "2026-09-01T00:00:00Z" }),
+    "a2/pipo": JSON.stringify({ kind: "pipo", destinationName: "PO_TPM_DEV", locationId: "pi-dev", proxyType: "OnPremise", verifiedAt: "2026-09-04T00:00:00Z" }),
+  };
+  const fetchImpl = fakeFetch({
+    "/oauth/token": TOKEN_OK,
+    "/api/v1/agent/search": {
+      status: 200,
+      body: JSON.stringify([
+        { id: "a1", systemId: "DemoDev", name: "Demo Dev", platform: "CPI" },
+        { id: "a2", systemId: "PO_DEV", name: "PO Dev", platform: "PRO" },
+        { id: "a3", systemId: "PO_QA", name: "PO QA", platform: "PRO" },
+      ]),
+    },
+  });
+  const h = createConnectionsHandlers({ credstore: fakeCredstore(stored), fetchImpl });
+  const r = await h["connections:listAgents"]();
+  assert.equal(r.ok, true);
+  const [a1, a2, a3] = ["a1", "a2", "a3"].map((id) => r.agents.find((a) => a.id === id));
+  assert.equal(a1.kind, "api");
+  assert.equal(a1.connected, true);
+  assert.equal(a1.connection.baseUrl, "https://t1.example");
+  assert.equal(a2.kind, "pipo");
+  assert.equal(a2.connected, true);
+  assert.equal(a2.connection.destinationName, "PO_TPM_DEV");
+  assert.equal(a2.connection.locationId, "pi-dev");
+  assert.equal(a3.kind, "pipo");
+  assert.equal(a3.connected, false);
 });

@@ -41,7 +41,12 @@
     var platform = data.l3 && data.l3.ok ? data.l3.platform : null;
     var platformDone = !!(platform && platform.status === "running");
 
-    var svc = data.services && data.services.ok ? (data.services.services || []) : null;
+    // Optional instances (catalog v4: connectivity / destination for on-premise
+    // PI/PO) are left out of the step state on purpose: an installation without
+    // a PI system is complete, so a missing optional instance must never keep
+    // step 3 open or block step 4. The Base services panel still lists them.
+    var allSvc = data.services && data.services.ok ? (data.services.services || []) : null;
+    var svc = allSvc ? allSvc.filter(function (s) { return !s.optional; }) : null;
     var hasServices = !!(svc && svc.length > 0);
     var allReady = hasServices && svc.every(function (s) { return s.status === "ready"; });
     var notReady = hasServices ? svc.filter(function (s) { return s.status !== "ready"; }) : [];

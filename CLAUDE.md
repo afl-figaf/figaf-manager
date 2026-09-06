@@ -3,7 +3,7 @@
 > **Session start (added 2026-09-03 for the L3/L4 stream).** Before any task:
 > 1. Read `docs/PROJECT-CONTEXT.md` — who Figaf is, the L3/L4 platform, Danfoss as the first customer, the rules that apply here.
 > 2. Read `docs/l3-console/SPEC.md` — the current behavior of the L3 console. `OPEN-ITEMS.md` and `TROUBLESHOOTING.md` sit next to it.
-> 3. Then use the architecture map below. It describes the Figaf-tool wizard (Alex's product) and does not yet list the console files (`packages/ui/console.jsx`, `packages/core/l3-apps.js`, `connections.js`, `credstore-client.js`, `manager-xsuaa.js`, `e2e/`).
+> 3. Then use the conventions below. They were written for the Figaf-tool wizard (Alex's product). The L3 console lives in `packages/ui/console.jsx`, `packages/core/l3-apps.js`, `connections.js`, `credstore-client.js`, `manager-xsuaa.js` and `e2e/`.
 >
 > The governance rules of the L3/L4 platform live in the figaf-l3-l4 repo (`docs/GOVERNANCE.md`). They are Figaf-owned and read-only.
 
@@ -17,206 +17,12 @@ to **SAP BTP Cloud Foundry**:
 
 Both share their entire orchestration layer and React renderer; they only
 diverge at the host-environment seam (file dialogs, persistent storage, deploy
-template sourcing). Skim the graph first, drill into the file table second.
+template sourcing).
 
 ---
 
-## Top-level graph
+## Packaging
 
-```
-   ┌─── apps/figaf-local (Electron) ────┐    ┌─── apps/figaf-manager (Cloud) ─────┐
-   │ ┌──────────┐  IPC ┌──────────────┐ │    │ ┌──────────┐  fetch+ws ┌────────┐ │
-   │ │ Renderer │─────▶│ Main process │ │    │ │ Browser  │──────────▶│ Express│ │
-   │ │ (React)  │◀─────│ (Node,spawn) │ │    │ │ (React)  │◀──────────│ +ws    │ │
-   │ └──────────┘ evts └──────┬───────┘ │    │ └──────────┘   events  └───┬────┘ │
-   │                          │         │    │                            │      │
-   │   host.electron.js ──────┘         │    │       host.cloud.js ───────┘      │
-   └──────────────────┬─────────────────┘    └──────────────────┬────────────────┘
-                      │                                         │
-                      └──────────► packages/core/orchestrator.js ◄
-                                   (shared CLI + login + push logic)
-                                              │
-                       ┌──────────────────────┼──────────────────────────┐
-                       ▼                      ▼                          ▼
-                 ┌────────────┐         ┌────────────┐            ┌──────────────┐
-                 │  btp CLI   │         │   cf CLI   │            │   web APIs   │
-                 │  (SAP)     │         │ (CF Found.)│            │ (DockerHub,  │
-                 └─────┬──────┘         └─────┬──────┘            │  GH releases)│
-                       │ SSO                  │ SSO+passcode      └──────────────┘
-                       ▼                      ▼
-                ┌──────────────────────────────────────────────┐
-                │              SAP BTP Cloud Foundry           │
-                │   approuter (Node) ─▶ figaf-app (Docker)     │
-                │        │                    │                │
-                │        ▼                    ▼                │
-                │   figaf-xsuaa          figaf-db (PG 16)      │
-                └──────────────────────────────────────────────┘
-```
-
-Both renderers consume the **same** `window.figaf` IPC surface (`prereq.*`,
-`btp.*`, `cf.*`, `config.*`, `shell.*`, `on(channel, handler)`). figaf-local
-implements that surface with `ipcRenderer.invoke`; figaf-manager implements it
-with `fetch("/rpc/:channel")` + `WebSocket(/stream)`. The orchestrator handlers
-are byte-identical between the two.
-
----
-
-## Workspace layout
-
-```
-figaf-installer/                          ← workspace root (npm workspaces)
-├── package.json                          (workspaces: ["apps/*","packages/*"])
-├── apps/
-│   ├── figaf-local/                      Electron desktop installer
-│   │   ├── package.json                  (electron, electron-builder; renderer shell + logo
-│   │   │                                  resolved via require.resolve("@figaf/ui/..."))
-│   │   └── main-process/
-│   │       ├── main.js                   BrowserWindow, frameless chrome
-│   │       ├── preload.js                window.figaf bridge → ipcRenderer
-│   │       ├── ipc-bridge.js             wires orchestrator handlers to ipcMain
-│   │       └── host.electron.js          HostAdapter (dialog, userData, clipboard)
-│   └── figaf-manager/                    Cloud-hosted installer
-│       ├── package.json                  (express, ws)
-│       ├── cloud/
-│       │   ├── server.js                 Express + WebSocketServer
-│       │   ├── client.js                 browser shim → window.figaf via fetch+ws
-│       │   └── index.html                cloud shell with FIGAF_MODE_INJECT
-│       ├── host.cloud.js                 HostAdapter (session-scoped, bundled bin)
-│       ├── bin/                          Linux btp + cf binaries (gitignored, populated by build-zip)
-│       ├── scripts/build-zip.js          assembles dist/figaf-manager-app-<v>.zip
-│       └── manifest.yml                  CF deployment manifest for the wizard itself
-└── packages/
-    ├── core/                             host-agnostic orchestrator
-    │   ├── package.json                  name: @figaf/core
-    │   ├── index.js                      re-exports orchestrator
-    │   └── orchestrator.js               every IPC handler + the HostAdapter @typedef
-    ├── ui/                               shared React renderer (no bundler)
-    │   ├── package.json                  name: @figaf/ui
-    │   ├── app.jsx                       <App/> state machine
-    │   ├── components.jsx                shared primitives (WinFrame, StepperRail, …)
-    │   ├── screens/                      per-step wizard screens (one file per group)
-    │   │   ├── screen-setup.jsx          BrowserAuthBanner (private) + CliInstaller + ScreenWelcome
-    │   │   ├── screen-login.jsx          ScreenLogin
-    │   │   ├── screen-choice.jsx         ScreenChoice
-    │   │   ├── screen-config.jsx         ScreenConfig
-    │   │   ├── screen-ops.jsx            ScreenProgress + ScreenDeploy
-    │   │   └── screen-done.jsx           ScreenDone
-    │   ├── styles.css                    design tokens + components
-    │   ├── electron-app.css              frameless titlebar (loaded only by figaf-local)
-    │   ├── mode.js                       window.figafModeFlags (isHosted + features)
-    │   ├── index.html                    Electron renderer shell (cloud has its own)
-    │   └── figaf-logo.png                shared brand mark (also used as Win exe icon + BrowserWindow icon)
-    └── deploy-templates/                 BTP CF deployment templates
-        ├── package.json                  name: @figaf/deploy-templates
-        ├── manifest.yml                  CF apps + service bindings (figaf-app, approuter)
-        ├── vars.yml                      template (rewritten at runtime by config:writeVars)
-        ├── db.json                       PG 16 service params
-        ├── xs-security.json              XSUAA roles
-        └── approuter/                    @sap/approuter package + xs-app.json
-```
-
----
-
-## Node A — Renderer (`packages/ui`)
-
-Single React tree. Each app reaches the renderer through its own `index.html` shell because the
-loading strategy differs (file:// vs http://):
-
-- `packages/ui/index.html` — sibling-relative paths; loaded by figaf-local's
-  main.js via `mainWindow.loadFile(require.resolve("@figaf/ui/package.json")
-  → dirname → /index.html)`. Works in dev (workspace symlink) and packaged
-  (electron-builder bundles `node_modules/@figaf/ui` into the asar).
-- `apps/figaf-manager/cloud/index.html` — absolute paths under `/installer/*`
-  (express.static mounts `@figaf/ui` at that prefix).
-
-`window.figafModeFlags` (set by `packages/ui/mode.js`) drives all
-mode-conditional behavior:
-
-```js
-window.figafModeFlags = {
-  isHosted: <bool>,
-  features: { cliInstall, diskCheck, windowChrome, selfDelete },
-};
-```
-
-Add new conditionals to `mode.js` rather than scattering `isHosted` ternaries
-across screens.
-
-**Wizard graph** (steps derived from `ctx.choice`):
-
-```
-Welcome ─▶ Login ─▶ Choice ─┬─▶ Config ─▶ Progress ─▶ Deploy ─▶ Done
-                            └─▶ Done                            (connect-to-IS — TBD)
-```
-
-`TerminalDrawer` subscribes to `cli:line` events streamed by the orchestrator.
-
----
-
-## Node B — Orchestrator (`packages/core/orchestrator.js`)
-
-`createOrchestrator({ host, send })` returns `{ handlers, dispose }` —
-~38 channel handlers covering: prereq probes, btp/cf login state machines
-(GA prompt detection, passcode pipe), service create/poll, `cf push`,
-vars.yml mutation, shell helpers. Streamed events:
-
-| Channel             | Payload                                       | Emitted by                |
-|---------------------|-----------------------------------------------|---------------------------|
-| `cli:line`          | `{source, type: cmd\|line\|err\|ok\|warn, text}`        | every spawned process     |
-| `cli:install`       | `{cli, phase, percent?, error?}`              | install/locate flows      |
-| `cf:loggedIn`       | `{}`                                          | cf login exits 0          |
-| `cf:loginFailed`    | `{code}`                                      | cf login exits non-zero   |
-| `cf:serviceStatus`  | `{name, status}`                              | each pollService tick     |
-
-The HostAdapter contract (`@typedef HostAdapter` at the top of orchestrator.js)
-is the only seam between the two apps — see file for full JSDoc.
-
----
-
-## Node C — Host adapters
-
-Both adapters expose the exact same shape; they differ only in implementation.
-
-| HostAdapter method      | figaf-local (Electron)                  | figaf-manager (Cloud)            |
-|-------------------------|-----------------------------------------|----------------------------------|
-| `getUserDataDir`        | `app.getPath("userData")`               | `$HOME/sessions/<sessionId>`     |
-| `resolveBinary`         | userData/cliPaths.json or PATH fallback | `apps/figaf-manager/bin/<name>` (or PATH in dev) |
-| `storeCliPath`          | persists to cliPaths.json               | not implemented                  |
-| `pickFile`              | `dialog.showOpenDialog`                 | no-op (returns null)             |
-| `openExternal`          | `shell.openExternal`                    | no-op (browser uses window.open) |
-| `readClipboard`         | `clipboard.readText`                    | no-op (browser uses navigator.clipboard) |
-| `resolveDeployTemplate` | `{ kind: "bundle", src: <bundled dir> }`| `{ kind: "github", src: <zip URL> }` |
-| `isHosted`              | `false`                                 | `true`                           |
-
----
-
-## Node D — External dependencies
-
-| External                          | Used for                                              | Reached via                    |
-|-----------------------------------|-------------------------------------------------------|--------------------------------|
-| `tools.hana.ondemand.com`         | btp CLI tar.gz download (Win) / EULA cookie           | `httpsDownload`                |
-| `api.github.com/repos/cloudfoundry/cli/releases/latest` | cf CLI windows zip                | `httpsJson`                    |
-| `packages.cloudfoundry.org/stable`| cf CLI Linux tar.gz (build-zip.js)                    | `httpsGet`                     |
-| `hub.docker.com/v2/repositories/figaf/app/tags`        | latest `figaf/app:*-btp` tag       | `httpsJson`                    |
-| `github.com/figaf/Figaf-BTP-Deployment` | deploy template zip (cloud only at runtime)     | `httpsDownload`                |
-| `cli.btp.cloud.sap`               | btp login endpoint                                    | `btp login --url`              |
-| `api.cf.<landscape>.hana.ondemand.com` | cf API endpoint (landscape-derived)              | `cf login -a`                  |
-
----
-
-## Node E — Packaging
-
-| App | Build command | Output |
-|---|---|---|
-| figaf-local | `npm --workspace apps/figaf-local run build:win` | `apps/figaf-local/dist/Figaf-Installer-<v>-x64.exe` |
-| figaf-manager | `npm --workspace apps/figaf-manager run build-zip` | `apps/figaf-manager/dist/figaf-manager-app-<v>.zip` |
-
-- electron-builder `extraResources` copies `packages/deploy-templates/` next to
-  the asar; `host.electron.js` resolves it from `process.resourcesPath`.
-- `build-zip.js` stages a self-contained tree under
-  `apps/figaf-manager/.staging/` (with `@figaf/core` and `@figaf/ui` as plain
-  directories under `node_modules/`), then `npm install --omit=dev` for the
-  public deps, then zips.
 - Pinned versions (2026-09-04): `btpCliVersion` and `cfCliVersion` in
   `apps/figaf-manager/package.json` are the only source of the bundled CLI
   versions; `build-zip.js` downloads exactly them, re-downloads when a pin
@@ -229,43 +35,10 @@ Both adapters expose the exact same shape; they differ only in implementation.
 
 ---
 
-## File map (single source of truth)
+## Docs
 
-| Path | Role |
-|------|------|
-| [apps/figaf-local/main-process/main.js](apps/figaf-local/main-process/main.js) | Electron entry, BrowserWindow, frameless chrome |
-| [apps/figaf-local/main-process/preload.js](apps/figaf-local/main-process/preload.js) | `window.figaf` IPC surface |
-| [apps/figaf-local/main-process/ipc-bridge.js](apps/figaf-local/main-process/ipc-bridge.js) | wires orchestrator handlers to ipcMain |
-| [apps/figaf-local/main-process/host.electron.js](apps/figaf-local/main-process/host.electron.js) | Electron HostAdapter |
-| [packages/ui/index.html](packages/ui/index.html) | Electron renderer shell (resolved by main.js via require.resolve) |
-| [apps/figaf-manager/cloud/server.js](apps/figaf-manager/cloud/server.js) | Express RPC + WebSocketServer |
-| [apps/figaf-manager/cloud/client.js](apps/figaf-manager/cloud/client.js) | browser `window.figaf` shim (fetch + ws) |
-| [apps/figaf-manager/cloud/index.html](apps/figaf-manager/cloud/index.html) | Cloud renderer shell with mode injection |
-| [apps/figaf-manager/host.cloud.js](apps/figaf-manager/host.cloud.js) | Cloud HostAdapter |
-| [apps/figaf-manager/manifest.yml](apps/figaf-manager/manifest.yml) | CF manifest for the wizard itself |
-| [apps/figaf-manager/scripts/build-zip.js](apps/figaf-manager/scripts/build-zip.js) | Assemble the cockpit-deployable zip |
-| [packages/core/orchestrator.js](packages/core/orchestrator.js) | All ~38 IPC handlers + HostAdapter typedef |
-| [packages/core/index.js](packages/core/index.js) | re-export of orchestrator |
-| [packages/ui/app.jsx](packages/ui/app.jsx) | `<App/>`, wizard state machine |
-| [packages/ui/screens/screen-setup.jsx](packages/ui/screens/screen-setup.jsx) | ScreenWelcome + CliInstaller + BrowserAuthBanner (private) |
-| [packages/ui/screens/screen-login.jsx](packages/ui/screens/screen-login.jsx) | ScreenLogin — BTP SSO + CF passcode flow |
-| [packages/ui/screens/screen-choice.jsx](packages/ui/screens/screen-choice.jsx) | ScreenChoice — deploy vs connect branch |
-| [packages/ui/screens/screen-config.jsx](packages/ui/screens/screen-config.jsx) | ScreenConfig — vars.yml form |
-| [packages/ui/screens/screen-ops.jsx](packages/ui/screens/screen-ops.jsx) | ScreenProgress + ScreenDeploy — async CF operations |
-| [packages/ui/screens/screen-done.jsx](packages/ui/screens/screen-done.jsx) | ScreenDone — completion + self-delete (hosted only) |
-| [packages/ui/components.jsx](packages/ui/components.jsx) | Shared primitives (icons, frame, stepper, terminal) |
-| [packages/ui/mode.js](packages/ui/mode.js) | window.figafModeFlags (isHosted + feature flags) |
-| [packages/ui/styles.css](packages/ui/styles.css) | Design tokens & component styles |
-| [packages/ui/electron-app.css](packages/ui/electron-app.css) | Frameless window chrome (figaf-local only) |
-| [packages/deploy-templates/manifest.yml](packages/deploy-templates/manifest.yml) | CF manifest (figaf-app + approuter) |
-| [packages/deploy-templates/vars.yml](packages/deploy-templates/vars.yml) | Variable template (rewritten at runtime) |
-| [packages/deploy-templates/xs-security.json](packages/deploy-templates/xs-security.json) | XSUAA roles |
-| [packages/deploy-templates/db.json](packages/deploy-templates/db.json) | PG service parameters |
-| [packages/deploy-templates/approuter/xs-app.json](packages/deploy-templates/approuter/xs-app.json) | Approuter routing |
-| [package.json](package.json) | workspace root |
-| [docs/PROJECT-CONTEXT.md](docs/PROJECT-CONTEXT.md) | Project context: Figaf, the L3/L4 platform, Danfoss, rules, where things live |
-| [docs/l3-console/SPEC.md](docs/l3-console/SPEC.md) | L3 console behavior (current state); `OPEN-ITEMS.md`, `TROUBLESHOOTING.md`, `FIGAF-TOOL-MANAGEMENT-GAPS.md` next to it |
-| [docs/CLEANUP-2026-09-03.md](docs/CLEANUP-2026-09-03.md) | What was deleted from this repo on 2026-09-03 and why |
+- `docs/l3-console/FIGAF-TOOL-MANAGEMENT-GAPS.md` — Figaf-tool management gaps (next to `SPEC.md`).
+- `docs/CLEANUP-2026-09-03.md` — what was deleted from this repo on 2026-09-03 and why.
 
 ---
 

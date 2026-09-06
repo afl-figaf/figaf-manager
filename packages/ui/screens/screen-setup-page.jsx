@@ -19,7 +19,25 @@ const setupXsuaaMode = () => typeof window !== "undefined" && window.figafXsuaaM
 const PLAN_NOTES = {
   "postgresql-db": { free: "for trials and demos, small limits", standard: "paid plan, for real use" },
   credstore:       { free: "one instance per subaccount, small limits", standard: "paid plan, for real use" },
+  connectivity:    { lite: "free" },
+  destination:     { lite: "free" },
 };
+
+// Optional service groups (catalog v4, decision 0011). A group is a set of
+// instances the platform needs only for a certain kind of system, so the
+// person turns it on; nothing optional is created unless they do.
+const SERVICE_GROUPS = {
+  pipo: {
+    title: "Also create the services for on-premise PI/PO systems",
+    text: "SAP PI and PO systems are reached through the SAP Cloud Connector. That needs two free service instances "
+        + "(connectivity and destination). They are SHARED with the Figaf tool: if it already created them in this "
+        + "space, they are reused, never replaced. Leave this off if you have no PI or PO system - you can add them "
+        + "later in Base services, which then restarts the shared backend once.",
+  },
+};
+function groupInfo(key) {
+  return SERVICE_GROUPS[key] || { title: `Also create the optional services (${key})`, text: "" };
+}
 function planNote(offering, plan) {
   const o = PLAN_NOTES[offering];
   return (o && o[plan]) || "";
@@ -27,7 +45,7 @@ function planNote(offering, plan) {
 
 // ── Step 1, part 1: which plans. One dropdown per MISSING instance with more
 // than one plan; existing instances are shown as they are.
-function ServicePlansPanel({ services, plans, setPlans, disabled }) {
+function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, disabled }) {
   if (services === null) {
     return (
       <div className="setup-panel" data-panel="service-plans">
@@ -37,7 +55,19 @@ function ServicePlansPanel({ services, plans, setPlans, disabled }) {
     );
   }
   if (!services || services.length === 0) return null;
-  const choosable = services.filter((s) => s.status === "missing" && (s.plans || []).length > 1);
+  // Optional instances are not part of the plan list: they are decided by the
+  // group checkboxes below, and their plans are free with no choice.
+  const required = services.filter((s) => !s.optional);
+  const optionalGroups = [];
+  for (const s of services) {
+    if (s.optional && s.group && !optionalGroups.includes(s.group)) optionalGroups.push(s.group);
+  }
+  const choosable = required.filter((s) => s.status === "missing" && (s.plans || []).length > 1);
+  const toggleGroup = (key, on) => setGroups((prev) => {
+    const next = (prev || []).filter((g) => g !== key);
+    if (on) next.push(key);
+    return next;
+  });
   return (
     <div className="setup-panel" data-panel="service-plans">
       <div className="setup-panel-title">Service plans</div>
@@ -46,7 +76,7 @@ function ServicePlansPanel({ services, plans, setPlans, disabled }) {
           ? "Pick the plan for each instance that does not exist yet. Plans that cost money are your decision; the manager never picks one for you."
           : "They all exist already; this step only binds them and adds the current roles."}
       </p>
-      {services.map((s) => {
+      {required.map((s) => {
         const exists = s.status !== "missing";
         const plan = plans[s.name] || s.plan;
         const canChoose = !exists && (s.plans || []).length > 1;
@@ -71,6 +101,34 @@ function ServicePlansPanel({ services, plans, setPlans, disabled }) {
                 <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{planNote(s.offering, plan)}</span>
               </>
             )}
+          </div>
+        );
+      })}
+      {optionalGroups.map((key) => {
+        const info = groupInfo(key);
+        const members = services.filter((s) => s.optional && s.group === key);
+        const on = (groups || []).includes(key);
+        const present = members.filter((s) => s.status !== "missing");
+        return (
+          <div key={key} className="setup-plan-row" data-service-group={key} style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: disabled ? "default" : "pointer" }}>
+              <input
+                type="checkbox"
+                checked={on}
+                disabled={disabled}
+                data-group-checkbox={key}
+                onChange={(e) => toggleGroup(key, e.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <span style={{ fontWeight: 600 }}>{info.title}</span>
+                <span style={{ display: "block", fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{info.text}</span>
+                <span style={{ display: "block", fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
+                  {members.map((s) => `${s.name} (${s.offering}, plan ${s.plan})`).join(" - ")}
+                  {present.length > 0 && ` - already in this space: ${present.map((s) => s.name).join(", ")}`}
+                </span>
+              </span>
+            </label>
           </div>
         );
       })}
@@ -151,6 +209,9 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged 
   const api = fgSetup();
   const signedIn = ctx.login.cfStatus === "done";
   const [plans, setPlans] = React.useState({});
+  // Optional service groups the person ticked (catalog v4, decision 0011).
+  // Empty by default: nothing optional is created unless it is asked for.
+  const [groups, setGroups] = React.useState([]);
   const [precheck, setPrecheck] = React.useState(null);
   const [autoAssign, setAutoAssign] = React.useState(false);
   const [assignTo, setAssignTo] = React.useState("");
@@ -238,7 +299,7 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged 
       if (s.status === "missing" && (s.plans || []).length > 1) chosen[s.name] = plans[s.name] || s.plan;
     }
     try {
-      const r = await runner({ api, plans: chosen, autoAssign, assignTo, onPhase: markPhase });
+      const r = await runner({ api, plans: chosen, groups, autoAssign, assignTo, onPhase: markPhase });
       if (!r.ok) { setError(r.error); return; }
       setOutcome({ ...r, managerMode: r.alreadyBound ? "xsuaa" : null });
       setCtx((c) => ({ ...c, xsuaaUpgradeInitiated: true }));
@@ -315,7 +376,7 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged 
     <div className="setup-step-body" data-body="prepare">
       {!started && (
         <>
-          <ServicePlansPanel services={services} plans={plans} setPlans={setPlans} disabled={started} />
+          <ServicePlansPanel services={services} plans={plans} setPlans={setPlans} groups={groups} setGroups={setGroups} disabled={started} />
           <RoleAssignPanel plan={rolePlan} autoAssign={autoAssign} setAutoAssign={setAutoAssign} assignTo={assignTo}
             setAssignTo={setAssignTo} emailOk={emailOk} roleName={roleName} onAddBtp={addBtpLoginFirst} />
         </>
@@ -543,8 +604,11 @@ function BaseServicesStep({ ctx, services, onRefresh, onOpenTerminal }) {
         services={services}
         busy={busy}
         onRefresh={onRefresh}
-        onProvision={(plans) => serviceAction("provision", () => api.l3.provisionServices({ plans }))}
+        onProvision={(plans, only) => serviceAction("provision", () => api.l3.provisionServices(only && only.length ? { plans, only } : { plans }))}
         onBind={(name) => serviceAction("bind", () => api.l3.bindManagerService({ name }))}
+        onBindPlatform={api.l3.bindPlatformService
+          ? (name) => serviceAction("bind-platform", () => api.l3.bindPlatformService({ name }))
+          : null}
         onRestart={() => serviceAction("restart", () => api.l3.restartSelf())}
       />
     </div>

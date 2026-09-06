@@ -90,19 +90,25 @@ one text, one owner. The rules that touch the manager:
 | L3 console behavior (spec), open items, failure procedure | this repo: `docs/l3-console/` |
 | Governance, project knowledge, decisions | figaf-l3-l4: `docs/GOVERNANCE.md`, `docs/PROJECT-KNOWLEDGE.md`, `decisions/` |
 | Solution documentation of the platform (architecture, status, plan) | figaf-l3-l4: `docs/SOLUTION.md` |
-| Release build (catalog + app zips + `xs-security.json`) | figaf-l3-l4: `release/build-artifacts.ps1` writes into `apps/figaf-manager/l3-artifacts/` here |
+| Release build and publishing (catalog + app zips + `xs-security.json`) | figaf-l3-l4: `release/build.js` writes into `apps/figaf-manager/l3-artifacts/` here (the local source for tests); `release/publish.js` publishes to the release store; the procedure is `release/README.md` there |
+| The release store the manager reads | `FIGAF_L3_RELEASE_URL` in `apps/figaf-manager/manifest.yml`; the reader is `packages/core/release-store.js` (figaf-l3-l4 decision 0010) |
 | Virgin install procedure (D1) and run records | figaf-l3-l4: `docs/d1/` |
 | App specs and the first app's source (playground) | figaf-l3-l4: `specs/`, `spikes/archiving-setup-playground/` |
 
-The contract between the two repositories is the **release catalog** (v3),
-described in `docs/l3-console/SPEC.md` section 2. figaf-l3-l4 produces it,
-the manager consumes it.
+The contract between the two repositories is the **release catalog** (v3)
+and the **store layout** (`index.json`, `<version>/…`), described in
+`docs/l3-console/SPEC.md` section 2. figaf-l3-l4 produces and publishes
+them, the manager consumes them.
 
 ## 7. Facts a session needs
 
 - Dev space: org `Figaf ApS_figafpartner-1`, space `figaf-l3-l4`, landscape eu10-004. Never target Emil's `figaf-dev` space.
 - Dev machine: cf CLI 8.7.11 (winget package `CloudFoundry.CLI.v8`), MultiApps plugin 3.11.1, mbt 1.2.47. The manager bundles btp 2.106.1 and cf 8.19.0 (Linux builds; pinned in `apps/figaf-manager/package.json`, recorded in `bin/VERSIONS.json`).
-- Manager version 26.5.0; release 0.4.0 (B2B Archiving Setup + shared backend).
+- Manager version 26.5.0; release 0.4.1 (B2B Archiving Setup + shared backend)
+  is in the release store (Cloudflare R2, public read URL) since 2026-09-04.
+  The manager reads releases from there; its zip bundles no release.
+  One version per installation: Install adds an app at the installed
+  version, Update installation moves everything to a newer release.
 - Virgin runs #1 to #7 passed in the dev space (record: figaf-l3-l4 `docs/d1/RUNBOOK-VIRGIN.md`). Run #7 (2026-09-03) proved the install order of decision 0009: one token, one passcode, one restart, one XSUAA instance.
 - The branch `poc/l3-app-manager` is pushed to GitHub but not merged into master. Merging is coordinated with Alex.
 - The distance to production and the plan: figaf-l3-l4 `docs/SOLUTION.md` section 1.

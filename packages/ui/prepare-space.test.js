@@ -76,7 +76,7 @@ test("happy path with assignment: the six phases run in order, the chosen plans 
     "xsuaa:upgradeStatus", "cf:createXsuaa", "xsuaa:assignRoleCollection", "l3:prepareSpaceServices",
     "cf:pushManagerApprouter", "cf:mapRoute", "cf:restage",
   ]);
-  assert.deepEqual(calls.find((c) => c.name === "l3:prepareSpaceServices").args[0], { plans: { "figaf-l3l4-db": "standard", "figaf-l3l4-credstore": "free" } });
+  assert.deepEqual(calls.find((c) => c.name === "l3:prepareSpaceServices").args[0], { plans: { "figaf-l3l4-db": "standard", "figaf-l3l4-credstore": "free" }, groups: [] });
   assert.deepEqual(calls.find((c) => c.name === "xsuaa:assignRoleCollection").args, ["FigafL3L4-Manager-Admin", "me@example.com"]);
   assert.deepEqual(calls.find((c) => c.name === "cf:mapRoute").args[0], { app: "figaf-manager-approuter", domain: "cfapps.eu10-004.hana.ondemand.com", hostname: "figaf-manager-x" });
   assert.deepEqual(calls.find((c) => c.name === "cf:restage").args[0], { app: "figaf-manager", bindXsuaa: true, skipIfBound: true, unmapRoute: { domain: "cfapps.eu10-004.hana.ondemand.com", hostname: "figaf-manager-x" } });
@@ -152,4 +152,18 @@ test("already bound manager: the result says so (no pointless wait for a mode fl
   const r = await w.figafRunPrepareSpace({ api, plans: {}, autoAssign: false, onPhase: () => {} });
   assert.equal(r.ok, true);
   assert.equal(r.alreadyBound, true);
+});
+
+// Optional service groups (catalog v4, decision 0011): the person ticks
+// "on-premise PI/PO" in step 1 and the group travels to the handler. Without
+// the tick nothing optional is created - the `groups: []` assertion above.
+test("prepare-space: the chosen optional service groups reach l3:prepareSpaceServices", async () => {
+  const w = load();
+  const { api, calls } = fakeApi();
+  const r = await w.figafRunPrepareSpace({
+    api, plans: {}, groups: ["pipo"], autoAssign: false, assignTo: "", onPhase: () => {},
+  });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const call = calls.find((c) => c.name === "l3:prepareSpaceServices");
+  assert.deepEqual(call.args[0].groups, ["pipo"]);
 });

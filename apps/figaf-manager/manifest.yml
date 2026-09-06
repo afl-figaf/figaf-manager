@@ -12,6 +12,12 @@ applications:
     env:
       NODE_ENV: production
       FIGAF_LOG_LEVEL: cli
+      # The L3 platform release store (figaf-l3-l4 decision 0010): the manager
+      # lists, downloads and verifies releases from here. Public read URL of the
+      # Cloudflare R2 bucket (figaf-l3-l4 release/publish.js writes it). A
+      # custom domain or a mirror is a change of this value only. For a local
+      # release directory (development, e2e) set FIGAF_L3_ARTIFACTS_DIR instead.
+      FIGAF_L3_RELEASE_URL: https://pub-086a7914662e477595f40f58270518b9.r2.dev/l3
       # FIGAF_LOG_LEVEL controls the verbosity of logs emitted by the wizard.
       #│ off   │ nothing (no-op fast path)                                     │
       #├───────┼───────────────────────────────────────────────────────────────┤

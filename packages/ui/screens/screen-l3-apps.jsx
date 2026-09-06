@@ -138,6 +138,106 @@ function L3ConfigForm({ app, busy, figafSystems, onApply, onCancel }) {
   );
 }
 
+// ─── Release panel (decision 0010) ──────────────────────────────────────────
+// Where releases come from, what is installed, what the store offers, and the
+// ONE action that changes the installation's version: Update installation.
+// Install of an app never changes the version (it uses the installed one);
+// the dropdown lists only versions Update may choose (installed or higher).
+function L3ReleasePanel({ releases, busy, onRefresh, onUpdate }) {
+  const [picked, setPicked] = React.useState("");
+  const [confirm, setConfirm] = React.useState(false);
+  const ok = !!(releases && releases.ok);
+  const installed = ok ? releases.installed : null;
+  // Only versions ABOVE the installed one are an update. The installed version
+  // itself is also allowed by the server (equal = re-deploy everything), but
+  // that is a repair, shown as a plain secondary action, never as "Update".
+  const newer = (ok ? releases.versions : []).filter((v) => v.selectable && !v.installed);
+  const target = newer.some((v) => v.version === picked) ? picked : (newer.length ? (releases.updateAvailable ? releases.latest : newer[0].version) : "");
+  React.useEffect(() => { setConfirm(false); }, [target, releases]);
+  const fmtWhen = (iso) => { try { return iso ? new Date(iso).toLocaleDateString() : ""; } catch { return ""; } };
+  return (
+    <div data-release-panel="" style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ fontWeight: 700 }}>Release</div>
+        {releases && releases.ok && releases.updateAvailable && <span className="pill blue">update available: {releases.latest}</span>}
+        {releases && releases.ok && !releases.updateAvailable && releases.installed && <span className="pill green">up to date</span>}
+        <div className="spacer" style={{ flex: 1 }} />
+        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+          installed: <span className="kbd" data-release-installed="">{(releases && releases.ok && releases.installed) || "—"}</span>
+          {" · "}latest: <span className="kbd" data-release-latest="">{(releases && releases.ok && releases.latest) || "?"}</span>
+        </div>
+      </div>
+      <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>
+        {!releases && "Reading the release store…"}
+        {releases && !releases.ok && <><strong>The release store cannot be read.</strong> {releases.error}</>}
+        {releases && releases.ok && (
+          <>
+            Source: <span className="kbd" data-release-source="">{releases.source ? releases.source.location : "?"}</span>
+            {releases.source && releases.source.kind === "local" ? " (local directory, development)" : ""}.
+            {" "}Versions in the store: {releases.versions.map((v) => (
+              <span key={v.version} style={{ marginRight: 10 }} title={v.reason || (v.publishedAt ? `published ${fmtWhen(v.publishedAt)}` : "")}>
+                <span className="kbd">{v.version}</span>{v.installed ? " (installed)" : ""}{v.latest ? " (latest)" : ""}
+              </span>
+            ))}
+          </>
+        )}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>
+        Install adds an app at the installed version. <strong>Update installation</strong> moves the shared backend and
+        every installed app to the chosen release, backend first. Older versions cannot be chosen (rollback is not supported).
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+        {ok && installed && newer.length > 0 && (
+          <>
+            <select className="input" data-release-target="" style={{ width: "auto" }} value={target} disabled={busy} onChange={(e) => setPicked(e.target.value)}>
+              {newer.map((v) => (
+                <option key={v.version} value={v.version}>{v.version}{v.latest ? " (latest)" : ""}</option>
+              ))}
+            </select>
+            {!confirm && (
+              <button className="btn btn-primary" disabled={busy || !target} onClick={() => setConfirm(true)}>
+                Update installation to {target}
+              </button>
+            )}
+            {confirm && (
+              <>
+                <button className="btn btn-primary" disabled={busy} onClick={() => { setConfirm(false); onUpdate(target); }}>
+                  Confirm: update to {target}
+                </button>
+                <button className="btn" disabled={busy} onClick={() => setConfirm(false)}>Cancel</button>
+              </>
+            )}
+          </>
+        )}
+        {ok && installed && newer.length === 0 && (
+          <>
+            <span data-release-uptodate="" style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              Up to date. Nothing newer than {installed} in the store.
+            </span>
+            {!confirm && (
+              <button className="btn" disabled={busy} onClick={() => setConfirm(true)} title="Repair: push the shared backend and every installed app again from the installed release">
+                Re-deploy everything at {installed}
+              </button>
+            )}
+            {confirm && (
+              <>
+                <button className="btn" disabled={busy} onClick={() => { setConfirm(false); onUpdate(installed); }}>
+                  Confirm: re-deploy everything at {installed}
+                </button>
+                <button className="btn" disabled={busy} onClick={() => setConfirm(false)}>Cancel</button>
+              </>
+            )}
+          </>
+        )}
+        {ok && !installed && (
+          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Nothing is installed yet. Install uses the latest release, {releases.latest}.</span>
+        )}
+        <button className="btn" disabled={busy} onClick={onRefresh}>Refresh releases</button>
+      </div>
+    </div>
+  );
+}
+
 function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
   const [showConfig, setShowConfig] = React.useState(false);
   const [confirmRemove, setConfirmRemove] = React.useState(false);
@@ -145,8 +245,10 @@ function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
 
   const st = status ? status.status : null;
   const installed = st && st !== "not-installed";
-  const updateAvailable =
-    installed && status.installedVersion && status.installedVersion !== status.catalogVersion;
+  // The app is not at the installation's version: a half-finished update, or
+  // a frontend installed before a backend-only update. Re-deploy fixes it.
+  const behind =
+    installed && status.installedVersion && status.catalogVersion && status.installedVersion !== status.catalogVersion;
   // Every action is off while this app (or any other) is being deployed, and
   // also while Cloud Foundry is staging a build we did not start ourselves.
   const locked = busy || st === "installing";
@@ -166,8 +268,8 @@ function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
         <div className="spacer" style={{ flex: 1 }} />
         <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
           installed: <span className="kbd">{(status && status.installedVersion) || "—"}</span>
-          {" · "}available: <span className="kbd">{app.version}</span>
-          {updateAvailable && <span className="pill blue" style={{ marginLeft: 6 }}>update available</span>}
+          {" · "}release: <span className="kbd">{app.version}</span>
+          {behind && <span className="pill blue" style={{ marginLeft: 6 }}>behind the installation</span>}
         </div>
       </div>
 
@@ -192,8 +294,8 @@ function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
           </button>
         )}
         {installed && (
-          <button className="btn btn-primary" disabled={locked} onClick={() => onAction("update")}>
-            {updateAvailable ? `Update to ${app.version}` : "Re-deploy"}
+          <button className="btn" disabled={locked} onClick={() => onAction("update")}>
+            {behind ? `Re-deploy at ${app.version}` : "Re-deploy"}
           </button>
         )}
         {installed && (app.configForm || []).length > 0 && (
@@ -283,7 +385,7 @@ const L3_SERVICE_STATUS_META = {
   "unknown":     { label: "Unknown state", cls: "gray" },
 };
 
-function BaseServicesCard({ services, busy, onProvision, onBind, onRestart, onRefresh }) {
+function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform, onRestart, onRefresh }) {
   const api = typeof window !== "undefined" ? window.figaf : null;
   const [plans, setPlans] = React.useState({});
   const [bindingLive, setBindingLive] = React.useState(null); // login:storedUserStatus.bindingPresent
@@ -313,9 +415,14 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onRestart, onRe
   }
   if (!services || services.length === 0) return null; // v2 release: nothing declared
 
-  const missing = services.filter((s) => s.status === "missing");
-  const allReady = services.every((s) => s.status === "ready");
-  const credstore = services.find((s) => s.bindToManager);
+  // Catalog v4 (decision 0011): optional instances are a separate block. They
+  // never count as "missing" - an installation without a PI/PO system is
+  // complete - and "Create missing services" never touches them.
+  const required = services.filter((s) => !s.optional);
+  const optional = services.filter((s) => s.optional);
+  const missing = required.filter((s) => s.status === "missing");
+  const allReady = required.every((s) => s.status === "ready");
+  const credstore = required.find((s) => s.bindToManager);
 
   return (
     <div style={{ border: "1px dashed var(--line)", borderRadius: 10, padding: 12, marginBottom: 14 }}>
@@ -326,7 +433,7 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onRestart, onRe
         <button className="btn" onClick={onRefresh} disabled={busy}>Refresh</button>
         <button
           className="btn btn-primary"
-          onClick={() => onProvision(plans)}
+          onClick={() => onProvision(plans, missing.map((s) => s.name))}
           disabled={busy || missing.length === 0}
           title={missing.length ? `cf create-service for: ${missing.map((s) => s.name).join(", ")}` : "nothing to create"}
         >
@@ -341,7 +448,7 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onRestart, onRe
           instances and binds them to the manager itself.</span>
         )}
       </div>
-      {services.map((s) => {
+      {required.map((s) => {
         const meta = L3_SERVICE_STATUS_META[s.status] || L3_SERVICE_STATUS_META.unknown;
         return (
           <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid var(--line)", marginTop: 7, flexWrap: "wrap" }}>
@@ -380,6 +487,51 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onRestart, onRe
           </div>
         );
       })}
+      {optional.length > 0 && (
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)" }} data-optional-services="">
+          <div style={{ fontWeight: 600, fontSize: 13 }}>Optional: on-premise PI/PO systems</div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
+            SAP PI and PO systems are reached through the SAP Cloud Connector. These two free instances make that
+            possible, and they are SHARED with the Figaf tool: an instance that already exists is reused, never
+            replaced. An instance created here is not used by the shared backend until it is bound to it - a
+            binding only reaches an app after a restart, so <strong>Bind to backend &amp; restart</strong> does both
+            (about 30-60 s of downtime for the apps). A fresh install binds them on its own.
+          </div>
+          {optional.map((s) => {
+            const meta = L3_SERVICE_STATUS_META[s.status] || L3_SERVICE_STATUS_META.unknown;
+            return (
+              <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid var(--line)", marginTop: 7, flexWrap: "wrap" }} data-optional-service={s.name}>
+                <span className="kbd">{s.name}</span>
+                <span className={`pill ${meta.cls}`}>{meta.label}</span>
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.offering} - plan {s.plan}</span>
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.purpose}</span>
+                {s.sharedWith === "figaf-tool" && <span className="pill gray">shared with the Figaf tool</span>}
+                <div className="spacer" style={{ flex: 1 }} />
+                {s.status === "missing" && (
+                  <button
+                    className="btn"
+                    disabled={!!busy}
+                    title={`cf create-service ${s.offering} ${s.plan} ${s.name}`}
+                    onClick={() => onProvision(plans, [s.name])}
+                  >
+                    {busy === "provision" ? "Creating…" : "Create"}
+                  </button>
+                )}
+                {s.status === "ready" && onBindPlatform && (
+                  <button
+                    className="btn"
+                    disabled={!!busy}
+                    title={`cf bind-service <shared backend> ${s.name}, then cf restart`}
+                    onClick={() => onBindPlatform(s.name)}
+                  >
+                    {busy === "bind-platform" ? "Binding…" : "Bind to backend & restart"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
       {credstore && credstore.boundToManager === true && bindingLive === false && !ssoMode && (
         <div style={{ marginTop: 10, padding: 10, border: "1px solid var(--line)", borderRadius: 8, fontSize: 13 }} data-gated="restart">
           <strong>Binding not active yet.</strong> It becomes active with the restart at the end of step 1
@@ -415,14 +567,16 @@ function BaseServicesSummary({ services, onOpenSetup }) {
     return <div data-services-summary="" style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>Checking base services…</div>;
   }
   if (!services || services.length === 0) return null;
-  const notReady = services.filter((s) => s.status !== "ready");
+  // Optional instances (PI/PO) are not part of "ready": see BaseServicesCard.
+  const required = services.filter((s) => !s.optional);
+  const notReady = required.filter((s) => s.status !== "ready");
   return (
     <div data-services-summary="" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
       <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Base services</span>
       {notReady.length === 0
         ? <span className="pill green">all ready</span>
         : <span className="pill gray">{notReady.length} not ready</span>}
-      <span>{services.map((s) => `${s.name}: ${s.status}`).join(" · ")}</span>
+      <span>{required.map((s) => `${s.name}: ${s.status}`).join(" · ")}</span>
       {notReady.length > 0 && onOpenSetup && (
         <button className="btn-link" onClick={onOpenSetup}>Repair in Setup (step 3)</button>
       )}
@@ -440,6 +594,8 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
   const [catalog, setCatalog] = React.useState(null);   // { releaseVersion, platform, apps } | { error }
   const [statuses, setStatuses] = React.useState({});   // appId → status row
   const [platformStatus, setPlatformStatus] = React.useState(null); // catalog-v2 platform row
+  // The release store (decision 0010): l3:releases result, or { ok:false, error }.
+  const [releases, setReleases] = React.useState(null);
   const [refreshing, setRefreshing] = React.useState(false);
   const [busyApp, setBusyApp] = React.useState(null);   // appId currently running an action
   const [busyLabel, setBusyLabel] = React.useState("");
@@ -496,6 +652,16 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
     }
   }, [api, onServices]);
 
+  const refreshReleases = React.useCallback(async (opts) => {
+    if (!api || !api.l3 || !api.l3.releases) { setReleases({ ok: false, error: "release surface unavailable" }); return; }
+    try {
+      const r = await api.l3.releases(opts || {});
+      setReleases(r || { ok: false, error: "no response from the manager" });
+    } catch (e) {
+      setReleases({ ok: false, error: (e && e.message) || "release store read failed" });
+    }
+  }, [api]);
+
   const refresh = React.useCallback(async () => {
     if (!api || !api.l3) return;
     setRefreshing(true);
@@ -523,9 +689,11 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
       const c = await api.l3.catalog();
       if (cancelled) return;
       setCatalog(c && c.ok ? c : { error: (c && c.error) || "catalog load failed" });
+      if (c && !c.ok) setReleases({ ok: false, error: c.error || "catalog load failed", source: c.source || null });
       if (c && c.ok) {
         refresh();
         refreshServices();
+        refreshReleases();
         // Discover Figaf Tool deployments only when some app's form wants one.
         const wantsFigaf = c.apps.some((a) => (a.configForm || []).some((f) => f.type === "figaf-system"));
         if (wantsFigaf && api.l3.figafSystems) {
@@ -535,7 +703,7 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
       }
     })();
     return () => { cancelled = true; };
-  }, [api, refresh, refreshServices]);
+  }, [api, refresh, refreshServices, refreshReleases]);
 
   // The manager announces every start and end of a lifecycle action. The
   // event reaches every page of this session, including one that reloaded
@@ -582,7 +750,31 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
     } finally {
       setBusyApp(null);
       setBusyLabel("");
-      if (action !== "health") refresh();
+      if (action !== "health") { refresh(); refreshReleases(); }
+    }
+  }
+
+  // Update installation (decision 0010): the shared backend, then every
+  // installed frontend, to `version`. Locked server-side as "platform"; the
+  // rows read that from `running` and keep their buttons off.
+  async function doInstallationUpdate(version) {
+    if (!api || !api.l3 || busyApp || running) return { ok: false, error: "busy" };
+    setBusyApp("platform");
+    setBusyLabel("updating…");
+    setOutcome(null);
+    try {
+      const r = await api.l3.update({ version });
+      if (r && !r.ok && r.error) failed("update", `installation to ${version}`, r);
+      return r;
+    } catch (e) {
+      const r = { ok: false, error: (e && e.message) || "update failed" };
+      failed("update", `installation to ${version}`, r);
+      return r;
+    } finally {
+      setBusyApp(null);
+      setBusyLabel("");
+      refresh();
+      refreshReleases();
     }
   }
 
@@ -594,9 +786,9 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
           <h1 className="pane-title">Figaf L3 applications</h1>
           <p className="pane-desc">
             Installed into <span className="kbd">{ctx.login.org || "?"} / {ctx.login.space || "?"}</span>.
-            Apps install from the bundled release
-            {catalog && catalog.releaseVersion ? <> (version <span className="kbd">{catalog.releaseVersion}</span>)</> : null}.
-            Every action runs plain <span className="kbd">cf</span> commands — open the terminal drawer to follow along.
+            Apps install from the release store
+            {catalog && catalog.releaseVersion ? <>, release <span className="kbd">{catalog.releaseVersion}</span></> : null}.
+            Every action runs plain <span className="kbd">cf</span> commands; every download is listed too — open the terminal drawer to follow along.
             A failed action stays on this page, with what Cloud Foundry said, until you dismiss it.
           </p>
         </div>
@@ -614,6 +806,15 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
           <BaseServicesSummary services={services} onOpenSetup={onOpenSetup} />
         )}
 
+        {catalog && !catalog.error && (
+          <L3ReleasePanel
+            releases={releases}
+            busy={!!busyApp || !!running}
+            onRefresh={() => refreshReleases({ refresh: true })}
+            onUpdate={doInstallationUpdate}
+          />
+        )}
+
         {catalog && catalog.platform && (
           <div data-platform-row="" style={{ border: "1px dashed var(--line)", borderRadius: 10, padding: 12, marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -625,12 +826,13 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
               <div className="spacer" style={{ flex: 1 }} />
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
                 installed: <span className="kbd">{(platformStatus && platformStatus.installedVersion) || "—"}</span>
-                {" · "}available: <span className="kbd">{catalog.releaseVersion || "?"}</span>
+                {" · "}release: <span className="kbd">{catalog.releaseVersion || "?"}</span>
               </div>
             </div>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>
-              The shared backend connector, used by every app. It is deployed and updated
-              automatically, always BEFORE the app frontends — no separate action needed.
+              The shared backend connector, used by every app. It is deployed with the first
+              app and moved to a newer release by Update installation, always BEFORE the app
+              frontends — no separate action needed.
               {" "}
               {(platformStatus ? platformStatus.parts : catalog.platform.cfApps).map((p) => (
                 <span key={p.name} style={{ marginRight: 12 }}>
@@ -648,13 +850,15 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
           const mine = busyApp === app.id || (running && running.appId === app.id);
           const label = mine
             ? (busyLabel || L3_BUSY_LABEL[running && running.action] || "working…")
-            : (running ? `waiting — ${L3_BUSY_LABEL[running.action] || "an action"} ${running.appId}` : "");
+            : (running
+              ? `waiting — ${L3_BUSY_LABEL[running.action] || "an action"} ${running.appId === "platform" ? "the installation" : running.appId}`
+              : (busyApp ? "waiting — updating the installation" : ""));
           return (
             <L3AppRow
               key={app.id}
               app={app}
               status={statuses[app.id]}
-              busy={busyApp === app.id || !!running}
+              busy={!!busyApp || !!running}
               busyLabel={label}
               figafSystems={figafSystems}
               onAction={(action, extra) => doAction(app, action, extra)}

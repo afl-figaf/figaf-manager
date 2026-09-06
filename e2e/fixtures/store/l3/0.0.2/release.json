@@ -1,0 +1,31 @@
+{
+  "releaseVersion": "0.0.2",
+  "publishedAt": "2026-09-02T12:00:00.000Z",
+  "files": [
+    {
+      "name": "backend.zip",
+      "size": 26,
+      "sha256": "f1b7b9256c598fc8bc660aeec22cd2de1078ca38b18210d76e949231bbd7afc3"
+    },
+    {
+      "name": "b2b-archiving-setup-e2e-store.zip",
+      "size": 27,
+      "sha256": "304e801818f6b138202580d5b95bd959dab08964421cdcacd644c25ba6dfcb25"
+    },
+    {
+      "name": "xs-security.json",
+      "size": 134,
+      "sha256": "329dd5222cfa3f886e041084f56db1115887c0d5f6e228d26bfe38bd7ba88b1c"
+    },
+    {
+      "name": "catalog.json",
+      "size": 1670,
+      "sha256": "848b5f1189268e6d53672f87ebb2ffe56f89b2e96251e81a76ee7f3391d77147"
+    }
+  ],
+  "source": {
+    "repository": "FigafManager e2e fixture",
+    "commit": "0000000000000000000000000000000000000000",
+    "branch": "fixture"
+  }
+}
