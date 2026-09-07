@@ -98,6 +98,14 @@ test(`install ${APP_ID} ${app.version}: platform base + app end Running with the
   expect(pushes.length, terminal).toBeGreaterThanOrEqual(platformCfApps.length + appCfApps.length);
   for (const p of pushes) expect(p, p).toContain("--no-manifest");
   expect(terminal).not.toContain("Applying manifest file");
+  // Stack: a CF app whose catalog entry names a stack is pushed with it
+  // (figaf-faid decision 0015), and the deployed app runs on that stack.
+  const allCfApps = [...((catalog.platform && catalog.platform.cfApps) || []), ...app.cfApps];
+  for (const cfApp of allCfApps.filter((c) => c.stack)) {
+    const push = pushes.find((l) => l.includes(` ${cfApp.name} `));
+    expect(push, `push line of ${cfApp.name}`).toContain(`-s ${cfApp.stack}`);
+    expect(cf(["app", cfApp.name]), `cf app ${cfApp.name}`).toMatch(new RegExp(`^stack:\\s+${cfApp.stack}\\s*$`, "m"));
+  }
   expect(terminal).toContain(`install ${APP_ID}: done`);
 
   // Health: the platform base answers on its health path. Right after the

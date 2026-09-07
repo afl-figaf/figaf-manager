@@ -70,6 +70,16 @@ test("early refusal (required services missing): no step, the services hint, not
   assert.ok(!o.report.includes("command:"));
 });
 
+test("early refusal (stack missing on the landscape): the stack hint, nothing was pushed", () => {
+  const o = load()({
+    ...BASE, action: "install", appName: "B2B Archiving Setup",
+    result: { ok: false, step: "stack", command: "cf stacks", error: "this release needs the Cloud Foundry stack cflinuxfs5, which this landscape does not offer (cf stacks: cflinuxfs3, cflinuxfs4) — ask SAP when the stack arrives on this landscape, or install a release built for an available stack" },
+  });
+  assert.equal(o.hintId, "stack-missing");
+  assert.match(o.hint, /does not offer yet/);
+  assert.ok(o.report.includes("cf stacks"));
+});
+
 test("hints: session lost, quota, bind, start, checksum, no route; unknown text gets the terminal-drawer default", () => {
   const f = load();
   const hintFor = (error, detail) => f({ action: "update", appName: "X", result: { ok: false, error, detail } }).hintId;

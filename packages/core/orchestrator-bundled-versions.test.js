@@ -64,7 +64,7 @@ function makeHost({ build, binaries } = {}) {
   };
 }
 
-const BUILD = { manager: "26.5.0", btp: "2.106.1", cf: "8.19.0", node: "22.x", builtAt: "2026-09-04T09:00:00.000Z", npm: { express: "4.22.2" } };
+const BUILD = { manager: "26.5.0", btp: "2.106.1", cf: "8.19.0", node: "24.x", builtAt: "2026-09-04T09:00:00.000Z", npm: { express: "4.22.2" } };
 
 test("both CLIs report the pinned versions: matches true, build record carried through", async () => {
   const { handlers } = createOrchestrator({ host: makeHost({ build: BUILD }), send: () => {} });
@@ -73,7 +73,7 @@ test("both CLIs report the pinned versions: matches true, build record carried t
   assert.equal(r.bundled, true);
   assert.equal(r.manager, "26.5.0");
   assert.equal(r.node, process.version);
-  assert.equal(r.nodeExpected, "22.x");
+  assert.equal(r.nodeExpected, "24.x");
   assert.deepEqual({ ok: r.btp.ok, version: r.btp.version, expected: r.btp.expected, matches: r.btp.matches },
     { ok: true, version: "2.106.1", expected: "2.106.1", matches: true });
   assert.deepEqual({ ok: r.cf.ok, version: r.cf.version, expected: r.cf.expected, matches: r.cf.matches },

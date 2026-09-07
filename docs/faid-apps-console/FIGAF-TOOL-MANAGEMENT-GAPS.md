@@ -87,7 +87,12 @@ must ask for a passcode before these flows and say why.
 Fact: the templates are the HEAD of a GitHub branch, downloaded by the
 customer's container. The manager's own zip is versioned; the templates it
 applies are not. Self-update also calls `api.github.com`; tag lookup calls
-Docker Hub.
+Docker Hub. The templates' approuter still declares Node `22.x` and no
+stack, so the Figaf tool's router gets the landscape's default stack
+(`cflinuxfs4`, deprecated); the manager and the FAID release moved to Node
+`24.x` and `cflinuxfs5` on 2026-09-07 (figaf-faid decision 0015). The copy in
+`packages/deploy-templates/` is not what runs; change the GitHub templates
+(Alex) together with their versioning.
 Why it matters: "one build, one version, one delivery" (governance decision
 2). An update can pick up template changes nobody released. Customers with
 restricted egress cannot reach GitHub; `FIGAF_DEPLOYMENT_ZIP_URL` and

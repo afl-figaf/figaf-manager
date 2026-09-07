@@ -7,6 +7,10 @@ applications:
     disk_quota: 512M
     instances: 1
     buildpack: nodejs_buildpack
+    # Ubuntu 24.04 stack (figaf-faid decision 0015, 2026-09-07). cflinuxfs4 is
+    # deprecated on SAP BTP. The manager's approuter follows this stack
+    # (CF_STACK, packages/core/cf-stack.js). Node 24.x comes from engines.node.
+    stack: cflinuxfs5
     command: node cloud/server.js
     random-route: true
     env:

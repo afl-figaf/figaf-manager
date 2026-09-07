@@ -57,6 +57,11 @@
       hint: "Create the base services first (Setup page, step 3), wait until every instance is Ready, then try again.",
     },
     {
+      id: "stack-missing",
+      re: /needs the Cloud Foundry stack/i,
+      hint: "The release names a Cloud Foundry stack (the container's Ubuntu version) that this landscape does not offer yet. Nothing was deployed. Ask SAP when the stack arrives on this landscape, or ask Figaf for a release built for a stack the landscape has (cf stacks lists them).",
+    },
+    {
       id: "checksum",
       re: /checksum mismatch/i,
       hint: "A file of the release does not match its checksum: the store content is damaged or was changed after publishing. Nothing was deployed. Press Refresh releases and try again; if it repeats, report it to Figaf - the release must be published again as a new version.",

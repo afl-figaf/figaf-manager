@@ -38,24 +38,27 @@ Last edited 2026-09-06.
    auto-selects it` — fails on master too; fix or quarantine. The cloud tests
    (`apps/figaf-manager/cloud/*.test.js`) are not part of `npm test` and so
    not part of CI.
-7. **Pinning** (small parts done 2026-09-04): `btpCliVersion` and
-   `cfCliVersion` in `apps/figaf-manager/package.json` fix the bundled CLIs;
-   `build-zip.js` downloads exactly those versions, re-downloads when a pin
-   changes, fails when the download does not match, and writes
-   `bin/VERSIONS.json`; `engines.node` is `22.x` for the manager and its
-   approuter; the staged `package.json` carries the exact top-level
-   dependency versions from the workspace lockfile; the About page and the
-   environment checks show the runtime versions against the pins. Still
-   open: transitive npm dependencies float within the ranges of the pinned
-   packages (a lockfile in staging needs a manager push test first); the
-   buildpack is the landscape's system buildpack; stack `cflinuxfs4` is
-   deprecated (new pushes end 2027-04, `cflinuxfs5` default from 2027-02);
-   the Figaf-tool deploy templates are unversioned
-   (`FIGAF-TOOL-MANAGEMENT-GAPS.md` 2.4). Seen in the first pinned build
-   (2026-09-04): `@sap/xsenv` 4.2.0 declares Node up to 20 in its `engines`
-   (npm warns on 22; check for a newer release), and the dev machine runs
-   Node 24, so `npm install` warns about `engines.node` 22.x there (the
-   container is what counts; CI builds with 22).
+7. **Pinning** (CLIs 2026-09-04; Node and stack 2026-09-07, figaf-faid
+   decision 0015): `btpCliVersion` and `cfCliVersion` in
+   `apps/figaf-manager/package.json` fix the bundled CLIs; `build-zip.js`
+   downloads exactly those versions, re-downloads when a pin changes, fails
+   when the download does not match, and writes `bin/VERSIONS.json`;
+   `engines.node` is `24.x` for the manager and its approuter, CI and
+   `.nvmrc` say 24; the manager's `manifest.yml` names the stack
+   `cflinuxfs5`, the approuter follows it (`CF_STACK`, `cf-stack.js`), FAID
+   apps take theirs from the release catalog; the staged `package.json`
+   carries the exact top-level dependency versions from the workspace
+   lockfile; the About page and the environment checks show the runtime
+   versions against the pins. Still open: transitive npm dependencies float
+   within the ranges of the pinned packages (a lockfile in staging needs a
+   manager push test first); the buildpack is the landscape's system
+   buildpack (the version it ships decides the exact Node 24 patch); the
+   Figaf-tool deploy templates are unversioned and still say Node `22.x`
+   with no stack (`FIGAF-TOOL-MANAGEMENT-GAPS.md` 2.4). Seen in the first
+   pinned build (2026-09-04): `@sap/xsenv` 4.2.0 declares Node up to 20 in
+   its `engines` (npm warns; check for a newer release). Not yet run: the
+   first push of the manager and of a release on `cflinuxfs5` (the install
+   smoke checks `cf app` reports the stack).
 8. **Password login for persons** (Alex's login screen shows "Username &
    password - coming soon"): product decision open. Today by design only the
    passcode (the person's password never reaches the manager; works with
@@ -103,7 +106,8 @@ Last edited 2026-09-06.
     (2026-09-06, install of release 0.4.4): `cliFailureDetail()` in
     `packages/core/faid-apps.js` takes the last 3 stderr lines, and cf CLI 8.19
     prints the `cflinuxfs4 is DEPRECATED` warning LAST, after `Start
-    unsuccessful`. The panel said the stack was the problem; the real cause
+    unsuccessful` (that warning is gone for pushes on `cflinuxfs5`, item 7,
+    but any cf WARNING has the same effect). The panel said the stack was the problem; the real cause
     (a failed schema migration) was only in `cf logs <app> --recent`. Fix:
     drop `WARNING:` lines (and their continuation) before taking the tail,
     and after a failed `start` step append the app's last `[APP/PROC/WEB]

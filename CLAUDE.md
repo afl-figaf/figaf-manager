@@ -31,9 +31,14 @@ template sourcing).
   changes, fails when the download does not match, and writes
   `bin/VERSIONS.json` (also the pinned npm versions and the Node engine).
   The staged `package.json` gets the exact top-level dependency versions from
-  the workspace `package-lock.json`. `engines.node` is `22.x` for the manager
-  and `packages/manager-approuter`; CI builds with Node 22. The About page
-  shows the runtime versions against these pins (`prereq:bundledVersions`).
+  the workspace `package-lock.json`. `engines.node` is `24.x` for the manager
+  and `packages/manager-approuter`; CI builds with Node 24 (`.nvmrc` says 24;
+  figaf-faid decision 0015, 2026-09-07). The manager's `manifest.yml` names
+  the stack `cflinuxfs5`; its approuter follows the manager's stack
+  (`CF_STACK`, `packages/core/cf-stack.js`); FAID apps take the stack from
+  the release catalog (`cfApps[].stack`, checked with `cf stacks` before the
+  first push). The About page shows the runtime versions against these pins
+  (`prereq:bundledVersions`).
 
 ---
 

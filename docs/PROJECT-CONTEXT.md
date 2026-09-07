@@ -105,7 +105,7 @@ them, the manager consumes them.
 ## 7. Facts a session needs
 
 - Dev space: org `Figaf ApS_figafpartner-1`, space `figaf-faid`, landscape eu10-004. Never target Emil's `figaf-dev` space.
-- Dev machine: cf CLI 8.7.11 (winget package `CloudFoundry.CLI.v8`), MultiApps plugin 3.11.1, mbt 1.2.47. The manager bundles btp 2.106.1 and cf 8.19.0 (Linux builds; pinned in `apps/figaf-manager/package.json`, recorded in `bin/VERSIONS.json`).
+- Dev machine: cf CLI 8.7.11 (winget package `CloudFoundry.CLI.v8`), MultiApps plugin 3.11.1, mbt 1.2.47. The manager bundles btp 2.106.1 and cf 8.19.0 (Linux builds; pinned in `apps/figaf-manager/package.json`, recorded in `bin/VERSIONS.json`). Runtime pins (figaf-faid decision 0015, 2026-09-07): Node `24.x` (`engines.node`, CI, `.nvmrc`), stack `cflinuxfs5` (manager `manifest.yml`; the approuter follows via `CF_STACK`; FAID apps via the catalog's `stack`).
 - Manager version 26.5.0; release 0.4.1 (B2B Archiving Setup + shared backend)
   is in the release store (Cloudflare R2, public read URL) since 2026-09-04.
   The manager reads releases from there; its zip bundles no release.

@@ -37,6 +37,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const { loadCatalog, chooseVersion, createReleaseStore } = require("./release-store");
+const { stackArgs, parseStackNames, wantedStacks, missingStacks, missingStackError } = require("./cf-stack");
 
 const VERSION_ENV = "FIGAF_APP_VERSION";
 const NO_SOURCE_ERROR = "No release source configured: set FIGAF_FAID_RELEASE_URL (the release store) or FIGAF_FAID_ARTIFACTS_DIR (a local release directory)";
@@ -193,6 +194,10 @@ function cliFailureDetail(r, { lines = 3, maxLen = 400 } = {}) {
 function buildPushArgs(cfApp, dir, { noStart } = {}) {
   const args = ["push", cfApp.name, "-p", dir, "--no-manifest"];
   if (cfApp.buildpack) args.push("-b", cfApp.buildpack);
+  // The stack the release names (figaf-faid decision 0015); none = the
+  // landscape's default stack, as older catalogs expect. preflight() has
+  // checked that the landscape offers it.
+  args.push(...stackArgs(cfApp.stack));
   if (cfApp.memory) args.push("-m", cfApp.memory);
   if (cfApp.disk) args.push("-k", cfApp.disk);
   if (noStart) args.push("--no-start");
@@ -714,12 +719,27 @@ function createFaidHandlers(ctx) {
   }
 
   /**
-   * What every deploy needs before the first push: the required service
+   * What every deploy needs before the first push: the landscape offers the
+   * stack(s) the release names (decision 0015), the required service
    * instances exist, and the shared XSUAA instance carries the roles of the
    * release being deployed (decision 0009; update only — a missing instance
    * is reported first). Returns null or a failed result.
    */
   async function preflight(rel, apps) {
+    const platform = platformPseudoApp(rel.catalog);
+    const stacks = wantedStacks([...(platform ? platform.cfApps : []), ...apps.flatMap((a) => a.cfApps || [])]);
+    if (stacks.length) {
+      const r = await run(resolveCf(), ["stacks"], { source: "cf", quiet: true });
+      if (r.code !== 0) {
+        log("cf", "warn", `cf stacks failed — the stack check is skipped; cf push reports a stack this landscape lacks (release asks for ${stacks.join(", ")})`);
+      } else {
+        const available = parseStackNames(r.stdout);
+        const missing = missingStacks(stacks, available);
+        if (missing.length) {
+          return { ok: false, error: missingStackError(missing, available), step: "stack", command: "cf stacks" };
+        }
+      }
+    }
     if (Array.isArray(rel.catalog.services)) {
       const names = new Set();
       for (const app of apps) for (const m of await missingRequiredServices(rel.catalog, app)) names.add(m);

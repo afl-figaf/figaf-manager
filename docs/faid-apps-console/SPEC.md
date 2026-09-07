@@ -110,14 +110,14 @@ immutable.
   "platform": {
     "name": "Shared backend (connector)",
     "cfApps": [ { "name": "figaf-faid-backend", "artifact": "backend.zip", "sha256": "...",
-                  "buildpack": "nodejs_buildpack", "memory": "256M", "disk": "1024M",
+                  "buildpack": "nodejs_buildpack", "stack": "cflinuxfs5", "memory": "256M", "disk": "1024M",
                   "services": ["figaf-faid-db", "figaf-faid-xsuaa"],
                   "optionalServices": ["figaf-faid-credstore"], "env": { } } ]
   },
   "apps": [
     { "id": "b2b-archiving-setup", "name": "B2B Archiving Setup", "version": "0.4.0",
       "cfApps": [ { "name": "figaf-faid-apps-b2b-archiving-setup", "artifact": "b2b-archiving-setup.zip",
-                    "sha256": "...", "buildpack": "nodejs_buildpack", "memory": "128M", "disk": "512M",
+                    "sha256": "...", "buildpack": "nodejs_buildpack", "stack": "cflinuxfs5", "memory": "128M", "disk": "512M",
                     "services": ["figaf-faid-xsuaa"], "env": { },
                     "destinationTo": "figaf-faid-backend", "destinationName": "figaf-faid-backend" } ],
       "configTargetCfApp": "figaf-faid-backend",
@@ -132,6 +132,12 @@ Rules:
 - `platform` = the shared backend connector, deployed and updated BEFORE any
   frontend, never touched by disable / enable / remove of an app. A catalog
   without `platform` keeps the older per-app behavior.
+- `stack` per CF app (figaf-faid decision 0015, releases from 0.5.0:
+  `cflinuxfs5`) = the Cloud Foundry stack the app is pushed with (`cf push
+  -s`). Before the first push the manager checks `cf stacks`; a landscape
+  without the stack gets a clear refusal and nothing is pushed. A cfApp
+  without `stack` gets the landscape's default stack (older catalogs). On
+  Update installation an app moves to the catalog's stack with its push.
 - `services` = the instances the manager creates when missing. `plan` is the
   default, `plans` what the admin may choose (plans that cost money are the
   admin's decision). `configFile` ships next to the catalog; `config` is
@@ -188,8 +194,10 @@ Install / update algorithm:
    its catalog and config files are downloaded and verified. A version that
    the rule refuses (unknown, lower than installed, not the installed one for
    Install) is a failed result before any cf call.
-2. Refuse when a REQUIRED instance (any name in a cfApp's `services`) is
-   missing: "create them first (Setup, step 3)".
+2. Refuse when the landscape lacks a stack the catalog names (`cf stacks`
+   once per action; step `stack`, nothing pushed; a failing `cf stacks` only
+   skips the check), or when a REQUIRED instance (any name in a cfApp's
+   `services`) is missing: "create them first (Setup, step 3)".
 3. Role refresh: `faid:ensureXsuaa({ updateOnly: true, version })` — the shared
    XSUAA instance gets the roles of the release being deployed and of the
    manager. A failure stops the install (step `roles`).
@@ -197,7 +205,8 @@ Install / update algorithm:
    every installed app's CF apps). Per CF app: download the zip from the
    store when not cached and verify its sha256 (step `download`; a failure
    pushes nothing for that part), verify sha256 again, extract, `cf push
-   <name> -p <dir> -b <buildpack> -m -k --no-start --no-manifest` (fresh) or
+   <name> -p <dir> -b <buildpack> -s <stack> -m -k --no-start --no-manifest`
+   (fresh; `-s` only when the catalog names a stack) or
    `cf push` without `--no-start` (update); `cf bind-service` for `services`
    and for `optionalServices` that exist; `cf set-env` for `env`,
    `FIGAF_APP_VERSION` (the release version), and for frontends the approuter

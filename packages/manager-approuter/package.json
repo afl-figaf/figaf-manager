@@ -5,7 +5,7 @@
   "description": "Wizard-scoped SAP approuter that fronts figaf-manager once XSUAA is enabled. Pushed as a second CF app from inside the manager dyno during the v2 upgrade.",
   "main": "server.js",
   "engines": {
-    "node": "22.x"
+    "node": "24.x"
   },
   "scripts": {
     "start": "node server.js"

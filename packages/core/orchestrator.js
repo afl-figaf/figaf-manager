@@ -36,6 +36,7 @@ const {
 const { patchManifestName } = require("./manifest-patch");
 const releaseConfig = require("./release-config");
 const { createFaidHandlers } = require("./faid-apps");
+const { ownStack, stackArgs } = require("./cf-stack");
 const { createConnectionsHandlers } = require("./connections");
 const credstoreClient = require("./credstore-client");
 // One XSUAA instance for the manager and the apps (figaf-faid decision 0009).
@@ -2493,11 +2494,13 @@ function createOrchestrator({ host, send, audit }) {
       // We push with --no-route --no-start so phase 2 can map the route
       // atomically. The approuter's own internal port comes from $PORT (CF
       // sets it). Memory: 128 MB is fine for @sap/approuter under steady load.
+      // Stack: the one the manager runs on (CF_STACK; cf-stack.js).
       const pushArgs = [
         "push", "figaf-manager-approuter",
         "-p", approuterDir,
         "-m", "128M",
         "-k", "256M",
+        ...stackArgs(ownStack()),
         "--no-route",
         "--no-start",
         "--no-manifest",
@@ -3618,10 +3621,13 @@ function createOrchestrator({ host, send, audit }) {
           // service bindings (figaf-manager-xsuaa) are already attached to
           // the live app and persist across cf push. --strategy rolling for
           // zero-downtime cutover. We await this; if it fails, we abort.
+          // Stack: the one the manager runs on (CF_STACK; cf-stack.js), so a
+          // manager moved to a new stack takes its approuter along.
           const apprtPushArgs = [
             "push", "figaf-manager-approuter",
             "-p", approuterDir,
             "--strategy", "rolling",
+            ...stackArgs(ownStack()),
             "--no-manifest",
           ];
           send("update:selfPhase", { phase: "push-approuter", state: "running", detail: "cf push (rolling)" });

@@ -167,6 +167,71 @@ test("buildPushArgs / buildDestinationsEnv", () => {
   assert.deepEqual(dest, [{ name: "figaf-b2b-gov-backend", url: "https://x.example", forwardAuthToken: true }]);
 });
 
+test("buildPushArgs: a cfApp that names a stack is pushed with -s; without one the landscape default applies (no -s)", () => {
+  const withStack = { ...CATALOG.platform.cfApps[0], stack: "cflinuxfs5" };
+  assert.deepEqual(
+    buildPushArgs(withStack, "/tmp/x", { noStart: true }),
+    ["push", "arch-backend", "-p", "/tmp/x", "--no-manifest", "-b", "nodejs_buildpack", "-s", "cflinuxfs5", "-m", "256M", "-k", "1024M", "--no-start"]
+  );
+  assert.ok(!buildPushArgs(CATALOG.platform.cfApps[0], "/tmp/x", {}).includes("-s"));
+});
+
+// A catalog whose CF apps name a stack (release built for cflinuxfs5).
+function catalogWithStack(stack = "cflinuxfs5") {
+  const c = JSON.parse(JSON.stringify(CATALOG));
+  for (const cfApp of [...c.platform.cfApps, ...c.apps.flatMap((a) => a.cfApps)]) cfApp.stack = stack;
+  return c;
+}
+const CF_STACKS_WITHOUT_FS5 = "Getting stacks as u...\n\nname         description\ncflinuxfs3   Cloud Foundry Linux-based filesystem (Ubuntu 18.04)\ncflinuxfs4   Cloud Foundry Linux-based filesystem (Ubuntu 22.04)\n";
+const CF_STACKS_WITH_FS5 = CF_STACKS_WITHOUT_FS5 + "cflinuxfs5   Cloud Foundry Linux-based filesystem (Ubuntu 24.04)\n";
+
+test("faid:install: a release that needs a stack this landscape lacks fails before any push, naming the stack and what cf stacks offers", async () => {
+  const dir = makeChannelDir(catalogWithStack());
+  const { ctx, calls } = makeCtx(dir, (args) => {
+    if (args[0] === "stacks") return { code: 0, stdout: CF_STACKS_WITHOUT_FS5 };
+    if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "" };
+    return { code: 0, stdout: "" };
+  });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:install"]({ appId: "arch" });
+  assert.equal(r.ok, false);
+  assert.equal(r.step, "stack");
+  assert.match(r.error, /needs the Cloud Foundry stack cflinuxfs5/);
+  assert.match(r.error, /cf stacks: cflinuxfs3, cflinuxfs4/);
+  assert.ok(!calls.some((c) => c.args[0] === "push"), "nothing was pushed");
+});
+
+test("faid:install: with the stack available every push carries -s <stack>; a failing cf stacks only skips the check", async () => {
+  const dir = makeChannelDir(catalogWithStack());
+  const { ctx, calls } = makeCtx(dir, (args) => {
+    if (args[0] === "stacks") return { code: 0, stdout: CF_STACKS_WITH_FS5 };
+    if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "" }; // fresh
+    if (args[0] === "app") return { code: 0, stdout: "routes: arch-backend.cfapps.example\n" };
+    return { code: 0, stdout: "" };
+  });
+  const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const pushes = calls.filter((c) => c.args[0] === "push");
+  assert.equal(pushes.length, 2);
+  for (const p of pushes) {
+    const i = p.args.indexOf("-s");
+    assert.ok(i > 0 && p.args[i + 1] === "cflinuxfs5", p.args.join(" "));
+  }
+  assert.equal(calls.filter((c) => c.args[0] === "stacks").length, 1, "cf stacks is asked once per action");
+
+  const dir2 = makeChannelDir(catalogWithStack());
+  const { ctx: ctx2, calls: calls2, logLines } = makeCtx(dir2, (args) => {
+    if (args[0] === "stacks") return { code: 1, stdout: "", stderr: "FAILED\nNot logged in" };
+    if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "" };
+    if (args[0] === "app") return { code: 0, stdout: "routes: arch-backend.cfapps.example\n" };
+    return { code: 0, stdout: "" };
+  });
+  const r2 = await createFaidHandlers(ctx2)["faid:install"]({ appId: "arch" });
+  assert.equal(r2.ok, true, JSON.stringify(r2));
+  assert.ok(logLines.some((l) => /cf stacks failed — the stack check is skipped/.test(l)), logLines.join("\n"));
+  assert.ok(calls2.some((c) => c.args[0] === "push" && c.args.includes("cflinuxfs5")));
+});
+
 test("validateConfigEnv: whitelist, empty-skip, type and length checks", () => {
   const app = CATALOG.apps[0];
   const ok = validateConfigEnv(app, { FIGAF_BASE_URL: "https://f", FIGAF_API_CLIENT_SECRET: "s3cret", });
