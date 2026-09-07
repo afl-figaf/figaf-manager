@@ -216,7 +216,7 @@
       verify:           function (a) { return rpc("update:verify", a || {}); },
     },
 
-    // Stored management user + session resume (L3 App Manager PoC).
+    // Stored management user + session resume (FAID Apps manager).
     login: {
       storedUserStatus:    function ()  { return rpc("login:storedUserStatus"); },
       withStoredUser:      function ()  { return rpc("login:withStoredUser"); },
@@ -226,34 +226,34 @@
       state: function () { return rpc("session:state"); },
     },
 
-    // L3 App Manager (PoC) — catalog-driven install/manage of L3 apps.
-    l3: {
-      catalog:   function (a) { return rpc("l3:catalog", a || {}); },
-      status:    function ()  { return rpc("l3:status"); },
-      running:   function ()  { return rpc("l3:running"); },
+    // FAID Apps manager — catalog-driven install/manage of FAID Apps.
+    faid: {
+      catalog:   function (a) { return rpc("faid:catalog", a || {}); },
+      status:    function ()  { return rpc("faid:status"); },
+      running:   function ()  { return rpc("faid:running"); },
       // The release store (decision 0010): source, installed / latest / every version.
-      releases:  function (a) { return rpc("l3:releases", a || {}); },
-      figafSystems: function () { return rpc("l3:figafSystems"); },
+      releases:  function (a) { return rpc("faid:releases", a || {}); },
+      figafSystems: function () { return rpc("faid:figafSystems"); },
       // Catalog v3: base service instances created by the manager.
-      services:           function ()  { return rpc("l3:services"); },
-      provisionServices:  function (a) { return rpc("l3:provisionServices", a || {}); },
-      bindManagerService: function (a) { return rpc("l3:bindManagerService", a || {}); },
+      services:           function ()  { return rpc("faid:services"); },
+      provisionServices:  function (a) { return rpc("faid:provisionServices", a || {}); },
+      bindManagerService: function (a) { return rpc("faid:bindManagerService", a || {}); },
       // Bind an optional instance (PI/PO) to the shared backend + restart it.
-      bindPlatformService: function (a) { return rpc("l3:bindPlatformService", a || {}); },
-      restartSelf:        function ()  { return rpc("l3:restartSelf"); },
+      bindPlatformService: function (a) { return rpc("faid:bindPlatformService", a || {}); },
+      restartSelf:        function ()  { return rpc("faid:restartSelf"); },
       // One XSUAA instance + secure access first (decision 0009).
-      ensureXsuaa:            function (a) { return rpc("l3:ensureXsuaa", a || {}); },
-      prepareManagerServices: function (a) { return rpc("l3:prepareManagerServices", a || {}); },
-      prepareSpaceServices:   function (a) { return rpc("l3:prepareSpaceServices", a || {}); },
-      install:   function (a) { return rpc("l3:install", a || {}); },
-      update:    function (a) { return rpc("l3:update", a || {}); },
-      disable:   function (a) { return rpc("l3:disable", a || {}); },
-      enable:    function (a) { return rpc("l3:enable", a || {}); },
-      remove:    function (a) { return rpc("l3:remove", a || {}); },
-      configure: function (a) { return rpc("l3:configure", a || {}); },
-      health:    function (a) { return rpc("l3:health", a || {}); },
+      ensureXsuaa:            function (a) { return rpc("faid:ensureXsuaa", a || {}); },
+      prepareManagerServices: function (a) { return rpc("faid:prepareManagerServices", a || {}); },
+      prepareSpaceServices:   function (a) { return rpc("faid:prepareSpaceServices", a || {}); },
+      install:   function (a) { return rpc("faid:install", a || {}); },
+      update:    function (a) { return rpc("faid:update", a || {}); },
+      disable:   function (a) { return rpc("faid:disable", a || {}); },
+      enable:    function (a) { return rpc("faid:enable", a || {}); },
+      remove:    function (a) { return rpc("faid:remove", a || {}); },
+      configure: function (a) { return rpc("faid:configure", a || {}); },
+      health:    function (a) { return rpc("faid:health", a || {}); },
       // PI/PO (decision 0011): the shared backend checks a BTP destination.
-      destinationCheck: function (a) { return rpc("l3:destinationCheck", a || {}); },
+      destinationCheck: function (a) { return rpc("faid:destinationCheck", a || {}); },
     },
 
     // System connections (decision 0006): Figaf tool + SAP systems in the

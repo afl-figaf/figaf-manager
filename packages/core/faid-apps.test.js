@@ -1,23 +1,23 @@
 "use strict";
-// Tests for the L3 App Manager PoC (l3-apps.js).
+// Tests for the FAID Apps manager (faid-apps.js).
 //
 // Coverage:
 //   A. Pure helpers: loadCatalog validation, computeAppStatus rollup,
 //      buildPushArgs, buildDestinationsEnv, validateConfigEnv whitelist.
 //   B. Handler flows with an injected fake `run` recorder (no processes):
-//      - l3:install happy path — command order per CF app:
+//      - faid:install happy path — command order per CF app:
 //        push --no-start → bind-service (required + optional-if-present)
 //        → set-env (masked) → start; frontend gets a destinations env
 //        pointing at the backend route.
 //      - required bind failure aborts the install.
-//      - l3:configure — whitelist enforced, values masked in logCmd/auditArgs,
+//      - faid:configure — whitelist enforced, values masked in logCmd/auditArgs,
 //        restart follows, unknown key rejected.
-//      - l3:disable stops in reverse order; l3:remove deletes in reverse order.
-//      - l3:status maps /v3 responses to app status + installed version,
+//      - faid:disable stops in reverse order; faid:remove deletes in reverse order.
+//      - faid:status maps /v3 responses to app status + installed version,
 //        reports the in-flight action and marks a part that is staging.
 //      - one lifecycle action at a time: a second install is refused and
 //        pushes nothing; the lock is released after a failure too.
-//      - l3:health hits <route><healthPath> via httpsText.
+//      - faid:health hits <route><healthPath> via httpsText.
 
 const { test, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
@@ -37,8 +37,8 @@ const {
   validateConfigEnv,
   serviceStatusFromCf,
   wantedService,
-  createL3Handlers,
-} = require("./l3-apps");
+  createFaidHandlers,
+} = require("./faid-apps");
 
 // ─── fixtures ────────────────────────────────────────────────────────────────
 
@@ -82,7 +82,7 @@ const CATALOG = {
 };
 
 function makeChannelDir(catalog = CATALOG) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "l3-test-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "faid-test-"));
   fs.writeFileSync(path.join(dir, "catalog.json"), JSON.stringify(catalog));
   fs.writeFileSync(path.join(dir, "backend.zip"), "zip");
   fs.writeFileSync(path.join(dir, "frontend.zip"), "zip");
@@ -90,7 +90,7 @@ function makeChannelDir(catalog = CATALOG) {
 }
 
 /**
- * Fake ctx for createL3Handlers. `responses` maps a predicate over the args
+ * Fake ctx for createFaidHandlers. `responses` maps a predicate over the args
  * array to a canned { code, stdout }. Calls are recorded in `calls`
  * ({ args, opts }); log lines in `logLines`.
  */
@@ -98,7 +98,7 @@ function makeCtx(channelDir, respond) {
   const calls = [];
   const logLines = [];
   const events = [];
-  const userDir = fs.mkdtempSync(path.join(os.tmpdir(), "l3-user-"));
+  const userDir = fs.mkdtempSync(path.join(os.tmpdir(), "faid-user-"));
   return {
     calls, logLines, events,
     ctx: {
@@ -106,7 +106,7 @@ function makeCtx(channelDir, respond) {
         isHosted: true,
         getUserDataDir: () => userDir,
         // A local release directory is the development source (decision 0010).
-        resolveL3ReleaseSource: () => (channelDir ? { kind: "local", dir: channelDir } : null),
+        resolvePlatformReleaseSource: () => (channelDir ? { kind: "local", dir: channelDir } : null),
       },
       run: async (cmd, args, opts = {}) => {
         calls.push({ cmd, args, opts });
@@ -140,14 +140,14 @@ test("loadCatalog: accepts a valid catalog", () => {
 });
 
 test("loadCatalog: missing file / bad JSON / missing fields are rejected", () => {
-  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "l3-empty-"));
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "faid-empty-"));
   assert.equal(loadCatalog(empty).ok, false);
 
-  const badJson = fs.mkdtempSync(path.join(os.tmpdir(), "l3-bad-"));
+  const badJson = fs.mkdtempSync(path.join(os.tmpdir(), "faid-bad-"));
   fs.writeFileSync(path.join(badJson, "catalog.json"), "{nope");
   assert.equal(loadCatalog(badJson).ok, false);
 
-  const noApps = fs.mkdtempSync(path.join(os.tmpdir(), "l3-noapps-"));
+  const noApps = fs.mkdtempSync(path.join(os.tmpdir(), "faid-noapps-"));
   fs.writeFileSync(path.join(noApps, "catalog.json"), JSON.stringify({ apps: [{ id: "x", version: "1", cfApps: [] }] }));
   assert.equal(loadCatalog(noApps).ok, false);
 });
@@ -185,7 +185,7 @@ test("validateConfigEnv: whitelist, empty-skip, type and length checks", () => {
 
 // ─── B. handler flows ────────────────────────────────────────────────────────
 
-test("l3:install: full command sequence, optional bind skipped when absent, destinations env set", async () => {
+test("faid:install: full command sequence, optional bind skipped when absent, destinations env set", async () => {
   const dir = makeChannelDir();
   const { ctx, calls, logLines } = makeCtx(dir, (args) => {
     if (args[0] === "app" && args[1] === "arch-backend" && args[2] === "--guid") return { code: 1, stdout: "" }; // fresh
@@ -194,8 +194,8 @@ test("l3:install: full command sequence, optional bind skipped when absent, dest
     if (args[0] === "app" && args[1] === "arch-backend") return { code: 0, stdout: "name: arch-backend\nroutes:   arch-backend.cfapps.eu10.hana.ondemand.com\n" };
     return { code: 0, stdout: "" };
   });
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:install"]({ appId: "arch" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.version, "0.2.0");
 
@@ -221,15 +221,15 @@ test("l3:install: full command sequence, optional bind skipped when absent, dest
   assert.ok(!logLines.some((l) => l.includes("cfapps.eu10") && l.startsWith("cf set-env")));
 });
 
-test("l3:install: required bind failure aborts with an error", async () => {
+test("faid:install: required bind failure aborts with an error", async () => {
   const dir = makeChannelDir();
   const { ctx, calls } = makeCtx(dir, (args) => {
     if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "" };
     if (args[0] === "bind-service" && args[2] === "db") return { code: 1, stdout: "", stderr: "not found" };
     return { code: 0, stdout: "" };
   });
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:install"]({ appId: "arch" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.match(r.error, /bind-service db failed/);
   assert.equal(r.failedApp, "arch-backend");
@@ -237,31 +237,31 @@ test("l3:install: required bind failure aborts with an error", async () => {
   assert.ok(!calls.some((c) => c.args.includes("arch-frontend")));
 });
 
-test("l3:update on an existing app: set-env then push (no --no-start, no bind)", async () => {
+test("faid:update on an existing app: set-env then push (no --no-start, no bind)", async () => {
   const dir = makeChannelDir();
   const { ctx, calls } = makeCtx(dir, (args) => {
     if (args[0] === "app" && args[2] === "--guid") return { code: 0, stdout: "guid" }; // exists
     if (args[0] === "app" && args[1] === "arch-backend") return { code: 0, stdout: "routes:   b.example.com\n" };
     return { code: 0, stdout: "" };
   });
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:update"]({ appId: "arch" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:update"]({ appId: "arch" });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.ok(!calls.some((c) => c.args.includes("--no-start")));
   assert.ok(!calls.some((c) => c.args[0] === "bind-service"));
   assert.ok(calls.some((c) => c.args[0] === "push" && c.args[1] === "arch-backend"));
 });
 
-test("l3:configure: masked set-env + restart; unknown key rejected; not-deployed rejected", async () => {
+test("faid:configure: masked set-env + restart; unknown key rejected; not-deployed rejected", async () => {
   const dir = makeChannelDir();
   let exists = true;
   const { ctx, calls, logLines } = makeCtx(dir, (args) => {
     if (args[0] === "app" && args[2] === "--guid") return { code: exists ? 0 : 1, stdout: "" };
     return { code: 0, stdout: "" };
   });
-  const handlers = createL3Handlers(ctx);
+  const handlers = createFaidHandlers(ctx);
 
-  const r = await handlers["l3:configure"]({ appId: "arch", env: { FIGAF_API_CLIENT_SECRET: "super-secret" } });
+  const r = await handlers["faid:configure"]({ appId: "arch", env: { FIGAF_API_CLIENT_SECRET: "super-secret" } });
   assert.equal(r.ok, true);
   assert.equal(r.applied, 1);
   const setCall = calls.find((c) => c.args[0] === "set-env");
@@ -270,26 +270,26 @@ test("l3:configure: masked set-env + restart; unknown key rejected; not-deployed
   assert.deepEqual(setCall.opts.auditArgs.slice(-1), ["<value hidden>"]); // …or the audit log
   assert.ok(calls.some((c) => c.args[0] === "restart" && c.args[1] === "arch-backend"));
 
-  const bad = await handlers["l3:configure"]({ appId: "arch", env: { EVIL: "x" } });
+  const bad = await handlers["faid:configure"]({ appId: "arch", env: { EVIL: "x" } });
   assert.equal(bad.ok, false);
 
   exists = false;
-  const notDeployed = await handlers["l3:configure"]({ appId: "arch", env: { FIGAF_BASE_URL: "https://x" } });
+  const notDeployed = await handlers["faid:configure"]({ appId: "arch", env: { FIGAF_BASE_URL: "https://x" } });
   assert.equal(notDeployed.ok, false);
   assert.match(notDeployed.error, /not deployed/);
 });
 
-test("l3:disable / l3:remove touch ONLY the app's own CF apps — the shared platform stays", async () => {
+test("faid:disable / faid:remove touch ONLY the app's own CF apps — the shared platform stays", async () => {
   const dir = makeChannelDir();
   const { ctx, calls } = makeCtx(dir, () => ({ code: 0, stdout: "" }));
-  const handlers = createL3Handlers(ctx);
+  const handlers = createFaidHandlers(ctx);
 
-  await handlers["l3:disable"]({ appId: "arch" });
+  await handlers["faid:disable"]({ appId: "arch" });
   const stops = calls.filter((c) => c.args[0] === "stop").map((c) => c.args[1]);
   assert.deepEqual(stops, ["arch-frontend"]);
 
   calls.length = 0;
-  await handlers["l3:remove"]({ appId: "arch" });
+  await handlers["faid:remove"]({ appId: "arch" });
   const dels = calls.filter((c) => c.args[0] === "delete").map((c) => c.args[1]);
   assert.deepEqual(dels, ["arch-frontend"]);
   assert.ok(calls.every((c) => c.args[0] !== "delete" || c.args[2] === "-f"));
@@ -299,7 +299,7 @@ test("l3:disable / l3:remove touch ONLY the app's own CF apps — the shared pla
   assert.ok(!mutating.some((c) => c.args.includes("arch-backend")), "the platform connector must never be stopped/deleted by app actions");
 });
 
-test("l3:status: rolls up states, reads FIGAF_APP_VERSION and routes", async () => {
+test("faid:status: rolls up states, reads FIGAF_APP_VERSION and routes", async () => {
   const dir = makeChannelDir();
   const { ctx } = makeCtx(dir, (args) => {
     if (args[0] === "target") return { code: 0, stdout: "org: o\nspace: myspace\n" };
@@ -318,8 +318,8 @@ test("l3:status: rolls up states, reads FIGAF_APP_VERSION and routes", async () 
     }
     return { code: 0, stdout: "" };
   });
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:status"]();
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:status"]();
   assert.equal(r.ok, true, JSON.stringify(r));
   // catalog v2: the connector is its own platform row; the app row holds the frontend
   assert.equal(r.platform.status, "running");
@@ -332,7 +332,7 @@ test("l3:status: rolls up states, reads FIGAF_APP_VERSION and routes", async () 
   assert.equal(r.apps[0].parts[0].route, "arch.example.com");
 });
 
-test("l3:install verifies artifact checksums when the catalog carries them", async () => {
+test("faid:install verifies artifact checksums when the catalog carries them", async () => {
   const crypto = require("node:crypto");
   const goodSha = crypto.createHash("sha256").update("zip").digest("hex"); // fixture zips contain "zip"
   const withSha = JSON.parse(JSON.stringify(CATALOG));
@@ -345,8 +345,8 @@ test("l3:install verifies artifact checksums when the catalog carries them", asy
     if (args[0] === "app" && args[1] === "arch-backend") return { code: 0, stdout: "routes:   b.example.com\n" };
     return { code: 0, stdout: "" };
   });
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:install"]({ appId: "arch" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.match(r.error, /checksum mismatch for frontend.zip/);
   // the platform (good checksum) deployed; the frontend was stopped BEFORE any push
@@ -354,16 +354,16 @@ test("l3:install verifies artifact checksums when the catalog carries them", asy
   assert.ok(!calls.some((c) => c.args[0] === "push" && c.args[1] === "arch-frontend"));
 });
 
-test("l3:health: GETs route + healthPath and parses JSON", async () => {
+test("faid:health: GETs route + healthPath and parses JSON", async () => {
   const dir = makeChannelDir();
   const { ctx, events } = makeCtx(dir, (args) => {
     if (args[0] === "app" && args[1] === "arch-backend") return { code: 0, stdout: "routes:   arch.example.com\n" };
     return { code: 0, stdout: "" };
   });
-  const handlers = createL3Handlers(ctx);
+  const handlers = createFaidHandlers(ctx);
 
   httpsBodyResult = { status: 200, body: "{\"ok\":true}" };
-  const r = await handlers["l3:health"]({ appId: "arch" });
+  const r = await handlers["faid:health"]({ appId: "arch" });
   assert.equal(r.ok, true);
   assert.equal(r.httpStatus, 200);
   assert.equal(r.url, "https://arch.example.com/health/connections");
@@ -372,7 +372,7 @@ test("l3:health: GETs route + healthPath and parses JSON", async () => {
 
   // 503 with a diagnostic body (unconfigured connections): body must survive.
   httpsBodyResult = { status: 503, body: "{\"ok\":false,\"postgres\":{\"ok\":true}}" };
-  const bad = await handlers["l3:health"]({ appId: "arch" });
+  const bad = await handlers["faid:health"]({ appId: "arch" });
   assert.equal(bad.ok, false);
   assert.equal(bad.httpStatus, 503);
   assert.deepEqual(bad.body, { ok: false, postgres: { ok: true } });
@@ -392,7 +392,7 @@ const CATALOG_V3 = {
 
 function makeV3Dir() {
   const dir = makeChannelDir(CATALOG_V3);
-  fs.writeFileSync(path.join(dir, "xs-security.json"), "{\"xsappname\":\"figaf-l3l4\"}");
+  fs.writeFileSync(path.join(dir, "xs-security.json"), "{\"xsappname\":\"figaf-faid\"}");
   return dir;
 }
 
@@ -432,7 +432,7 @@ test("loadCatalog: v3 services validated (needs name/offering/plan; plans must c
   assert.match(loadCatalog(bad2).error, /containing the default plan/);
 });
 
-test("l3:services: reports status per service and the manager binding for bindToManager entries", async () => {
+test("faid:services: reports status per service and the manager binding for bindToManager entries", async () => {
   const dir = makeV3Dir();
   const { ctx } = makeCtx(dir, cfServiceResponder(
     { db: "create in progress", credstore: "create succeeded" },
@@ -440,8 +440,8 @@ test("l3:services: reports status per service and the manager binding for bindTo
       ? { code: 0, stdout: JSON.stringify({ resources: [{ guid: "b1" }] }) } : null
   ));
   ctx.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:services"]();
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:services"]();
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.selfApp, "figaf-manager");
   const by = Object.fromEntries(r.services.map((s) => [s.name, s]));
@@ -454,7 +454,7 @@ test("l3:services: reports status per service and the manager binding for bindTo
   assert.deepEqual(by.xsuaa.plans, ["application"]); // default when no plans listed
 });
 
-test("l3:provisionServices: creates only the missing ones, passes configs as files, honors a plan override, waits until ready", async () => {
+test("faid:provisionServices: creates only the missing ones, passes configs as files, honors a plan override, waits until ready", async () => {
   const dir = makeV3Dir();
   const state = { credstore: "create succeeded" }; // db + xsuaa missing
   let polls = 0;
@@ -475,8 +475,8 @@ test("l3:provisionServices: creates only the missing ones, passes configs as fil
   });
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:provisionServices"]({ plans: { db: "standard" } });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:provisionServices"]({ plans: { db: "standard" } });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual(r.created.sort(), ["db", "xsuaa"]);
   const creates = calls.filter((c) => c.args[0] === "create-service");
@@ -492,7 +492,7 @@ test("l3:provisionServices: creates only the missing ones, passes configs as fil
   assert.ok(!creates.some((c) => c.args[3] === "credstore"));
 });
 
-test("l3:provisionServices: rejects a plan that the catalog does not allow; inline config written to a file", async () => {
+test("faid:provisionServices: rejects a plan that the catalog does not allow; inline config written to a file", async () => {
   const dir = makeV3Dir();
   const state = {}; // everything missing
   const { ctx, calls } = makeCtx(dir, (args) => {
@@ -502,8 +502,8 @@ test("l3:provisionServices: rejects a plan that the catalog does not allow; inli
     return null;
   });
   ctx.sleep = async () => {};
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:provisionServices"]({ plans: { db: "enterprise" } });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:provisionServices"]({ plans: { db: "enterprise" } });
   assert.equal(r.ok, false);
   assert.match(r.error, /plan 'enterprise' is not allowed for db/);
   // the other two were still created
@@ -513,7 +513,7 @@ test("l3:provisionServices: rejects a plan that the catalog does not allow; inli
   assert.deepEqual(JSON.parse(fs.readFileSync(cs.args[5], "utf8")), { authentication: { type: "basic" } });
 });
 
-test("l3:provisionServices: a failed creation is reported, the deadline stops the wait", async () => {
+test("faid:provisionServices: a failed creation is reported, the deadline stops the wait", async () => {
   const dir = makeV3Dir();
   const state = { xsuaa: "create succeeded" };
   const { ctx } = makeCtx(dir, (args) => {
@@ -527,14 +527,14 @@ test("l3:provisionServices: a failed creation is reported, the deadline stops th
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
   ctx.provisionTimeoutMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:provisionServices"]({});
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:provisionServices"]({});
   assert.equal(r.ok, false);
   assert.ok(r.failed.some((f) => f.name === "db"));
   assert.deepEqual(r.timedOut, ["credstore"]);
 });
 
-test("l3:provisionServices: a FAILED instance is deleted and created again; cf error text is carried", async () => {
+test("faid:provisionServices: a FAILED instance is deleted and created again; cf error text is carried", async () => {
   const dir = makeV3Dir();
   const state = { db: "create failed", xsuaa: "create succeeded", credstore: "create succeeded" };
   let deleted = false;
@@ -549,8 +549,8 @@ test("l3:provisionServices: a FAILED instance is deleted and created again; cf e
   });
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:provisionServices"]({});
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:provisionServices"]({});
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.ok(deleted, "the failed instance must be deleted first");
   assert.deepEqual(r.created, ["db"]);
@@ -565,46 +565,46 @@ test("l3:provisionServices: a FAILED instance is deleted and created again; cf e
     return null;
   });
   ctx2.sleep = async () => {};
-  const r2 = await createL3Handlers(ctx2)["l3:provisionServices"]({});
+  const r2 = await createFaidHandlers(ctx2)["faid:provisionServices"]({});
   assert.equal(r2.ok, false);
   assert.match(r2.error, /plan quota exceeded/);
 });
 
-test("l3:bindManagerService + l3:restartSelf use the manager's own app name; refused for non-manager services", async () => {
+test("faid:bindManagerService + faid:restartSelf use the manager's own app name; refused for non-manager services", async () => {
   const dir = makeV3Dir();
   const { ctx, calls } = makeCtx(dir, () => null);
   ctx.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager" });
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:bindManagerService"]({ name: "credstore" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:bindManagerService"]({ name: "credstore" });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.restartRequired, true);
   assert.deepEqual(calls.find((c) => c.args[0] === "bind-service").args, ["bind-service", "figaf-manager", "credstore"]);
-  const bad = await handlers["l3:bindManagerService"]({ name: "db" });
+  const bad = await handlers["faid:bindManagerService"]({ name: "db" });
   assert.equal(bad.ok, false);
-  const rs = await handlers["l3:restartSelf"]();
+  const rs = await handlers["faid:restartSelf"]();
   assert.equal(rs.ok, true);
   assert.deepEqual(calls.find((c) => c.args[0] === "restart").args, ["restart", "figaf-manager"]);
 });
 
-test("l3:bindManagerService outside CF (no self app name) is a clear error", async () => {
+test("faid:bindManagerService outside CF (no self app name) is a clear error", async () => {
   const { ctx } = makeCtx(makeV3Dir(), () => null);
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:bindManagerService"]({ name: "credstore" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:bindManagerService"]({ name: "credstore" });
   assert.equal(r.ok, false);
   assert.match(r.error, /not running in CF/);
 });
 
-test("l3:install refuses while a required service instance is missing (v3), v2 catalogs unaffected", async () => {
+test("faid:install refuses while a required service instance is missing (v3), v2 catalogs unaffected", async () => {
   const dir = makeV3Dir();
   const { ctx, calls } = makeCtx(dir, cfServiceResponder({ xsuaa: "create succeeded" })); // db missing
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:install"]({ appId: "arch" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.match(r.error, /required service instance\(s\) missing: db/);
   assert.ok(!calls.some((c) => c.args[0] === "push"), "nothing must be deployed");
 });
 
-test("l3:figafSystems: finds app+router pairs running figaf/app images, returns router URLs", async () => {
+test("faid:figafSystems: finds app+router pairs running figaf/app images, returns router URLs", async () => {
   const dir = makeChannelDir();
   const { ctx } = makeCtx(dir, (args) => {
     if (args[0] === "curl" && /\/v3\/apps\?/.test(args[1])) {
@@ -626,8 +626,8 @@ test("l3:figafSystems: finds app+router pairs running figaf/app images, returns 
     if (args[1] === "/v3/apps/r4/routes") return { code: 0, stdout: JSON.stringify({ resources: [{ url: "demo.cfapps.eu10-004.hana.ondemand.com" }] }) };
     return { code: 0, stdout: "" };
   });
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:figafSystems"]();
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:figafSystems"]();
   assert.equal(r.ok, true, JSON.stringify(r));
   // "figaf"-named candidates are checked first; both image repos are accepted.
   assert.deepEqual(r.systems, [
@@ -638,18 +638,18 @@ test("l3:figafSystems: finds app+router pairs running figaf/app images, returns 
 
 test("handlers report a friendly error when the host has no release source", async () => {
   const { ctx } = makeCtx(null, () => ({ code: 0, stdout: "" }));
-  const handlers = createL3Handlers(ctx);
-  for (const ch of ["l3:catalog", "l3:status", "l3:releases"]) {
+  const handlers = createFaidHandlers(ctx);
+  for (const ch of ["faid:catalog", "faid:status", "faid:releases"]) {
     const r = await handlers[ch]({});
     assert.equal(r.ok, false);
-    assert.match(r.error, /No release source configured.*FIGAF_L3_RELEASE_URL/);
+    assert.match(r.error, /No release source configured.*FIGAF_PLATFORM_RELEASE_URL/);
   }
   // An older host adapter that only knows the directory seam still works.
   const dir = makeChannelDir();
   const { ctx: legacy } = makeCtx(null, () => ({ code: 0, stdout: "" }));
-  delete legacy.host.resolveL3ReleaseSource;
-  legacy.host.resolveL3ArtifactsDir = () => dir;
-  const c = await createL3Handlers(legacy)["l3:catalog"]({});
+  delete legacy.host.resolvePlatformReleaseSource;
+  legacy.host.resolvePlatformArtifactsDir = () => dir;
+  const c = await createFaidHandlers(legacy)["faid:catalog"]({});
   assert.equal(c.ok, true);
   assert.equal(c.source.kind, "local");
 });
@@ -659,13 +659,13 @@ test("handlers report a friendly error when the host has no release source", asy
 function makeV3DirWithPlaceholder() {
   const dir = makeChannelDir(CATALOG_V3);
   fs.writeFileSync(path.join(dir, "xs-security.json"), JSON.stringify({
-    xsappname: "figaf-l3l4",
+    xsappname: "figaf-faid",
     "oauth2-configuration": { "redirect-uris": [`https://*.${APPS_DOMAIN_PLACEHOLDER}/**`] },
   }));
   return dir;
 }
 
-test("l3:provisionServices: fills __CF_APPS_DOMAIN__ in a release config file from the landscape's cfapps domain; the release file stays untouched", async () => {
+test("faid:provisionServices: fills __CF_APPS_DOMAIN__ in a release config file from the landscape's cfapps domain; the release file stays untouched", async () => {
   const dir = makeV3DirWithPlaceholder();
   const state = { db: "create succeeded", credstore: "create succeeded" }; // only xsuaa missing
   const { ctx, calls, logLines } = makeCtx(dir, (args) => {
@@ -678,8 +678,8 @@ test("l3:provisionServices: fills __CF_APPS_DOMAIN__ in a release config file fr
   });
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:provisionServices"]({});
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:provisionServices"]({});
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual(r.created, ["xsuaa"]);
   const xsCreate = calls.find((c) => c.args[0] === "create-service" && c.args[3] === "xsuaa");
@@ -692,7 +692,7 @@ test("l3:provisionServices: fills __CF_APPS_DOMAIN__ in a release config file fr
   assert.ok(logLines.some((l) => l.includes("cfapps.eu10-004.hana.ondemand.com")), "the filled domain is shown in the terminal");
 });
 
-test("l3:provisionServices: no cfapps domain in the landscape -> the XSUAA instance is reported failed with a clear error and is not created", async () => {
+test("faid:provisionServices: no cfapps domain in the landscape -> the XSUAA instance is reported failed with a clear error and is not created", async () => {
   const dir = makeV3DirWithPlaceholder();
   const state = { db: "create succeeded", credstore: "create succeeded" };
   const { ctx, calls } = makeCtx(dir, (args) => {
@@ -703,8 +703,8 @@ test("l3:provisionServices: no cfapps domain in the landscape -> the XSUAA insta
   });
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:provisionServices"]({});
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:provisionServices"]({});
   assert.equal(r.ok, false);
   assert.equal(r.failed.length, 1);
   assert.equal(r.failed[0].name, "xsuaa");
@@ -712,8 +712,8 @@ test("l3:provisionServices: no cfapps domain in the landscape -> the XSUAA insta
   assert.ok(!calls.some((c) => c.args[0] === "create-service"), "nothing is created without a domain");
 });
 
-test("l3:provisionServices: the XSUAA config is ALWAYS composed - the manager's roles are added to the release part (decision 0009)", async () => {
-  const dir = makeV3Dir(); // release part: {"xsappname":"figaf-l3l4"}, no placeholder
+test("faid:provisionServices: the XSUAA config is ALWAYS composed - the manager's roles are added to the release part (decision 0009)", async () => {
+  const dir = makeV3Dir(); // release part: {"xsappname":"figaf-faid"}, no placeholder
   const state = { db: "create succeeded", credstore: "create succeeded" };
   const { ctx, calls } = makeCtx(dir, (args) => {
     if (domainsResponder(args)) return domainsResponder(args);
@@ -723,19 +723,19 @@ test("l3:provisionServices: the XSUAA config is ALWAYS composed - the manager's 
   });
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:provisionServices"]({});
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:provisionServices"]({});
   assert.equal(r.ok, true, JSON.stringify(r));
   const xsCreate = calls.find((c) => c.args[0] === "create-service" && c.args[3] === "xsuaa");
   assert.notEqual(xsCreate.args[5], path.join(dir, "xs-security.json"), "the composed copy, never the release file");
   const doc = JSON.parse(fs.readFileSync(xsCreate.args[5], "utf8"));
-  assert.equal(doc.xsappname, "figaf-l3l4");
-  assert.ok(doc.scopes.some((s) => s.name === "$XSAPPNAME.FigafL3L4ManagerOperator"), "manager scope merged in");
-  assert.ok(doc["role-collections"].some((c) => c.name === "FigafL3L4-Manager-Admin"), "manager collection merged in");
+  assert.equal(doc.xsappname, "figaf-faid");
+  assert.ok(doc.scopes.some((s) => s.name === "$XSAPPNAME.FAIDManagerOperator"), "manager scope merged in");
+  assert.ok(doc["role-collections"].some((c) => c.name === "FAID-Manager-Admin"), "manager collection merged in");
   assert.deepEqual(doc["oauth2-configuration"]["redirect-uris"], ["https://*.cfapps.eu10-004.hana.ondemand.com/**"]);
 });
 
-test("l3:provisionServices: a NON-xsuaa config file without the placeholder is passed to cf as-is from the release dir", async () => {
+test("faid:provisionServices: a NON-xsuaa config file without the placeholder is passed to cf as-is from the release dir", async () => {
   const catalog = {
     ...CATALOG_V3,
     services: [{ name: "dest", offering: "destination", plan: "lite", configFile: "dest.json", purpose: "destinations" }],
@@ -750,8 +750,8 @@ test("l3:provisionServices: a NON-xsuaa config file without the placeholder is p
   });
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:provisionServices"]({});
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:provisionServices"]({});
   assert.equal(r.ok, true, JSON.stringify(r));
   const create = calls.find((c) => c.args[0] === "create-service" && c.args[3] === "dest");
   assert.equal(create.args[5], path.join(dir, "dest.json"));
@@ -760,7 +760,7 @@ test("l3:provisionServices: a NON-xsuaa config file without the placeholder is p
 
 // ─── E. one XSUAA instance for the manager and the apps (decision 0009) ──────
 
-test("l3:ensureXsuaa: instance missing -> create-service figaf-l3l4-xsuaa with the composed document, then wait until ready", async () => {
+test("faid:ensureXsuaa: instance missing -> create-service figaf-faid-xsuaa with the composed document, then wait until ready", async () => {
   const dir = makeV3DirWithPlaceholder();
   const state = {};
   const { ctx, calls } = makeCtx(dir, (args) => {
@@ -771,24 +771,24 @@ test("l3:ensureXsuaa: instance missing -> create-service figaf-l3l4-xsuaa with t
   });
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:ensureXsuaa"]({});
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:ensureXsuaa"]({});
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.created, true);
-  assert.equal(r.instance, "figaf-l3l4-xsuaa");
+  assert.equal(r.instance, "figaf-faid-xsuaa");
   const create = calls.find((c) => c.args[0] === "create-service");
-  assert.deepEqual(create.args.slice(0, 5), ["create-service", "xsuaa", "application", "figaf-l3l4-xsuaa", "-c"]);
+  assert.deepEqual(create.args.slice(0, 5), ["create-service", "xsuaa", "application", "figaf-faid-xsuaa", "-c"]);
   const doc = JSON.parse(fs.readFileSync(create.args[5], "utf8"));
-  assert.equal(doc.xsappname, "figaf-l3l4");
-  assert.ok(doc.scopes.some((s) => s.name === "$XSAPPNAME.FigafL3L4ManagerOperator"), "manager scope added");
-  assert.ok(doc["role-collections"].some((c) => c.name === "FigafL3L4-Manager-Admin"));
+  assert.equal(doc.xsappname, "figaf-faid");
+  assert.ok(doc.scopes.some((s) => s.name === "$XSAPPNAME.FAIDManagerOperator"), "manager scope added");
+  assert.ok(doc["role-collections"].some((c) => c.name === "FAID-Manager-Admin"));
   assert.deepEqual(doc["oauth2-configuration"]["redirect-uris"], ["https://*.cfapps.eu10-004.hana.ondemand.com/**"]);
   assert.ok(!calls.some((c) => c.args[0] === "update-service"), "no update on a fresh create");
 });
 
-test("l3:ensureXsuaa: instance present -> update-service with the composed document; updateOnly on a missing instance does nothing", async () => {
+test("faid:ensureXsuaa: instance present -> update-service with the composed document; updateOnly on a missing instance does nothing", async () => {
   const dir = makeV3DirWithPlaceholder();
-  const state = { "figaf-l3l4-xsuaa": "create succeeded" };
+  const state = { "figaf-faid-xsuaa": "create succeeded" };
   const { ctx, calls } = makeCtx(dir, (args) => {
     if (domainsResponder(args)) return domainsResponder(args);
     if (args[0] === "update-service") { state[args[1]] = "update succeeded"; return { code: 0, stdout: "" }; }
@@ -797,43 +797,43 @@ test("l3:ensureXsuaa: instance present -> update-service with the composed docum
   });
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:ensureXsuaa"]({});
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:ensureXsuaa"]({});
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.updated, true);
   assert.equal(r.created, false);
   const upd = calls.find((c) => c.args[0] === "update-service");
-  assert.deepEqual(upd.args.slice(0, 3), ["update-service", "figaf-l3l4-xsuaa", "-c"]);
+  assert.deepEqual(upd.args.slice(0, 3), ["update-service", "figaf-faid-xsuaa", "-c"]);
   assert.ok(!calls.some((c) => c.args[0] === "create-service"));
 
-  delete state["figaf-l3l4-xsuaa"];
+  delete state["figaf-faid-xsuaa"];
   calls.length = 0;
-  const r2 = await handlers["l3:ensureXsuaa"]({ updateOnly: true });
+  const r2 = await handlers["faid:ensureXsuaa"]({ updateOnly: true });
   assert.equal(r2.ok, true);
   assert.equal(r2.skipped, true);
   assert.ok(!calls.some((c) => c.args[0] === "update-service" || c.args[0] === "create-service"), "nothing created or updated");
 });
 
-test("l3:ensureXsuaa: without a release on the host the manager part alone is used (xsappname figaf-l3l4)", async () => {
+test("faid:ensureXsuaa: without a release on the host the manager part alone is used (xsappname figaf-faid)", async () => {
   const { ctx, calls } = makeCtx(null, (args) => {
     if (domainsResponder(args)) return domainsResponder(args);
     if (args[0] === "create-service") return { code: 0, stdout: "" };
     if (args[0] === "service") return calls.some((c) => c.args[0] === "create-service") ? { code: 0, stdout: "status:    create succeeded\n" } : { code: 1, stdout: "" };
     return null;
   });
-  ctx.host.resolveL3ArtifactsDir = () => null;
+  ctx.host.resolvePlatformArtifactsDir = () => null;
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:ensureXsuaa"]({});
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:ensureXsuaa"]({});
   assert.equal(r.ok, true, JSON.stringify(r));
   const create = calls.find((c) => c.args[0] === "create-service");
   const doc = JSON.parse(fs.readFileSync(create.args[5], "utf8"));
-  assert.equal(doc.xsappname, "figaf-l3l4");
-  assert.deepEqual(doc["role-collections"].map((c) => c.name), ["FigafL3L4-Manager-Operator", "FigafL3L4-Manager-Admin"]);
+  assert.equal(doc.xsappname, "figaf-faid");
+  assert.deepEqual(doc["role-collections"].map((c) => c.name), ["FAID-Manager-Operator", "FAID-Manager-Admin"]);
 });
 
-test("l3:prepareManagerServices: creates ONLY the manager-bound services and binds them to the manager - no restart, db and xsuaa untouched", async () => {
+test("faid:prepareManagerServices: creates ONLY the manager-bound services and binds them to the manager - no restart, db and xsuaa untouched", async () => {
   const dir = makeV3DirWithPlaceholder();
   const state = {};
   const { ctx, calls } = makeCtx(dir, (args) => {
@@ -845,8 +845,8 @@ test("l3:prepareManagerServices: creates ONLY the manager-bound services and bin
   ctx.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:prepareManagerServices"]({});
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:prepareManagerServices"]({});
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual(r.created, ["credstore"]);
   assert.deepEqual(r.bound, ["credstore"]);
@@ -858,7 +858,7 @@ test("l3:prepareManagerServices: creates ONLY the manager-bound services and bin
   assert.ok(!calls.some((c) => c.args[0] === "curl" && c.args[1] === "/v3/domains"), "xsuaa is not touched here");
 });
 
-test("l3:prepareManagerServices: re-run with the instance present and already bound is a success; a create failure is reported and nothing is bound", async () => {
+test("faid:prepareManagerServices: re-run with the instance present and already bound is a success; a create failure is reported and nothing is bound", async () => {
   const dir = makeV3DirWithPlaceholder();
   const { ctx: ctx1, calls: calls1 } = makeCtx(dir, (args) => {
     if (args[0] === "service" && args[1] === "credstore") return { code: 0, stdout: "status:    create succeeded\n" };
@@ -867,7 +867,7 @@ test("l3:prepareManagerServices: re-run with the instance present and already bo
   });
   ctx1.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
   ctx1.sleep = async () => {}; ctx1.pollIntervalMs = 0;
-  const r1 = await createL3Handlers(ctx1)["l3:prepareManagerServices"]({});
+  const r1 = await createFaidHandlers(ctx1)["faid:prepareManagerServices"]({});
   assert.equal(r1.ok, true, JSON.stringify(r1));
   assert.deepEqual(r1.created, []);
   assert.deepEqual(r1.bound, ["credstore"]);
@@ -880,15 +880,15 @@ test("l3:prepareManagerServices: re-run with the instance present and already bo
   });
   ctx2.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
   ctx2.sleep = async () => {}; ctx2.pollIntervalMs = 0;
-  const r2 = await createL3Handlers(ctx2)["l3:prepareManagerServices"]({});
+  const r2 = await createFaidHandlers(ctx2)["faid:prepareManagerServices"]({});
   assert.equal(r2.ok, false);
   assert.match(r2.error, /only one instance allowed/);
   assert.ok(!calls2.some((c) => c.args[0] === "bind-service"), "nothing bound after a failed create");
 });
 
-test("l3:install on a v3 release: the shared XSUAA instance is UPDATED (role refresh) before the shared backend is pushed", async () => {
+test("faid:install on a v3 release: the shared XSUAA instance is UPDATED (role refresh) before the shared backend is pushed", async () => {
   const dir = makeV3DirWithPlaceholder();
-  const state = { db: "create succeeded", xsuaa: "create succeeded", credstore: "create succeeded", "figaf-l3l4-xsuaa": "create succeeded" };
+  const state = { db: "create succeeded", xsuaa: "create succeeded", credstore: "create succeeded", "figaf-faid-xsuaa": "create succeeded" };
   const { ctx, calls } = makeCtx(dir, (args) => {
     if (domainsResponder(args)) return domainsResponder(args);
     if (args[0] === "update-service") { state[args[1]] = "update succeeded"; return { code: 0, stdout: "" }; }
@@ -899,8 +899,8 @@ test("l3:install on a v3 release: the shared XSUAA instance is UPDATED (role ref
   });
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:install"]({ appId: "arch" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, true, JSON.stringify(r));
   const seq = calls.map((c) => c.args[0]);
   const upd = seq.indexOf("update-service");
@@ -908,12 +908,12 @@ test("l3:install on a v3 release: the shared XSUAA instance is UPDATED (role ref
   assert.ok(upd !== -1, "update-service ran");
   assert.ok(push !== -1, "push ran");
   assert.ok(upd < push, "role refresh happens before the first push");
-  assert.equal(calls[upd].args[1], "figaf-l3l4-xsuaa");
+  assert.equal(calls[upd].args[1], "figaf-faid-xsuaa");
 });
 
-test("l3:install on a v3 release: a failed role refresh stops the install before any push, with step/cfApp/command", async () => {
+test("faid:install on a v3 release: a failed role refresh stops the install before any push, with step/cfApp/command", async () => {
   const dir = makeV3DirWithPlaceholder();
-  const state = { db: "create succeeded", xsuaa: "create succeeded", credstore: "create succeeded", "figaf-l3l4-xsuaa": "create succeeded" };
+  const state = { db: "create succeeded", xsuaa: "create succeeded", credstore: "create succeeded", "figaf-faid-xsuaa": "create succeeded" };
   const { ctx, calls } = makeCtx(dir, (args) => {
     if (domainsResponder(args)) return domainsResponder(args);
     if (args[0] === "update-service") return { code: 1, stdout: "", stderr: "Service broker error: invalid xs-security" };
@@ -923,12 +923,12 @@ test("l3:install on a v3 release: a failed role refresh stops the install before
   });
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:install"]({ appId: "arch" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.equal(r.step, "roles");
-  assert.equal(r.cfApp, "figaf-l3l4-xsuaa");
-  assert.match(r.error, /role refresh of figaf-l3l4-xsuaa failed/);
+  assert.equal(r.cfApp, "figaf-faid-xsuaa");
+  assert.match(r.error, /role refresh of figaf-faid-xsuaa failed/);
   assert.match(r.error, /invalid xs-security/);
   assert.ok(!calls.some((c) => c.args[0] === "push"), "nothing pushed");
 });
@@ -937,7 +937,7 @@ test("l3:install on a v3 release: a failed role refresh stops the install before
 //
 // Release 0.4.0 could not be installed from a manager deployed through the BTP
 // cockpit upload: the manager's own manifest.yml sat in its working directory,
-// `cf push` applied it to the L3 app and CAPI rejected "Buildpack and
+// `cf push` applied it to the FAID app and CAPI rejected "Buildpack and
 // Buildpacks fields cannot be used together". The console showed nothing: the
 // generic error was wiped by the status refresh within a second and the CLI
 // text never reached the result. These tests lock both fixes.
@@ -955,7 +955,7 @@ test("buildPushArgs always passes --no-manifest, fresh install and update alike"
 });
 
 test("cliFailureDetail: last stderr lines win, the bare FAILED marker is skipped, stdout and spawn error are fallbacks", () => {
-  const { cliFailureDetail } = require("./l3-apps");
+  const { cliFailureDetail } = require("./faid-apps");
   assert.equal(
     cliFailureDetail({ stdout: "Pushing app x...\nApplying manifest file /home/vcap/app/manifest.yml...\nFAILED\n", stderr: "For application 'x': Buildpack and Buildpacks fields cannot be used together.\n" }),
     "For application 'x': Buildpack and Buildpacks fields cannot be used together."
@@ -967,7 +967,7 @@ test("cliFailureDetail: last stderr lines win, the bare FAILED marker is skipped
   assert.equal(cliFailureDetail({ stderr: "x".repeat(1000) }).length, 400);
 });
 
-test("l3:install: a failed cf push carries step, CF app, command and what cf said; the terminal ends with one FAILED line; the phase event has the detail", async () => {
+test("faid:install: a failed cf push carries step, CF app, command and what cf said; the terminal ends with one FAILED line; the phase event has the detail", async () => {
   const dir = makeChannelDir();
   const { ctx, logLines, events } = makeCtx(dir, (args) => {
     if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "" }; // fresh
@@ -980,8 +980,8 @@ test("l3:install: a failed cf push carries step, CF app, command and what cf sai
     }
     return { code: 0, stdout: "" };
   });
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:install"]({ appId: "arch" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.equal(r.step, "push");
   assert.equal(r.cfApp, "arch-backend");
@@ -992,21 +992,21 @@ test("l3:install: a failed cf push carries step, CF app, command and what cf sai
   // one red summary line closes the action in the terminal drawer
   assert.ok(logLines.some((l) => l === `install arch FAILED at step "push" (arch-backend): ${r.error}`), logLines.join("\n"));
   // the phase event carries the same detail (for a future stepper view)
-  const ph = events.find((e) => e.channel === "l3:phase" && e.payload.step === "push" && e.payload.state === "error");
+  const ph = events.find((e) => e.channel === "faid:phase" && e.payload.step === "push" && e.payload.state === "error");
   assert.ok(ph);
   assert.match(ph.payload.detail, /Buildpack and Buildpacks/);
   // nothing after the failed push
   assert.ok(!logLines.some((l) => /bind-service|set-env|^cf start/.test(l)));
 });
 
-test("l3:install: a required bind failure names the step, the CF app and the command", async () => {
+test("faid:install: a required bind failure names the step, the CF app and the command", async () => {
   const dir = makeChannelDir();
   const { ctx } = makeCtx(dir, (args) => {
     if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "" };
     if (args[0] === "bind-service" && args[2] === "db") return { code: 1, stdout: "FAILED\n", stderr: "Service instance db not found\n" };
     return { code: 0, stdout: "" };
   });
-  const r = await createL3Handlers(ctx)["l3:install"]({ appId: "arch" });
+  const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.equal(r.step, "bind");
   assert.equal(r.cfApp, "arch-backend");
@@ -1014,7 +1014,7 @@ test("l3:install: a required bind failure names the step, the CF app and the com
   assert.match(r.error, /^bind-service db failed — does the service instance exist in this space\?: Service instance db not found$/);
 });
 
-test("l3:install: a failed cf start keeps the 'see the staging log' pointer and adds cf's last lines", async () => {
+test("faid:install: a failed cf start keeps the 'see the staging log' pointer and adds cf's last lines", async () => {
   const dir = makeChannelDir();
   const { ctx } = makeCtx(dir, (args) => {
     if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "" };
@@ -1022,47 +1022,47 @@ test("l3:install: a failed cf start keeps the 'see the staging log' pointer and 
     if (args[0] === "start") return { code: 1, stdout: "Staging app...\nFAILED\n", stderr: "Start unsuccessful\nTIP: use 'cf logs arch-backend --recent' for more information\n" };
     return { code: 0, stdout: "" };
   });
-  const r = await createL3Handlers(ctx)["l3:install"]({ appId: "arch" });
+  const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.equal(r.step, "start");
   assert.equal(r.command, "cf start arch-backend");
   assert.match(r.error, /see the staging log in the terminal: Start unsuccessful \| TIP: use 'cf logs arch-backend --recent'/);
 });
 
-test("l3:remove / l3:disable failures carry step, CF app, command and cf's message; success ends with a green done line", async () => {
+test("faid:remove / faid:disable failures carry step, CF app, command and cf's message; success ends with a green done line", async () => {
   const dir = makeChannelDir();
   const { ctx, logLines } = makeCtx(dir, (args) => {
     if (args[0] === "delete") return { code: 1, stdout: "FAILED\n", stderr: "App 'arch-frontend' not found\n" };
     return { code: 0, stdout: "" };
   });
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:remove"]({ appId: "arch" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:remove"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.equal(r.step, "delete");
   assert.equal(r.cfApp, "arch-frontend");
   assert.equal(r.command, "cf delete arch-frontend -f");
   assert.equal(r.error, "cf delete arch-frontend failed: App 'arch-frontend' not found");
   assert.ok(logLines.some((l) => l.startsWith('remove arch FAILED at step "delete" (arch-frontend):')));
-  const ok = await handlers["l3:disable"]({ appId: "arch" });
+  const ok = await handlers["faid:disable"]({ appId: "arch" });
   assert.equal(ok.ok, true);
   assert.ok(logLines.includes("disable arch: done"));
 });
 
-test("l3:install refused for a missing required service is reported as FAILED in the terminal too", async () => {
+test("faid:install refused for a missing required service is reported as FAILED in the terminal too", async () => {
   const v3 = JSON.parse(JSON.stringify(CATALOG));
   v3.services = [{ name: "db", offering: "postgresql-db", plan: "free" }];
   const dir = makeChannelDir(v3);
   const { ctx, logLines, calls } = makeCtx(dir, (args) => (args[0] === "service" ? { code: 1, stdout: "" } : { code: 0, stdout: "" }));
-  const r = await createL3Handlers(ctx)["l3:install"]({ appId: "arch" });
+  const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.match(r.error, /required service instance\(s\) missing: db, xsuaa/);
   assert.ok(logLines.some((l) => l.startsWith("install arch FAILED: required service instance(s) missing")));
   assert.ok(!calls.some((c) => c.args[0] === "push"), "nothing may be pushed");
 });
 
-// ─── Setup step 1: l3:prepareSpaceServices (docs/l3-console/SPEC.md 5.2) ────────────
+// ─── Setup step 1: faid:prepareSpaceServices (docs/faid-apps-console/SPEC.md 5.2) ────────────
 
-test("l3:prepareSpaceServices: creates every missing instance except XSUAA with the chosen plans, waits only for the Credential Store, binds it, leaves the database creating (pending); no restart", async () => {
+test("faid:prepareSpaceServices: creates every missing instance except XSUAA with the chosen plans, waits only for the Credential Store, binds it, leaves the database creating (pending); no restart", async () => {
   const dir = makeV3DirWithPlaceholder();
   const state = {}; // everything missing
   const { ctx, calls, logLines } = makeCtx(dir, (args) => {
@@ -1078,15 +1078,15 @@ test("l3:prepareSpaceServices: creates every missing instance except XSUAA with 
   ctx.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
   ctx.sleep = async () => { throw new Error("must not wait for the database"); };
   ctx.pollIntervalMs = 0;
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:prepareSpaceServices"]({ plans: { db: "standard", credstore: "free" } });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:prepareSpaceServices"]({ plans: { db: "standard", credstore: "free" } });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual(r.created.sort(), ["credstore", "db"]);
   assert.deepEqual(r.bound, ["credstore"]);
   assert.deepEqual(r.pending, ["db"]);
   assert.deepEqual(r.failed, []);
   const creates = calls.filter((c) => c.args[0] === "create-service");
-  assert.deepEqual(creates.map((c) => c.args[3]).sort(), ["credstore", "db"], "xsuaa is owned by l3:ensureXsuaa");
+  assert.deepEqual(creates.map((c) => c.args[3]).sort(), ["credstore", "db"], "xsuaa is owned by faid:ensureXsuaa");
   assert.deepEqual(creates.find((c) => c.args[3] === "db").args.slice(0, 4), ["create-service", "postgresql-db", "standard", "db"]);
   assert.deepEqual(calls.find((c) => c.args[0] === "bind-service").args, ["bind-service", "figaf-manager", "credstore"]);
   assert.ok(!calls.some((c) => c.args[0] === "restart"), "no restart in this step");
@@ -1094,7 +1094,7 @@ test("l3:prepareSpaceServices: creates every missing instance except XSUAA with 
   assert.ok(logLines.some((l) => /db: still being created/.test(l)), "the terminal says the database is left creating");
 });
 
-test("l3:prepareSpaceServices: a plan the catalog does not allow fails that instance only; the Credential Store is still created and bound; ok:false carries the reason", async () => {
+test("faid:prepareSpaceServices: a plan the catalog does not allow fails that instance only; the Credential Store is still created and bound; ok:false carries the reason", async () => {
   const dir = makeV3DirWithPlaceholder();
   const state = {};
   const { ctx, calls } = makeCtx(dir, (args) => {
@@ -1105,7 +1105,7 @@ test("l3:prepareSpaceServices: a plan the catalog does not allow fails that inst
   });
   ctx.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
   ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
-  const r = await createL3Handlers(ctx)["l3:prepareSpaceServices"]({ plans: { db: "enterprise" } });
+  const r = await createFaidHandlers(ctx)["faid:prepareSpaceServices"]({ plans: { db: "enterprise" } });
   assert.equal(r.ok, false);
   assert.match(r.error, /plan 'enterprise' is not allowed for db/);
   assert.deepEqual(r.created, ["credstore"]);
@@ -1113,7 +1113,7 @@ test("l3:prepareSpaceServices: a plan the catalog does not allow fails that inst
   assert.ok(!calls.some((c) => c.args[0] === "create-service" && c.args[3] === "db"));
 });
 
-test("l3:prepareSpaceServices: a Credential Store that cannot be created (free plan used up) is reported and NOT bound; the database is still started", async () => {
+test("faid:prepareSpaceServices: a Credential Store that cannot be created (free plan used up) is reported and NOT bound; the database is still started", async () => {
   const dir = makeV3DirWithPlaceholder();
   const state = {};
   const { ctx, calls } = makeCtx(dir, (args) => {
@@ -1127,7 +1127,7 @@ test("l3:prepareSpaceServices: a Credential Store that cannot be created (free p
   });
   ctx.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
   ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
-  const r = await createL3Handlers(ctx)["l3:prepareSpaceServices"]({});
+  const r = await createFaidHandlers(ctx)["faid:prepareSpaceServices"]({});
   assert.equal(r.ok, false);
   assert.match(r.error, /only one instance allowed/);
   assert.deepEqual(r.created, ["db"]);
@@ -1136,7 +1136,7 @@ test("l3:prepareSpaceServices: a Credential Store that cannot be created (free p
   assert.ok(!calls.some((c) => c.args[0] === "bind-service"), "nothing bound after a failed create");
 });
 
-test("l3:prepareSpaceServices: instances that exist are left alone; an already bound Credential Store is a success; no release = nothing to do", async () => {
+test("faid:prepareSpaceServices: instances that exist are left alone; an already bound Credential Store is a success; no release = nothing to do", async () => {
   const dir = makeV3DirWithPlaceholder();
   const { ctx, calls } = makeCtx(dir, (args) => {
     if (args[0] === "service") return { code: 0, stdout: "status:    create succeeded\n" };
@@ -1145,7 +1145,7 @@ test("l3:prepareSpaceServices: instances that exist are left alone; an already b
   });
   ctx.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
   ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
-  const r = await createL3Handlers(ctx)["l3:prepareSpaceServices"]({});
+  const r = await createFaidHandlers(ctx)["faid:prepareSpaceServices"]({});
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual(r.created, []);
   assert.deepEqual(r.pending, []);
@@ -1153,13 +1153,13 @@ test("l3:prepareSpaceServices: instances that exist are left alone; an already b
   assert.ok(!calls.some((c) => c.args[0] === "create-service"));
 
   const { ctx: ctx2 } = makeCtx(dir, () => null);
-  ctx2.host.resolveL3ReleaseSource = () => null;
-  const r2 = await createL3Handlers(ctx2)["l3:prepareSpaceServices"]({});
+  ctx2.host.resolvePlatformReleaseSource = () => null;
+  const r2 = await createFaidHandlers(ctx2)["faid:prepareSpaceServices"]({});
   assert.equal(r2.ok, true);
   assert.match(r2.note, /nothing to prepare/);
 });
 
-test("l3:provisionServices with waitOnly: only the named instances are awaited; a not-awaited instance that already failed is reported failed", async () => {
+test("faid:provisionServices with waitOnly: only the named instances are awaited; a not-awaited instance that already failed is reported failed", async () => {
   const dir = makeV3Dir();
   const state = {};
   let polls = 0;
@@ -1178,18 +1178,18 @@ test("l3:provisionServices with waitOnly: only the named instances are awaited; 
     return null;
   });
   ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
-  const r = await createL3Handlers(ctx)["l3:provisionServices"]({ waitOnly: ["credstore", "xsuaa"] });
+  const r = await createFaidHandlers(ctx)["faid:provisionServices"]({ waitOnly: ["credstore", "xsuaa"] });
   assert.equal(r.ok, false);
   assert.ok(r.failed.some((f) => f.name === "db"), JSON.stringify(r));
   assert.deepEqual(r.timedOut, []);
   assert.deepEqual(r.pending, []);
 });
 
-test("l3:install refuses with a pointer to Setup step 3 while a required instance is missing", async () => {
+test("faid:install refuses with a pointer to Setup step 3 while a required instance is missing", async () => {
   const dir = makeV3Dir();
   const { ctx } = makeCtx(dir, cfServiceResponder({ xsuaa: "create succeeded", credstore: "create succeeded" }));
   ctx.sleep = async () => {};
-  const r = await createL3Handlers(ctx)["l3:install"]({ appId: "arch" });
+  const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.match(r.error, /required service instance\(s\) missing: db — create them first \(Setup, step 3\)/);
 });
@@ -1219,17 +1219,17 @@ test("a second install is refused while the first one runs - and pushes nothing"
     if (!held && args[0] === "push") { held = true; await firstDone; }
     return realRun(cmd, args, opts);
   };
-  const handlers = createL3Handlers(ctx);
+  const handlers = createFaidHandlers(ctx);
 
-  const first = handlers["l3:install"]({ appId: "arch" });
+  const first = handlers["faid:install"]({ appId: "arch" });
   await new Promise((r) => setImmediate(r));            // let it reach the hold
   assert.equal((runningAction() || {}).action, "install", "the manager must report the running action");
-  const running = await handlers["l3:running"]();
+  const running = await handlers["faid:running"]();
   assert.equal(running.running.action, "install");
   assert.equal(running.running.appId, "arch");
 
   const pushesBefore = calls.filter((c) => c.args[0] === "push").length;
-  const second = await handlers["l3:install"]({ appId: "arch" });
+  const second = await handlers["faid:install"]({ appId: "arch" });
   assert.equal(second.ok, false);
   assert.equal(second.busy, true);
   assert.equal(second.running.action, "install");
@@ -1243,7 +1243,7 @@ test("a second install is refused while the first one runs - and pushes nothing"
   const r = await first;
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(runningAction(), null, "the lock is released when the action ends");
-  const runningEvents = events.filter((e) => e.channel === "l3:running");
+  const runningEvents = events.filter((e) => e.channel === "faid:running");
   assert.equal(runningEvents.length, 2, "one event on start, one on end");
   assert.equal(runningEvents[0].payload.action, "install");
   assert.equal(runningEvents[1].payload, null);
@@ -1261,11 +1261,11 @@ test("every lifecycle action shares the lock, and a failure releases it", async 
     if (first && args[0] === "stop") { first = false; await held; }
     return realRun(cmd, args, opts);
   };
-  const handlers = createL3Handlers(ctx);
-  const disable = handlers["l3:disable"]({ appId: "arch" });
+  const handlers = createFaidHandlers(ctx);
+  const disable = handlers["faid:disable"]({ appId: "arch" });
   await new Promise((r) => setImmediate(r));
   for (const action of ["install", "update", "enable", "remove", "configure"]) {
-    const r = await handlers["l3:" + action]({ appId: "arch", env: { FIGAF_BASE_URL: "https://f" } });
+    const r = await handlers["faid:" + action]({ appId: "arch", env: { FIGAF_BASE_URL: "https://f" } });
     assert.equal(r.busy, true, action + " must wait for the running disable");
   }
   release();
@@ -1274,13 +1274,13 @@ test("every lifecycle action shares the lock, and a failure releases it", async 
 
   // A failing action must not leave the lock behind.
   const bad = makeCtx(dir, (args) => (args[0] === "stop" ? { code: 1, stderr: "boom" } : { code: 0, stdout: "" }));
-  const h2 = createL3Handlers(bad.ctx);
-  const f = await h2["l3:disable"]({ appId: "arch" });
+  const h2 = createFaidHandlers(bad.ctx);
+  const f = await h2["faid:disable"]({ appId: "arch" });
   assert.equal(f.ok, false);
   assert.equal(runningAction(), null, "the lock must be released after a failure too");
 });
 
-test("l3:status: a stopped part with a staging build reads as installing", async () => {
+test("faid:status: a stopped part with a staging build reads as installing", async () => {
   resetRunningAction();
   const dir = makeChannelDir();
   const { ctx } = makeCtx(dir, (args) => {
@@ -1300,7 +1300,7 @@ test("l3:status: a stopped part with a staging build reads as installing", async
     if (args[0] === "curl" && /routes$/.test(args[1])) return { code: 0, stdout: JSON.stringify({ resources: [] }) };
     return { code: 0, stdout: "" };
   });
-  const r = await createL3Handlers(ctx)["l3:status"]();
+  const r = await createFaidHandlers(ctx)["faid:status"]();
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.platform.status, "installing");
   assert.equal(r.platform.parts[0].staging, true);
@@ -1308,7 +1308,7 @@ test("l3:status: a stopped part with a staging build reads as installing", async
   assert.equal(r.apps[0].status, "not-installed", "the app row has no CF app yet");
 });
 
-test("l3:status: a running install marks the app row and the shared backend", async () => {
+test("faid:status: a running install marks the app row and the shared backend", async () => {
   resetRunningAction();
   const dir = makeChannelDir();
   let release;
@@ -1328,10 +1328,10 @@ test("l3:status: a running install marks the app row and the shared backend", as
     if (first && args[0] === "push") { first = false; await held; }
     return realRun(cmd, args, opts);
   };
-  const handlers = createL3Handlers(ctx);
-  const install = handlers["l3:install"]({ appId: "arch" });
+  const handlers = createFaidHandlers(ctx);
+  const install = handlers["faid:install"]({ appId: "arch" });
   await new Promise((r) => setImmediate(r));
-  const st = await handlers["l3:status"]();
+  const st = await handlers["faid:status"]();
   assert.equal(st.running.action, "install");
   assert.equal(st.running.appId, "arch");
   // Nothing exists in CF yet, but a deploy IS running - both rows must say so.
@@ -1366,7 +1366,7 @@ const CATALOG_V4 = {
 
 function makeV4Dir() {
   const dir = makeChannelDir(CATALOG_V4);
-  fs.writeFileSync(path.join(dir, "xs-security.json"), "{\"xsappname\":\"figaf-l3l4\"}");
+  fs.writeFileSync(path.join(dir, "xs-security.json"), "{\"xsappname\":\"figaf-faid\"}");
   return dir;
 }
 
@@ -1390,23 +1390,23 @@ test("wantedService: required always, optional only when its group is asked for"
   assert.equal(wantedService(optional, ["pipo"]), true);
 });
 
-test("l3:prepareSpaceServices: the optional PI/PO services are NOT created by default", async () => {
+test("faid:prepareSpaceServices: the optional PI/PO services are NOT created by default", async () => {
   const dir = makeV4Dir();
   const { ctx, calls } = makeCtx(dir, servicesResponder({}));
   ctx.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
   ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
-  const r = await createL3Handlers(ctx)["l3:prepareSpaceServices"]({ plans: {} });
+  const r = await createFaidHandlers(ctx)["faid:prepareSpaceServices"]({ plans: {} });
   assert.equal(r.ok, true, JSON.stringify(r));
   const created = calls.filter((c) => c.args[0] === "create-service").map((c) => c.args[3]).sort();
   assert.deepEqual(created, ["credstore", "db"]);
 });
 
-test("l3:prepareSpaceServices: groups:['pipo'] adds connectivity and destination", async () => {
+test("faid:prepareSpaceServices: groups:['pipo'] adds connectivity and destination", async () => {
   const dir = makeV4Dir();
   const { ctx, calls } = makeCtx(dir, servicesResponder({}));
   ctx.host.getDeployTargetForSelf = () => ({ appName: "figaf-manager", apiUrl: "u", orgName: "o", spaceName: "s" });
   ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
-  const r = await createL3Handlers(ctx)["l3:prepareSpaceServices"]({ plans: {}, groups: ["pipo"] });
+  const r = await createFaidHandlers(ctx)["faid:prepareSpaceServices"]({ plans: {}, groups: ["pipo"] });
   assert.equal(r.ok, true, JSON.stringify(r));
   const created = calls.filter((c) => c.args[0] === "create-service");
   assert.deepEqual(created.map((c) => c.args[3]).sort(), ["credstore", "db", "figaf-connectivity", "figaf-destination"]);
@@ -1417,32 +1417,32 @@ test("l3:prepareSpaceServices: groups:['pipo'] adds connectivity and destination
   assert.ok(!r.bound.includes("figaf-destination"), "shared services are not bound to the manager");
 });
 
-test("l3:provisionServices: `only` creates one optional instance (the Base services repair path)", async () => {
+test("faid:provisionServices: `only` creates one optional instance (the Base services repair path)", async () => {
   const dir = makeV4Dir();
   const { ctx, calls } = makeCtx(dir, servicesResponder({}));
   ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
-  const r = await createL3Handlers(ctx)["l3:provisionServices"]({ only: ["figaf-destination"] });
+  const r = await createFaidHandlers(ctx)["faid:provisionServices"]({ only: ["figaf-destination"] });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual(calls.filter((c) => c.args[0] === "create-service").map((c) => c.args[3]), ["figaf-destination"]);
 });
 
-test("l3:provisionServices: without `only` or `groups` the optional services stay untouched", async () => {
+test("faid:provisionServices: without `only` or `groups` the optional services stay untouched", async () => {
   const dir = makeV4Dir();
   const { ctx, calls } = makeCtx(dir, servicesResponder({}));
   ctx.sleep = async () => {}; ctx.pollIntervalMs = 0;
-  await createL3Handlers(ctx)["l3:provisionServices"]({});
+  await createFaidHandlers(ctx)["faid:provisionServices"]({});
   const created = calls.filter((c) => c.args[0] === "create-service").map((c) => c.args[3]);
   assert.ok(!created.includes("figaf-connectivity"), created.join(","));
   assert.ok(!created.includes("figaf-destination"), created.join(","));
 });
 
-test("l3:services: reports optional, group and sharedWith so the panel can show them apart", async () => {
+test("faid:services: reports optional, group and sharedWith so the panel can show them apart", async () => {
   const dir = makeV4Dir();
   const { ctx } = makeCtx(dir, (args) => {
     if (args[0] === "service") return { code: 1, stdout: "" }; // everything missing
     return null;
   });
-  const r = await createL3Handlers(ctx)["l3:services"]();
+  const r = await createFaidHandlers(ctx)["faid:services"]();
   assert.equal(r.ok, true);
   const dest = r.services.find((s) => s.name === "figaf-destination");
   assert.equal(dest.optional, true);
@@ -1453,7 +1453,7 @@ test("l3:services: reports optional, group and sharedWith so the panel can show 
   assert.equal(db.group, "");
 });
 
-test("l3:services: optional instances report backendDeployed and boundToBackend (the panel offers the bind only when needed)", async () => {
+test("faid:services: optional instances report backendDeployed and boundToBackend (the panel offers the bind only when needed)", async () => {
   const dir = makeV4Dir();
   const { ctx, calls } = makeCtx(dir, (args) => {
     if (args[0] === "app" && args[1] === "arch-backend" && args[2] === "--guid") return { code: 0, stdout: "guid\n" };
@@ -1466,7 +1466,7 @@ test("l3:services: optional instances report backendDeployed and boundToBackend 
     }
     return null;
   });
-  const r = await createL3Handlers(ctx)["l3:services"]();
+  const r = await createFaidHandlers(ctx)["faid:services"]();
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.backend, "arch-backend");
   assert.equal(r.backendDeployed, true);
@@ -1481,14 +1481,14 @@ test("l3:services: optional instances report backendDeployed and boundToBackend 
   assert.equal(calls.filter((c) => c.args[0] === "curl" && /app_names=arch-backend$/.test(c.args[1])).length, 2, "one binding probe per ready optional instance");
 });
 
-test("l3:services: backend not deployed -> backendDeployed false, boundToBackend null, no binding probe", async () => {
+test("faid:services: backend not deployed -> backendDeployed false, boundToBackend null, no binding probe", async () => {
   const dir = makeV4Dir();
   const { ctx, calls } = makeCtx(dir, (args) => {
     if (args[0] === "app" && args[1] === "arch-backend" && args[2] === "--guid") return { code: 1, stdout: "" };
     if (args[0] === "service") return { code: 0, stdout: "status:    create succeeded\n" };
     return null;
   });
-  const r = await createL3Handlers(ctx)["l3:services"]();
+  const r = await createFaidHandlers(ctx)["faid:services"]();
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.backendDeployed, false);
   const dest = r.services.find((s) => s.name === "figaf-destination");
@@ -1497,17 +1497,17 @@ test("l3:services: backend not deployed -> backendDeployed false, boundToBackend
   assert.ok(!calls.some((c) => c.args[0] === "curl" && /app_names=arch-backend/.test(c.args[1])), "no binding probe without a backend");
 });
 
-test("l3:services: a release without optional instances never probes the backend", async () => {
+test("faid:services: a release without optional instances never probes the backend", async () => {
   const dir = makeV3Dir();
   const { ctx, calls } = makeCtx(dir, cfServiceResponder({ db: "create succeeded", credstore: "create succeeded" }));
-  const r = await createL3Handlers(ctx)["l3:services"]();
+  const r = await createFaidHandlers(ctx)["faid:services"]();
   assert.equal(r.ok, true);
   assert.equal(r.backendDeployed, null);
   assert.ok(r.services.every((s) => s.backendDeployed === null && s.boundToBackend === null));
   assert.ok(!calls.some((c) => c.args[0] === "curl" && /service_credential_bindings/.test(c.args[1])), "no binding probe when nothing is optional");
 });
 
-// l3:destinationCheck — the manager asks the shared backend, because only the
+// faid:destinationCheck — the manager asks the shared backend, because only the
 // backend is bound to the destination service (decision 0011).
 
 function backendRouteResponder(args) {
@@ -1517,14 +1517,14 @@ function backendRouteResponder(args) {
   return null;
 }
 
-test("l3:destinationCheck: asks the backend and passes its answer through", async () => {
+test("faid:destinationCheck: asks the backend and passes its answer through", async () => {
   const dir = makeV4Dir();
   const { ctx, events } = makeCtx(dir, backendRouteResponder);
   httpsBodyResult = {
     status: 200,
     body: JSON.stringify({ ok: true, found: true, name: "PO_TPM_DEV", proxyType: "OnPremise", locationId: "pi-dev", warning: null }),
   };
-  const r = await createL3Handlers(ctx)["l3:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
+  const r = await createFaidHandlers(ctx)["faid:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
   assert.equal(r.ok, true);
   assert.equal(r.found, true);
   assert.equal(r.proxyType, "OnPremise");
@@ -1533,53 +1533,53 @@ test("l3:destinationCheck: asks the backend and passes its answer through", asyn
   assert.ok(asked.some((u) => u.endsWith("/health/destination?name=PO_TPM_DEV")), asked.join(","));
 });
 
-test("l3:destinationCheck: a name is required and nothing is called", async () => {
+test("faid:destinationCheck: a name is required and nothing is called", async () => {
   const dir = makeV4Dir();
   const { ctx, events } = makeCtx(dir, backendRouteResponder);
-  const r = await createL3Handlers(ctx)["l3:destinationCheck"]({ destinationName: "  " });
+  const r = await createFaidHandlers(ctx)["faid:destinationCheck"]({ destinationName: "  " });
   assert.equal(r.ok, false);
   assert.match(r.error, /destinationName is required/);
   assert.equal(events.filter((e) => e.channel === "httpsBody").length, 0);
 });
 
-test("l3:destinationCheck: no backend route -> ok:false with the install hint", async () => {
+test("faid:destinationCheck: no backend route -> ok:false with the install hint", async () => {
   const dir = makeV4Dir();
   const { ctx } = makeCtx(dir, (args) => {
     if (args[0] === "app" && args[1] === "arch-backend") return { code: 1, stdout: "" }; // not deployed
     return null;
   });
-  const r = await createL3Handlers(ctx)["l3:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
+  const r = await createFaidHandlers(ctx)["faid:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
   assert.equal(r.ok, false);
   assert.match(r.error, /not deployed yet/);
   assert.match(r.hint, /Install the platform/);
 });
 
-test("l3:destinationCheck: an old backend without the endpoint says so", async () => {
+test("faid:destinationCheck: an old backend without the endpoint says so", async () => {
   const dir = makeV4Dir();
   const { ctx } = makeCtx(dir, backendRouteResponder);
   httpsBodyResult = { status: 404, body: "Cannot GET /health/destination" };
-  const r = await createL3Handlers(ctx)["l3:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
+  const r = await createFaidHandlers(ctx)["faid:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
   assert.equal(r.ok, false);
   assert.match(r.error, /no [/]health[/]destination endpoint/);
   assert.match(r.hint, /Update the installation/);
   httpsBodyResult = { status: 200, body: "{\"ok\":true}" };
 });
 
-test("l3:destinationCheck: the backend's own failure (503) is reported as a failed check", async () => {
+test("faid:destinationCheck: the backend's own failure (503) is reported as a failed check", async () => {
   const dir = makeV4Dir();
   const { ctx } = makeCtx(dir, backendRouteResponder);
   httpsBodyResult = {
     status: 503,
     body: JSON.stringify({ ok: false, error: "this backend is not bound to a destination service instance", hint: "Create the PI/PO services" }),
   };
-  const r = await createL3Handlers(ctx)["l3:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
+  const r = await createFaidHandlers(ctx)["faid:destinationCheck"]({ destinationName: "PO_TPM_DEV" });
   assert.equal(r.ok, false);
   assert.match(r.error, /not bound to a destination service/);
   assert.match(r.hint, /Create the PI[/]PO services/);
   httpsBodyResult = { status: 200, body: "{\"ok\":true}" };
 });
 
-// l3:bindPlatformService — the repair path for an optional instance created
+// faid:bindPlatformService — the repair path for an optional instance created
 // AFTER the backend was deployed (decision 0011). A binding only reaches a CF
 // app after a restart, so it binds and restarts.
 
@@ -1593,48 +1593,48 @@ function bindResponder(state) {
   };
 }
 
-test("l3:bindPlatformService: binds the instance to the shared backend, then restarts it", async () => {
+test("faid:bindPlatformService: binds the instance to the shared backend, then restarts it", async () => {
   const dir = makeV4Dir();
   const { ctx, calls } = makeCtx(dir, bindResponder({ "figaf-destination": "create succeeded" }));
-  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-destination" });
+  const r = await createFaidHandlers(ctx)["faid:bindPlatformService"]({ name: "figaf-destination" });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.cfApp, "arch-backend");
   assert.deepEqual(calls.find((c) => c.args[0] === "bind-service").args, ["bind-service", "arch-backend", "figaf-destination"]);
   assert.deepEqual(calls.find((c) => c.args[0] === "restart").args, ["restart", "arch-backend"]);
 });
 
-test("l3:bindPlatformService: only the catalog's optional services may be bound", async () => {
+test("faid:bindPlatformService: only the catalog's optional services may be bound", async () => {
   const dir = makeV4Dir();
-  const { ctx, calls } = makeCtx(dir, bindResponder({ "figaf-l3l4-secret": "create succeeded" }));
-  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-l3l4-secret" });
+  const { ctx, calls } = makeCtx(dir, bindResponder({ "figaf-faid-secret": "create succeeded" }));
+  const r = await createFaidHandlers(ctx)["faid:bindPlatformService"]({ name: "figaf-faid-secret" });
   assert.equal(r.ok, false);
   assert.match(r.error, /not an optional service of the shared backend/);
   assert.ok(!calls.some((c) => c.args[0] === "bind-service"), "nothing is bound");
 });
 
-test("l3:bindPlatformService: an instance that is not ready is refused", async () => {
+test("faid:bindPlatformService: an instance that is not ready is refused", async () => {
   const dir = makeV4Dir();
   const { ctx, calls } = makeCtx(dir, bindResponder({})); // missing
-  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-destination" });
+  const r = await createFaidHandlers(ctx)["faid:bindPlatformService"]({ name: "figaf-destination" });
   assert.equal(r.ok, false);
   assert.match(r.error, /not ready yet/);
   assert.ok(!calls.some((c) => c.args[0] === "bind-service"));
 });
 
-test("l3:bindPlatformService: no backend deployed -> says a later install binds it anyway", async () => {
+test("faid:bindPlatformService: no backend deployed -> says a later install binds it anyway", async () => {
   const dir = makeV4Dir();
   const { ctx, calls } = makeCtx(dir, (args) => {
     if (args[0] === "service") return { code: 0, stdout: "status:    create succeeded\n" };
     if (args[0] === "app") return { code: 1, stdout: "" };
     return null;
   });
-  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-connectivity" });
+  const r = await createFaidHandlers(ctx)["faid:bindPlatformService"]({ name: "figaf-connectivity" });
   assert.equal(r.ok, false);
   assert.match(r.error, /is not deployed/);
   assert.ok(!calls.some((c) => c.args[0] === "bind-service"));
 });
 
-test("l3:bindPlatformService: an already bound instance is fine; the restart still runs", async () => {
+test("faid:bindPlatformService: an already bound instance is fine; the restart still runs", async () => {
   const dir = makeV4Dir();
   const { ctx, calls } = makeCtx(dir, (args) => {
     if (args[0] === "service") return { code: 0, stdout: "status:    create succeeded\n" };
@@ -1643,13 +1643,13 @@ test("l3:bindPlatformService: an already bound instance is fine; the restart sti
     if (args[0] === "restart") return { code: 0, stdout: "OK" };
     return null;
   });
-  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-destination" });
+  const r = await createFaidHandlers(ctx)["faid:bindPlatformService"]({ name: "figaf-destination" });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.alreadyBound, true);
   assert.ok(calls.some((c) => c.args[0] === "restart"));
 });
 
-test("l3:bindPlatformService: a failed restart is reported, and says the binding is in place", async () => {
+test("faid:bindPlatformService: a failed restart is reported, and says the binding is in place", async () => {
   const dir = makeV4Dir();
   const { ctx } = makeCtx(dir, (args) => {
     if (args[0] === "service") return { code: 0, stdout: "status:    create succeeded\n" };
@@ -1658,7 +1658,7 @@ test("l3:bindPlatformService: a failed restart is reported, and says the binding
     if (args[0] === "restart") return { code: 1, stdout: "", stderr: "FAILED\ninsufficient memory" };
     return null;
   });
-  const r = await createL3Handlers(ctx)["l3:bindPlatformService"]({ name: "figaf-destination" });
+  const r = await createFaidHandlers(ctx)["faid:bindPlatformService"]({ name: "figaf-destination" });
   assert.equal(r.ok, false);
   assert.match(r.error, /is bound, but cf restart/);
   assert.equal(r.step, "restart");

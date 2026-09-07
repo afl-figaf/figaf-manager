@@ -1,6 +1,6 @@
 "use strict";
 // The passcode CF login targets the manager's OWN org/space automatically
-// (figaf-l3-l4 SPEC "its own Cloud Foundry space"): `cf login` is spawned with
+// (figaf-platform SPEC "its own Cloud Foundry space"): `cf login` is spawned with
 // `-o`/`-s`, so the operator is never asked a question with exactly one
 // correct answer. A wrong pick would install the platform into the wrong
 // space, and nothing downstream re-checks the target.
@@ -45,12 +45,12 @@ const { createOrchestrator } = require("./orchestrator");
 const SELF = {
   apiUrl: "https://api.cf.eu10-004.hana.ondemand.com",
   orgName: "Figaf ApS_figafpartner-1",
-  spaceName: "figaf-l3-l4",
+  spaceName: "figaf-platform",
   appName: "figaf-manager",
   uris: [],
 };
 
-// consoleUI: the L3 console frame. `null` models a host that does not
+// consoleUI: the FAID Apps console frame. `null` models a host that does not
 // implement isConsoleUI at all - then the pin must stay off. (A default
 // parameter cannot express that: JS treats `undefined` as "not passed".)
 function makeHost({ hosted = true, self = SELF, consoleUI = true } = {}) {
@@ -160,11 +160,11 @@ test("pinned login succeeds: cf:loggedIn is sent and org/space are known without
 });
 
 test("pinned login fails on the space: cf:loginFailed carries an explanation, not just a code", async () => {
-  loginExit = { code: 1, stderr: "FAILED\nSpace 'figaf-l3-l4' not found\n" };
+  loginExit = { code: 1, stderr: "FAILED\nSpace 'figaf-platform' not found\n" };
   const { events } = await startLogin({ host: makeHost(), apiUrl: SELF.apiUrl });
   const failed = events.find((e) => e.name === "cf:loginFailed");
   assert.ok(failed, "cf:loginFailed must be sent");
-  assert.match(failed.payload.error, /figaf-l3-l4/);
+  assert.match(failed.payload.error, /figaf-platform/);
   assert.match(failed.payload.error, /Space Developer/);
 });
 

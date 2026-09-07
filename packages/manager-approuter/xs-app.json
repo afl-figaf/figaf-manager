@@ -23,7 +23,7 @@
       "target": "/stream$1",
       "destination": "figaf-manager-internal",
       "authenticationType": "xsuaa",
-      "scope": ["$XSAPPNAME.FigafL3L4ManagerOperator", "$XSAPPNAME.FigafManagerOperator"],
+      "scope": ["$XSAPPNAME.FAIDManagerOperator", "$XSAPPNAME.FigafManagerOperator"],
       "csrfProtection": false
     },
     {
@@ -31,7 +31,7 @@
       "target": "/rpc/$1",
       "destination": "figaf-manager-internal",
       "authenticationType": "xsuaa",
-      "scope": ["$XSAPPNAME.FigafL3L4ManagerOperator", "$XSAPPNAME.FigafManagerOperator"],
+      "scope": ["$XSAPPNAME.FAIDManagerOperator", "$XSAPPNAME.FigafManagerOperator"],
       "csrfProtection": false
     },
     {
@@ -39,7 +39,7 @@
       "target": "$1",
       "destination": "figaf-manager-internal",
       "authenticationType": "xsuaa",
-      "scope": ["$XSAPPNAME.FigafL3L4ManagerOperator", "$XSAPPNAME.FigafManagerOperator"],
+      "scope": ["$XSAPPNAME.FAIDManagerOperator", "$XSAPPNAME.FigafManagerOperator"],
       "csrfProtection": false
     }
   ]

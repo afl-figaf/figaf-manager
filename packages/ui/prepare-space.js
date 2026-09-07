@@ -1,13 +1,13 @@
-// "Prepare the space" - Setup step 1 of the hosted console (docs/l3-console/SPEC.md
+// "Prepare the space" - Setup step 1 of the hosted console (docs/faid-apps-console/SPEC.md
 // 5.2). The whole run as ONE sequence over the window.figaf RPC surface, so
 // the screen (screen-setup-page.jsx) only renders phases and the result.
 // Pure logic, browser-globals like setup-checklist.js; prepare-space.test.js
 // runs it under node:test with a fake api. No React, no DOM.
 //
 // Sequence (every phase is reported through onPhase(id, status, sub)):
-//   create-xsuaa     cf:createXsuaa            create or update figaf-l3l4-xsuaa (always)
+//   create-xsuaa     cf:createXsuaa            create or update figaf-faid-xsuaa (always)
 //   assign-role      xsuaa:assignRoleCollection  optional; non-fatal
-//   services         l3:prepareSpaceServices     base services with the chosen plans;
+//   services         faid:prepareSpaceServices     base services with the chosen plans;
 //                                                Credential Store awaited + bound, database
 //                                                started only; non-fatal. `groups`
 //                                                adds OPTIONAL service groups the
@@ -27,14 +27,14 @@
   "use strict";
 
   var PHASES = [
-    { id: "create-xsuaa",   label: "Prepare the XSUAA instance",   sub: "cf create-service / update-service xsuaa application figaf-l3l4-xsuaa - roles of the manager and the apps" },
+    { id: "create-xsuaa",   label: "Prepare the XSUAA instance",   sub: "cf create-service / update-service xsuaa application figaf-faid-xsuaa - roles of the manager and the apps" },
     { id: "assign-role",    label: "Assign role collection",       sub: "btp assign security/role-collection (optional)" },
     { id: "services",       label: "Create the base services",     sub: "cf create-service with the plans you picked; Credential Store bound to the manager; the database keeps creating in the background" },
     { id: "push-approuter", label: "Deploy approuter",             sub: "cf push figaf-manager-approuter (bundled in the manager)" },
     { id: "map-route",      label: "Hand off public route",        sub: "the approuter takes over the public URL" },
     { id: "restage",        label: "Restart manager",              sub: "the manager binds to XSUAA and restarts once - 30-90 s offline" },
   ];
-  var DEFAULT_ROLE = "FigafL3L4-Manager-Admin";
+  var DEFAULT_ROLE = "FAID-Manager-Admin";
 
   function figafPrepareSpacePhases(includeAssign) {
     return PHASES.filter(function (p) { return p.id !== "assign-role" || includeAssign; })
@@ -73,7 +73,7 @@
       mark("create-xsuaa", "error", e1);
       return { ok: false, phase: "create-xsuaa", error: "prepare XSUAA: " + e1 };
     }
-    var inst = r1.instance || "figaf-l3l4-xsuaa";
+    var inst = r1.instance || "figaf-faid-xsuaa";
     mark("create-xsuaa", "done", r1.legacy ? "legacy instance already bound - nothing to create"
       : r1.updated ? inst + " updated with the current roles" : inst + " created");
 
@@ -100,8 +100,8 @@
     var services = null;
     mark("services", "running");
     try {
-      services = api.l3 && api.l3.prepareSpaceServices
-        ? await api.l3.prepareSpaceServices({ plans: plans, groups: groups })
+      services = api.faid && api.faid.prepareSpaceServices
+        ? await api.faid.prepareSpaceServices({ plans: plans, groups: groups })
         : { ok: true, created: [], bound: [], pending: [], note: "not available in this build" };
     } catch (e) {
       services = { ok: false, error: (e && e.message) || "prepareSpaceServices failed" };

@@ -100,7 +100,7 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
   const cfReady = btpLoggedIn || cfOnly;
   const canContinue = cfReady && cfLoggedIn;
   const showCfOnly = !!(window.figafModeFlags.features && window.figafModeFlags.features.cfOnlyLogin);
-  // Console gate, first sign-in: Cloud Foundry is what the L3 install needs,
+  // Console gate, first sign-in: Cloud Foundry is what the FAID Apps install needs,
   // the BTP login is optional (persistent-SSO role assignment, Figaf Tool
   // deployments). Only while NEITHER login exists - "Add BTP login" from
   // Session & access (CF already signed in) keeps the BTP-first layout.
@@ -477,7 +477,7 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
 
   // The two sign-in cards. Order: BTP first in the wizard and when adding a
   // BTP login to an existing CF session; Cloud Foundry first on the console
-  // gate (cfFirst) - the L3 install needs only cf.
+  // gate (cfFirst) - the FAID Apps install needs only cf.
   const btpCard = (
         <div className="card">
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: (btpLoggedIn || gaChoice || subaccountChoice) ? 10 : 14 }}>
@@ -767,7 +767,7 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
                         Target: <span className="kbd">{ownTarget.org}</span> / <span className="kbd">{ownTarget.space}</span>
                       </div>
                       <div style={{ marginTop: 3 }}>
-                        This manager runs in that space and installs the L3 applications there. The
+                        This manager runs in that space and installs the FAID Apps there. The
                         sign-in targets it for you, so there is no org or space to choose.
                       </div>
                     </div>

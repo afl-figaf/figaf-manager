@@ -26,14 +26,14 @@ zip is what ships.
 
 Servers started by global-setup (choose with `E2E_SERVERS=main,failure,remote`):
 
-- `main` on :8087 — the bundled release (`apps/figaf-manager/l3-artifacts`).
-  It is a LOCAL release source (`FIGAF_L3_ARTIFACTS_DIR`).
+- `main` on :8087 — the bundled release (`apps/figaf-manager/platform-artifacts`).
+  It is a LOCAL release source (`FIGAF_PLATFORM_ARTIFACTS_DIR`).
   Project `console` (read-only specs) and the install smoke run here.
 - `failure` on :8088 — the fixture release `e2e/fixtures/release-missing-service`.
   Its platform base needs a service instance that does not exist, so every
   Install is refused BEFORE any cf change. Project `failure-visibility` runs
   here: a real failure, zero side effects.
-- `remote` on :8089 — a REMOTE release source: `FIGAF_L3_RELEASE_URL` points
+- `remote` on :8089 — a REMOTE release source: `FIGAF_PLATFORM_RELEASE_URL` points
   at a static file server on :8090 that serves `e2e/fixtures/store` (the
   bucket layout, versions 0.0.1 and 0.0.2; regenerate with
   `node e2e/tools/make-fixture-store.js`). Project `release-store` runs here:
@@ -49,14 +49,14 @@ Run:
 Prerequisites on the dev machine:
 
 - `cf` CLI on PATH, logged in (`cf login --sso`) and targeted at the dev
-  space (today: org `Figaf ApS_figafpartner-1`, space `figaf-l3-l4`).
+  space (today: org `Figaf ApS_figafpartner-1`, space `figaf-platform`).
 - Node deps installed at the repo root (`npm install`).
-- For the install smoke: the release built into `l3-artifacts/`
-  (`node release/build.js --version x.y.z` in the figaf-l3-l4 repo) and a space WITHOUT the
+- For the install smoke: the release built into `platform-artifacts/`
+  (`node release/build.js --version x.y.z` in the figaf-platform repo) and a space WITHOUT the
   release's CF apps (the smoke refuses to start otherwise) but WITH the base
-  service instances (`figaf-l3l4-db`, `-xsuaa`, `-credstore`). The smoke
+  service instances (`figaf-faid-db`, `-xsuaa`, `-credstore`). The smoke
   installs from the LOCAL build on purpose: it gates a release before it is
-  published to the store (figaf-l3-l4 `release/README.md`).
+  published to the store (figaf-platform `release/README.md`).
 
 ## How auth works here (all real, nothing bypassed)
 
@@ -106,12 +106,12 @@ Dev-space helpers, run by a person, never by the specs:
 
 - `wipe-and-provision.ps1 -Mode status|wipe|provision` — empties the dev
   space before a virgin run (guardrail: refuses any target other than
-  `Figaf ApS_figafpartner-1` / `figaf-l3-l4`). `provision` creates the base
+  `Figaf ApS_figafpartner-1` / `figaf-platform`). `provision` creates the base
   services from the bundled release's `xs-security.json`
-  (`apps/figaf-manager/l3-artifacts/`, override with `-XsSecurity`); the
+  (`apps/figaf-manager/platform-artifacts/`, override with `-XsSecurity`); the
   customer path is the manager's Setup page, not this mode.
 - `manager-log-failures.ps1` — reads `cf logs --recent` of the manager and
   prints the failed CLI calls and failed actions in readable form
-  (`docs/l3-console/TROUBLESHOOTING.md`).
+  (`docs/faid-apps-console/TROUBLESHOOTING.md`).
 
-The full virgin install procedure (D1) is figaf-l3-l4 `docs/d1/MANUAL-RUNBOOK.md`.
+The full virgin install procedure (D1) is figaf-platform `docs/d1/MANUAL-RUNBOOK.md`.

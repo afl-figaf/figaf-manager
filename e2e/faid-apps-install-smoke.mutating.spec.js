@@ -25,7 +25,7 @@ const fs = require("fs");
 const path = require("path");
 
 const APP_ID = process.env.E2E_APP_ID || "b2b-archiving-setup";
-const RELEASE_DIR = process.env.FIGAF_L3_ARTIFACTS_DIR || path.join(__dirname, "..", "apps", "figaf-manager", "l3-artifacts");
+const RELEASE_DIR = process.env.FIGAF_PLATFORM_ARTIFACTS_DIR || path.join(__dirname, "..", "apps", "figaf-manager", "platform-artifacts");
 const catalog = JSON.parse(fs.readFileSync(path.join(RELEASE_DIR, "catalog.json"), "utf8").replace(/^﻿/, ""));
 const app = catalog.apps.find((a) => a.id === APP_ID);
 if (!app) throw new Error(`app '${APP_ID}' is not in ${RELEASE_DIR}/catalog.json`);
@@ -66,8 +66,8 @@ test.afterAll(() => {
 
 test(`install ${APP_ID} ${app.version}: platform base + app end Running with the version stamped, health answers, every push isolated from any manifest`, async ({ page }) => {
   await page.goto("/#/apps");
-  await expect(page.locator("h1.pane-title")).toHaveText("Figaf L3 applications");
-  const row = page.locator(`.l3-app-row[data-app="${APP_ID}"]`);
+  await expect(page.locator("h1.pane-title")).toHaveText("FAID Apps");
+  const row = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
   const platformRow = page.locator("[data-platform-row]");
   const panel = page.locator('[data-outcome="error"]');
   await expect(row).toContainText("Not installed");
@@ -78,7 +78,7 @@ test(`install ${APP_ID} ${app.version}: platform base + app end Running with the
   await page.locator(".terminal-bar").click();
   await expect(page.locator(".terminal")).toBeVisible();
 
-  const installDone = page.waitForResponse(isRpc("l3:install"), { timeout: 12 * 60_000 });
+  const installDone = page.waitForResponse(isRpc("faid:install"), { timeout: 12 * 60_000 });
   await row.getByRole("button", { name: `Install ${app.version}` }).click();
   const result = await (await installDone).json();
   // On failure the message carries the manager's own diagnosis (step, CF app, what cf said).
@@ -105,7 +105,7 @@ test(`install ${APP_ID} ${app.version}: platform base + app end Running with the
   if (app.healthPath) {
     let shown = false;
     for (let i = 0; i < 6 && !shown; i++) {
-      const done = page.waitForResponse(isRpc("l3:health"), { timeout: 60_000 });
+      const done = page.waitForResponse(isRpc("faid:health"), { timeout: 60_000 });
       await row.getByRole("button", { name: /health/i }).click();
       await done;
       shown = (await row.locator("pre").count()) > 0;
@@ -125,10 +125,10 @@ test(`install ${APP_ID} ${app.version}: platform base + app end Running with the
 test(`remove ${APP_ID} through the console: its CF apps go, the platform base stays`, async ({ page }) => {
   test.skip(KEEP, "E2E_KEEP_INSTALL=1");
   await page.goto("/#/apps");
-  const row = page.locator(`.l3-app-row[data-app="${APP_ID}"]`);
+  const row = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
   await expect(row).toContainText("Running");
   await row.getByRole("button", { name: "Remove" }).click();
-  const removeDone = page.waitForResponse(isRpc("l3:remove"), { timeout: 5 * 60_000 });
+  const removeDone = page.waitForResponse(isRpc("faid:remove"), { timeout: 5 * 60_000 });
   await row.getByRole("button", { name: "Confirm remove" }).click();
   const result = await (await removeDone).json();
   expect(result, JSON.stringify(result)).toMatchObject({ ok: true });

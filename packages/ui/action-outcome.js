@@ -1,6 +1,6 @@
 // Action outcome for the hosted console: what the operator sees when an
 // action FAILS. Pure logic, browser-globals like setup-checklist.js:
-// screen-l3-apps.jsx renders the result, action-outcome.test.js runs it
+// screen-faid-apps.jsx renders the result, action-outcome.test.js runs it
 // under node:test. No React, no I/O.
 //
 // Why: on 2026-09-03 an install failed inside `cf push` and the console

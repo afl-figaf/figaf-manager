@@ -1,12 +1,12 @@
-# L3 console — open items and design notes
+# FAID Apps console — open items and design notes
 
-This file holds only what is still OPEN for the Figaf Manager's L3 console,
+This file holds only what is still OPEN for the Figaf Manager's FAID Apps console,
 plus the design notes that are still in force. It is not a log. History is in
-git (`git log -p docs/l3-console/OPEN-ITEMS.md`; before 2026-09-03 the file
-was `spikes/app-manager-poc/FINDINGS.md` in the figaf-l3-l4 repo). Behavior
-is in `SPEC.md`, reasons are in figaf-l3-l4 `decisions/`, run records in
-figaf-l3-l4 `docs/d1/RUNBOOK-VIRGIN.md`. Platform-level notes (release model,
-Figaf API client scopes) live in figaf-l3-l4 `docs/SOLUTION.md`.
+git (`git log -p docs/faid-apps-console/OPEN-ITEMS.md`; before 2026-09-03 the file
+was `spikes/app-manager-poc/FINDINGS.md` in the figaf-platform repo). Behavior
+is in `SPEC.md`, reasons are in figaf-platform `decisions/`, run records in
+figaf-platform `docs/d1/RUNBOOK-VIRGIN.md`. Platform-level notes (release model,
+Figaf API client scopes) live in figaf-platform `docs/SOLUTION.md`.
 Last edited 2026-09-06.
 
 ## Open items
@@ -22,13 +22,13 @@ Last edited 2026-09-06.
 3. **Remove + reinstall repeatability** check (remove exists; reinstall after
    remove not yet done by hand).
 4. **Release store, what is left** (the store itself is in use since
-   2026-09-04, figaf-l3-l4 decision 0010): Daniel's confirmation that public
-   downloads of L3 builds are acceptable; a custom domain instead of
+   2026-09-04, figaf-platform decision 0010): Daniel's confirmation that public
+   downloads of platform builds are acceptable; a custom domain instead of
    `r2.dev` (Cloudflare: rate-limited, not for production; a change of
-   `FIGAF_L3_RELEASE_URL`); signed `release.json` later; the manager's own
+   `FIGAF_PLATFORM_RELEASE_URL`); signed `release.json` later; the manager's own
    release publishing. Owed run: the install smoke against a manager whose
    source is the R2 URL (the smoke runs from the local build today), and one
-   **Update installation** in the dev space (figaf-l3-l4 `docs/SOLUTION.md`
+   **Update installation** in the dev space (figaf-platform `docs/SOLUTION.md`
    3.4).
 5. **Space Auditor** for the management user in the Figaf-tool spaces, so
    cross-space discovery of Figaf-tool deployments works under the technical
@@ -66,8 +66,8 @@ Last edited 2026-09-06.
     `figaf-installer`; the architecture map in CLAUDE.md describes the
     Figaf-tool wizard and does not list the console files. The garbage
     removal itself is done (`docs/CLEANUP-2026-09-03.md`).
-11. **Customer manual for the L3 console**: Alex's manual covers the
-    Figaf-tool flow only. The customer prerequisites are in figaf-l3-l4
+11. **Customer manual for the FAID Apps console**: Alex's manual covers the
+    Figaf-tool flow only. The customer prerequisites are in figaf-platform
     `docs/d1/MANUAL-RUNBOOK.md`.
 12. **E2E seeding and the refresh token** (2026-09-04): `e2e/global-setup.js`
     copies the developer's `~/.cf/config.json` into each seeded server
@@ -88,27 +88,27 @@ Last edited 2026-09-06.
     apps, or run that spec against the fixture release. Part of the
     test-suite discussion.
 
-14. **No target guard on the L3 lifecycle handlers** (2026-09-04): the sign-in
+14. **No target guard on the FAID Apps lifecycle handlers** (2026-09-04): the sign-in
     now pins the session to the manager's own org/space (SPEC section 5.3), so
     the normal path cannot install into the wrong space any more. The handlers
-    themselves still trust the session: `l3:install`, `l3:update` and the
+    themselves still trust the session: `faid:install`, `faid:update` and the
     remove/disable actions run `cf` against whatever space the session is
     targeting, and **Switch Org** can move it away (the Figaf-tool flows need
     that button). Only self-update checks (`update:selfTarget` compares the
     session against `VCAP_APPLICATION`). Fix: reuse that comparison as a
-    pre-condition in `l3-apps.js` and refuse with a clear message, instead of
+    pre-condition in `faid-apps.js` and refuse with a clear message, instead of
     installing somewhere else. Small, and worth doing before a customer runs
     the console.
 15. **The Failed panel can show a cf WARNING instead of the reason**
     (2026-09-06, install of release 0.4.4): `cliFailureDetail()` in
-    `packages/core/l3-apps.js` takes the last 3 stderr lines, and cf CLI 8.19
+    `packages/core/faid-apps.js` takes the last 3 stderr lines, and cf CLI 8.19
     prints the `cflinuxfs4 is DEPRECATED` warning LAST, after `Start
     unsuccessful`. The panel said the stack was the problem; the real cause
     (a failed schema migration) was only in `cf logs <app> --recent`. Fix:
     drop `WARNING:` lines (and their continuation) before taking the tail,
     and after a failed `start` step append the app's last `[APP/PROC/WEB]
     ERR` lines from `cf logs <app> --recent` to the detail. Extend
-    `l3-apps.test.js` ("a failed cf start keeps the pointer") with a stderr
+    `faid-apps.test.js` ("a failed cf start keeps the pointer") with a stderr
     that ends in the warning.
 
 ## Design notes still in force
@@ -116,8 +116,8 @@ Last edited 2026-09-06.
 ### Desktop installer frozen (Arsenii, 2026-09-03)
 
 `apps/figaf-local` keeps working and keeps building, but gets no new features.
-The L3 console, the connections screen and the Setup page are hosted-only
-(`mode.js`: `manageL3Apps`, `consoleUI`, `cfFirstLogin`). Shared changes must
+The FAID Apps console, the connections screen and the Setup page are hosted-only
+(`mode.js`: `manageFaidApps`, `consoleUI`, `cfFirstLogin`). Shared changes must
 still not break the desktop wizard. Its release job in `release.yml` is
 already disabled. To be confirmed with Alex.
 
@@ -127,14 +127,14 @@ The manager has no database. Its per-session user data lives under
 `$HOME/sessions/<sessionId>` in the container and is gone after a restart or
 restage. What survives a restart comes from three places only: the service
 bindings (`VCAP_SERVICES`), the Credential Store (management user,
-connections) and the Cloud Foundry space itself. For the L3 console this is by
+connections) and the Cloud Foundry space itself. For the FAID Apps console this is by
 design: the installed apps and their versions are read live from the space
 (`cf env <app>`, the release version env var), so nothing needs to be stored.
 For the Figaf-tool flows it is a gap: `vars.yml` and the update state under
 the session directory are lost, so a re-entered flow starts blank.
 
 One deliberate piece of memory was added on 2026-09-04: which lifecycle action
-is running now (`l3-apps.js`, module scope — one lock for every session of the
+is running now (`faid-apps.js`, module scope — one lock for every session of the
 container). It is gone after a restart, and that is acceptable: the console
 then falls back to Cloud Foundry itself, where a part with a build in
 `STAGING` still reads as `Installing…` (SPEC section 3).
@@ -143,7 +143,7 @@ then falls back to Cloud Foundry itself, where a part with a build in
 
 Token mode exists only until the Secure-access step (now step 1). The
 management user (Credential Store, option B of decision 0004 item 3) covers
-unattended sign-in: restarts, scheduled updates, L4-triggered actions.
+unattended sign-in: restarts, scheduled updates, agent-triggered actions.
 Attribution then comes from the manager's audit log (the XSUAA login says
 who). Middle option to evaluate later: keep each person's own CF refresh
 token per IAS user, so a passcode is needed only rarely and the technical
@@ -152,10 +152,9 @@ impossible: the first cf login is also the authorization moment.
 
 ### Naming rules confirmed
 
-Release / release store (not "channel"); `figaf-l3l4-` = shared by L3 and
-L4; `figaf-l3-<app-id>` = one L3 frontend; the shared backend connector is
-"Shared backend" in the UI, CF app `figaf-l3l4-backend`; "approuter", not
-"authentication proxy". Frozen identifiers: figaf-l3-l4 decisions 0008 and 0009.
+Release / release store (not "channel"); `figaf-faid-` = shared by FAID Apps and FAID Agents; `figaf-faid-apps-<app-id>` = one FAID Apps frontend; the shared backend connector is
+"Shared backend" in the UI, CF app `figaf-faid-backend`; "approuter", not
+"authentication proxy". Frozen identifiers: figaf-platform decisions 0008, 0009 and 0014 (product names).
 
 ### Environment facts
 
@@ -163,8 +162,8 @@ L4; `figaf-l3-<app-id>` = one L3 frontend; the shared backend connector is
   realistic plan (cost belongs in pricing).
 - PostgreSQL: ~8 min to delete, ~7 min to create.
 - The `it-rt/api` broker returned 500s on 2026-09-02; it is not part of the
-  L3 install.
-- Windows build machine: release zips must be made with figaf-l3-l4
+  FAID Apps install.
+- Windows build machine: release zips must be made with figaf-platform
   `release/zip-dir.js` (Unix permission bits), `build-zip.js` uses
   `System32\tar.exe`, JSON written without a BOM.
 - The cockpit upload keeps `manifest.yml` inside the container; `cf push -p`

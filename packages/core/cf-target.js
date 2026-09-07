@@ -75,7 +75,7 @@ function normalizeApiUrl(url) {
 }
 
 // ── The manager's own space as the automatic CF target ──────────────────────
-// The L3 console installs, updates and removes applications in ITS OWN Cloud
+// The FAID Apps console installs, updates and removes applications in ITS OWN Cloud
 // Foundry space (SPEC section 1), and the hosted manager already knows that
 // space from VCAP_APPLICATION. So the passcode sign-in answers `cf login`'s
 // "Select an org / Select a space" prompts itself: the question has exactly

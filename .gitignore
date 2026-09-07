@@ -23,7 +23,7 @@ Thumbs.db
 .vscode/
 # .claude/ is tracked on purpose: agent definitions and their memory are part of the repo.
 
-# docs/ is tracked (manual, project context, L3 console spec). Cleaned 2026-09-03,
+# docs/ is tracked (manual, project context, FAID Apps console spec). Cleaned 2026-09-03,
 # see docs/CLEANUP-2026-09-03.md.
 
 # Logs

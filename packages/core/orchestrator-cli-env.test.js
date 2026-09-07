@@ -1,6 +1,6 @@
 "use strict";
 // Tests for per-session CLI state isolation (the FigafManager single-operator
-// gap, fixed for the L3 App Manager PoC).
+// gap, fixed for the FAID Apps manager).
 //
 // In hosted mode every spawned btp/cf process must receive:
 //   CF_HOME          = <sessionUserDataDir>/cli

@@ -96,27 +96,27 @@ function createHost({ sessionId }) {
     }),
 
     /**
-     * Where the L3 platform releases come from (figaf-l3-l4 decision 0010).
+     * Where the Figaf Platform releases come from (figaf-platform decision 0010).
      * Exactly one source, in this order:
-     *   1. FIGAF_L3_ARTIFACTS_DIR  a local directory holding ONE release in the
+     *   1. FIGAF_PLATFORM_ARTIFACTS_DIR  a local directory holding ONE release in the
      *      flat shape build.js writes (development, e2e fixtures);
-     *   2. FIGAF_L3_RELEASE_URL    the artifact store (manifest.yml; the bucket
-     *      layout of figaf-l3-l4 release/publish.js: index.json, <version>/…);
-     *   3. l3-artifacts/ next to this file, when a developer built a release
+     *   2. FIGAF_PLATFORM_RELEASE_URL    the artifact store (manifest.yml; the bucket
+     *      layout of figaf-platform release/publish.js: index.json, <version>/…);
+     *   3. platform-artifacts/ next to this file, when a developer built a release
      *      into the checkout and set nothing (development convenience; the
      *      shipped zip does not contain it any more).
      * Returns { kind:"local", dir } | { kind:"remote", url, cacheDir } | null.
-     * With null the l3:* handlers report "no release source configured".
+     * With null the faid:* handlers report "no release source configured".
      */
-    resolveL3ReleaseSource() {
-      const dir = process.env.FIGAF_L3_ARTIFACTS_DIR;
-      if (dir) return { kind: "local", dir, origin: "FIGAF_L3_ARTIFACTS_DIR" };
-      const url = (process.env.FIGAF_L3_RELEASE_URL || "").trim();
+    resolvePlatformReleaseSource() {
+      const dir = process.env.FIGAF_PLATFORM_ARTIFACTS_DIR;
+      if (dir) return { kind: "local", dir, origin: "FIGAF_PLATFORM_ARTIFACTS_DIR" };
+      const url = (process.env.FIGAF_PLATFORM_RELEASE_URL || "").trim();
       if (url) {
-        return { kind: "remote", url: url.replace(/\/+$/, ""), cacheDir: path.join(os.tmpdir(), "figaf-l3-releases"), origin: "FIGAF_L3_RELEASE_URL" };
+        return { kind: "remote", url: url.replace(/\/+$/, ""), cacheDir: path.join(os.tmpdir(), "figaf-platform-releases"), origin: "FIGAF_PLATFORM_RELEASE_URL" };
       }
-      const bundled = path.join(__dirname, "l3-artifacts");
-      if (fs.existsSync(path.join(bundled, "catalog.json"))) return { kind: "local", dir: bundled, origin: "l3-artifacts/ next to the server" };
+      const bundled = path.join(__dirname, "platform-artifacts");
+      if (fs.existsSync(path.join(bundled, "catalog.json"))) return { kind: "local", dir: bundled, origin: "platform-artifacts/ next to the server" };
       return null;
     },
 

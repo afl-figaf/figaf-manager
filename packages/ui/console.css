@@ -134,7 +134,7 @@
 .access-purpose { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-3); line-height: 1.45; }
 .access-row .pill { flex-shrink: 0; }
 
-/* ── Action outcome: the result of the LAST failed action (screen-l3-apps.jsx).
+/* ── Action outcome: the result of the LAST failed action (screen-faid-apps.jsx).
    Stays until dismissed; the status refresh must never remove it. ─────────── */
 .action-outcome {
   margin: 0 0 14px;

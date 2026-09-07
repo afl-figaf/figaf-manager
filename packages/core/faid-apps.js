@@ -1,11 +1,11 @@
 "use strict";
-// L3 App Manager (PoC) — catalog-driven install / update / disable / enable /
-// remove / configure / health for Figaf L3 applications.
+// FAID Apps manager — catalog-driven install / update / disable / enable /
+// remove / configure / health for FAID Apps.
 //
 // Architecture:
-//   - Releases come from a RELEASE STORE (release-store.js; figaf-l3-l4
-//     decision 0010): the artifact store behind FIGAF_L3_RELEASE_URL, or a
-//     local directory for development. host.resolveL3ReleaseSource() names
+//   - Releases come from a RELEASE STORE (release-store.js; figaf-platform
+//     decision 0010): the artifact store behind FIGAF_PLATFORM_RELEASE_URL, or a
+//     local directory for development. host.resolvePlatformReleaseSource() names
 //     the one source. A RELEASE is catalog.json plus one zip per CF app,
 //     downloaded on demand and verified against its checksums.
 //   - ONE VERSION PER INSTALLATION: the installed version is what the shared
@@ -29,7 +29,7 @@
 //     `cf set-env` with the value masked in the terminal stream and in the
 //     audit log — secret values must never appear in either.
 //
-// Handlers are created by createL3Handlers(ctx) and spread into the
+// Handlers are created by createFaidHandlers(ctx) and spread into the
 // orchestrator's handlers map. ctx carries the orchestrator's own helpers so
 // this module spawns nothing on its own (tests inject a fake `run`).
 
@@ -39,11 +39,11 @@ const crypto = require("crypto");
 const { loadCatalog, chooseVersion, createReleaseStore } = require("./release-store");
 
 const VERSION_ENV = "FIGAF_APP_VERSION";
-const NO_SOURCE_ERROR = "No release source configured: set FIGAF_L3_RELEASE_URL (the release store) or FIGAF_L3_ARTIFACTS_DIR (a local release directory)";
+const NO_SOURCE_ERROR = "No release source configured: set FIGAF_PLATFORM_RELEASE_URL (the release store) or FIGAF_PLATFORM_ARTIFACTS_DIR (a local release directory)";
 // How long the installed platform version is remembered between the cf calls
 // of one page load (catalog, status and services are asked together).
 const INSTALLED_MEMO_MS = 5_000;
-// Landscape-independent releases (decision 0008, figaf-l3-l4 repo): a service
+// Landscape-independent releases (decision 0008, figaf-platform repo): a service
 // config file in the release (xs-security.json) may carry this placeholder in
 // its redirect URI; provisionServices fills it with the cfapps domain of the
 // landscape we are logged into. No landscape is ever hard-coded in a release.
@@ -92,7 +92,7 @@ function agoText(ms) {
   return secs < 90 ? `${secs} s` : `${Math.round(secs / 60)} min`;
 }
 
-// ─── pure helpers (unit-tested in l3-apps.test.js) ──────────────────────────
+// ─── pure helpers (unit-tested in faid-apps.test.js) ──────────────────────────
 
 // loadCatalog lives in release-store.js (re-exported below for the tests).
 
@@ -184,10 +184,10 @@ function cliFailureDetail(r, { lines = 3, maxLen = 400 } = {}) {
  * manager's OWN /home/vcap/app/manifest.yml. That file is present whenever the
  * manager was deployed through the BTP cockpit upload (the customer path):
  * `cf push` strips manifest.yml from what it uploads, the cockpit does not.
- * The manager's manifest then becomes the base of the L3 app push (its
+ * The manager's manifest then becomes the base of the FAID app push (its
  * buildpack, command, random-route, env) and CAPI rejects the mix:
  * "Buildpack and Buildpacks fields cannot be used together" — found live on
- * 2026-09-03, install of release 0.4.0. An L3 app is described ONLY by the
+ * 2026-09-03, install of release 0.4.0. An FAID app is described ONLY by the
  * release catalog; no manifest is ever part of its push.
  */
 function buildPushArgs(cfApp, dir, { noStart } = {}) {
@@ -200,7 +200,7 @@ function buildPushArgs(cfApp, dir, { noStart } = {}) {
 }
 
 /**
- * Whitelist-validate the env object a renderer sends to l3:configure.
+ * Whitelist-validate the env object a renderer sends to faid:configure.
  * Only keys declared in the catalog app's configForm are accepted — the RPC
  * channel must not be usable to set arbitrary env vars on arbitrary apps.
  * Empty values are skipped (meaning: leave unchanged).
@@ -226,7 +226,7 @@ function validateConfigEnv(app, env) {
 
 /**
  * @param {object} ctx
- * @param {object} ctx.host        HostAdapter (needs resolveL3ReleaseSource + getUserDataDir)
+ * @param {object} ctx.host        HostAdapter (needs resolvePlatformReleaseSource + getUserDataDir)
  * @param {Function} ctx.run       orchestrator subprocess helper
  * @param {Function} ctx.log       cli:line logger (source, type, text)
  * @param {Function} ctx.send      event emitter to the renderer
@@ -236,17 +236,17 @@ function validateConfigEnv(app, env) {
  * @param {Function} ctx.httpsJson (url) => Promise<object>            release store reads
  * @param {Function} ctx.httpsDownload (url, destPath) => Promise      release store downloads
  */
-function createL3Handlers(ctx) {
+function createFaidHandlers(ctx) {
   const { host, run, log, send, resolveCf, extractZip, httpsText } = ctx;
 
   // ─── the release store ────────────────────────────────────────────────────
   let storeInst = null;
   let storeKey = null;
   function releaseSource() {
-    if (typeof host.resolveL3ReleaseSource === "function") return host.resolveL3ReleaseSource();
+    if (typeof host.resolvePlatformReleaseSource === "function") return host.resolvePlatformReleaseSource();
     // Older host adapters: a directory is a local source.
-    if (typeof host.resolveL3ArtifactsDir === "function") {
-      const dir = host.resolveL3ArtifactsDir();
+    if (typeof host.resolvePlatformArtifactsDir === "function") {
+      const dir = host.resolvePlatformArtifactsDir();
       return dir ? { kind: "local", dir } : null;
     }
     return null;
@@ -267,7 +267,7 @@ function createL3Handlers(ctx) {
   // catalog exist (`exists`), and which FIGAF_APP_VERSION does it carry
   // (`version`, null when not deployed or not stamped). Two cf calls,
   // remembered for INSTALLED_MEMO_MS; forgotten after every action. Both
-  // facts come from the same probe, so `l3:services` (backendDeployed) and
+  // facts come from the same probe, so `faid:services` (backendDeployed) and
   // the Release panel (installed) never disagree.
   let installedMemo = null; // { at, name, value, exists }
   async function installedPlatformState(catalog) {
@@ -317,7 +317,7 @@ function createL3Handlers(ctx) {
     const versions = idx.versions.map((v) => v.version);
     const pick = chooseVersion({ requested: version, installed, latest: idx.latest, versions, purpose });
     if (!pick.ok) return pick;
-    if (pick.note) log("l3", "warn", pick.note);
+    if (pick.note) log("faid", "warn", pick.note);
     const rel = pick.version === idx.latest ? latestRel : await s.resolve(pick.version, { verbose: !!refresh });
     if (!rel.ok) return rel;
     return { ...rel, installed, latest: idx.latest, versions: idx.versions, source: s.describe(), note: pick.note };
@@ -369,7 +369,7 @@ function createL3Handlers(ctx) {
       pending = still;
       if (!pending.length) break;
       if (Date.now() > deadline) { timedOut.push(...pending); break; }
-      log("l3", "dim", `waiting for: ${pending.join(", ")} …`);
+      log("faid", "dim", `waiting for: ${pending.join(", ")} …`);
       await sleep(POLL_MS);
     }
     const ok = failed.length === 0 && timedOut.length === 0;
@@ -386,7 +386,7 @@ function createL3Handlers(ctx) {
    * 0009): the release part (the xsuaa entry's configFile, when a release is
    * present) merged with the manager part, the __CF_APPS_DOMAIN__ placeholder
    * filled with the landscape's cfapps domain (decision 0008). Written to
-   * <userData>/l3-services/ so the release file stays untouched.
+   * <userData>/faid-services/ so the release file stays untouched.
    * Returns { ok, path, doc } or { ok:false, error }.
    */
   async function composedXsuaaConfig(dir, catalog) {
@@ -402,17 +402,17 @@ function createL3Handlers(ctx) {
     if (!dom.ok) return dom;
     const composed = managerXsuaa.composeXsSecurity({ release, appsDomain: dom.domain });
     if (!composed.ok) return composed;
-    const cfgDir = path.join(host.getUserDataDir(), "l3-services");
+    const cfgDir = path.join(host.getUserDataDir(), "faid-services");
     fs.mkdirSync(cfgDir, { recursive: true });
     const out = path.join(cfgDir, "xs-security.composed.json");
     fs.writeFileSync(out, JSON.stringify(composed.doc, null, 2));
-    log("l3", "dim", `xs-security = manager part + release part; ${APPS_DOMAIN_PLACEHOLDER} -> ${dom.domain}`);
+    log("faid", "dim", `xs-security = manager part + release part; ${APPS_DOMAIN_PLACEHOLDER} -> ${dom.domain}`);
     return { ok: true, path: out, doc: composed.doc };
   }
 
   /**
    * Make the shared XSUAA instance carry the current roles (decision 0009):
-   * create `figaf-l3l4-xsuaa` when missing, update it when present, always
+   * create `figaf-faid-xsuaa` when missing, update it when present, always
    * from the composed document. Waits until the operation succeeded.
    * updateOnly: do nothing when the instance is missing (before install and
    * update, where the required-services check reports a missing instance).
@@ -438,7 +438,7 @@ function createL3Handlers(ctx) {
     const cfg = await composedXsuaaConfig(dir, catalog);
     if (!cfg.ok) return { ok: false, instance: inst, error: cfg.error };
     if (status === "failed") {
-      log("l3", "warn", `${inst} is in a failed state — deleting it before creating again`);
+      log("faid", "warn", `${inst} is in a failed state — deleting it before creating again`);
       const del = await run(resolveCf(), ["delete-service", inst, "-f"], { source: "cf" });
       if (del.code !== 0) return { ok: false, instance: inst, error: `could not delete the failed instance ${inst}: ${cfTail(del)}` };
       const gone = Date.now() + PROVISION_TIMEOUT_MS;
@@ -452,12 +452,12 @@ function createL3Handlers(ctx) {
     if (status === "missing") {
       const svc = (catalog && (catalog.services || []).find((s) => s.offering === "xsuaa")) || null;
       const plan = (svc && svc.plan) || "application";
-      log("l3", "line", `Creating service instance ${inst} (xsuaa / ${plan}) — roles of the manager and the apps …`);
+      log("faid", "line", `Creating service instance ${inst} (xsuaa / ${plan}) — roles of the manager and the apps …`);
       const r = await run(resolveCf(), ["create-service", "xsuaa", plan, inst, "-c", cfg.path], { source: "cf" });
       if (r.code !== 0) return { ok: false, instance: inst, error: `cf create-service ${inst} failed: ${cfTail(r)}` };
       created = true;
     } else {
-      log("l3", "line", `Updating service instance ${inst} — roles of the manager and the apps …`);
+      log("faid", "line", `Updating service instance ${inst} — roles of the manager and the apps …`);
       const r = await run(resolveCf(), ["update-service", inst, "-c", cfg.path], { source: "cf" });
       if (r.code !== 0) return { ok: false, instance: inst, error: `cf update-service ${inst} failed: ${cfTail(r)}` };
     }
@@ -476,7 +476,7 @@ function createL3Handlers(ctx) {
   }
 
   function phase(appId, cfApp, step, state, detail) {
-    send("l3:phase", { appId, cfApp, step, state, detail: detail || null });
+    send("faid:phase", { appId, cfApp, step, state, detail: detail || null });
   }
 
   /**
@@ -547,7 +547,7 @@ function createL3Handlers(ctx) {
    * The structured failure of one deploy step. Carries what cf said (`detail`),
    * WHERE it happened (`step`, `cfApp`) and the exact command (masked where it
    * carried a secret), so the console can show it and the operator can report
-   * it. Also emits the l3:phase error event with the detail.
+   * it. Also emits the faid:phase error event with the detail.
    */
   function stepFailure(app, cfApp, step, r, summary, command) {
     const detail = cliFailureDetail(r);
@@ -567,8 +567,8 @@ function createL3Handlers(ctx) {
    * lasts (see the module header). The refusal is a normal failed result, so
    * the console shows it in the red panel; `busy: true` and `running` let a
    * caller tell it apart from a real error. While the action runs, every page
-   * of this session learns it from the `l3:running` event, and any page can
-   * ask with `l3:running` or read `running` from `l3:status`.
+   * of this session learns it from the `faid:running` event, and any page can
+   * ask with `faid:running` or read `running` from `faid:status`.
    */
   async function exclusive(action, appId, fn) {
     const busy = runningAction();
@@ -577,17 +577,17 @@ function createL3Handlers(ctx) {
         `${busy.action} of ${busy.appId} is already running (started ${agoText(Date.now() - busy.startedAt)} ago) — ` +
         "wait until it finishes. Two deploys at the same time overwrite the package Cloud Foundry is staging, " +
         "and both fail.";
-      log("l3", "err", `${action} ${appId} refused: ${error}`);
+      log("faid", "err", `${action} ${appId} refused: ${error}`);
       return { ok: false, busy: true, running: busy, error };
     }
     currentAction = { action, appId, startedAt: Date.now() };
-    send("l3:running", runningAction());
+    send("faid:running", runningAction());
     try {
       return await fn();
     } finally {
       currentAction = null;
       installedMemo = null; // the action may have changed the installed version
-      send("l3:running", null);
+      send("faid:running", null);
     }
   }
 
@@ -628,7 +628,7 @@ function createL3Handlers(ctx) {
     }
 
     phase(app.id, name, "extract", "running");
-    const workDir = path.join(host.getUserDataDir(), "l3-apps", app.id, name);
+    const workDir = path.join(host.getUserDataDir(), "faid-apps", app.id, name);
     try {
       await removeTree(workDir);
       await extractZip(path.join(channelDir, cfApp.artifact), workDir);
@@ -767,7 +767,7 @@ function createL3Handlers(ctx) {
   async function deployAll(appId, { version } = {}) {
     const req = await requireApp(appId, { version, purpose: "install" });
     if (req.error) return { ok: false, error: req.error };
-    log("l3", "dim", `release ${req.rel.version} from ${req.rel.source.label}`);
+    log("faid", "dim", `release ${req.rel.version} from ${req.rel.source.label}`);
     const pre = await preflight(req.rel, [req.app]);
     if (pre) return pre;
     const r = await deploySet(req.rel, [req.app]);
@@ -784,14 +784,14 @@ function createL3Handlers(ctx) {
   async function updateInstallation(version) {
     const rel = await currentRelease({ version, purpose: "update" });
     if (!rel.ok) return { ok: false, error: rel.error };
-    log("l3", "line", `Updating the installation from ${rel.installed} to ${rel.version} (${rel.source.label}) …`);
+    log("faid", "line", `Updating the installation from ${rel.installed} to ${rel.version} (${rel.source.label}) …`);
     const installedApps = [];
     for (const app of rel.catalog.apps) {
       let present = false;
       for (const c of app.cfApps) if (await cfAppExists(c.name)) present = true;
       if (present) installedApps.push(app);
     }
-    log("l3", "dim", installedApps.length
+    log("faid", "dim", installedApps.length
       ? `installed apps to update: ${installedApps.map((a) => a.id).join(", ")}`
       : "no app frontend is installed; only the shared backend is updated");
     const pre = await preflight(rel, installedApps);
@@ -825,7 +825,7 @@ function createL3Handlers(ctx) {
     return { ok: true };
   }
 
-  /** l3:configure body — see the handler. */
+  /** faid:configure body — see the handler. */
   async function configure(appId, env) {
     const req = await requireApp(appId);
     if (req.error) return { ok: false, error: req.error };
@@ -885,7 +885,7 @@ function createL3Handlers(ctx) {
     if (restart.code !== 0) {
       return { ok: false, error: `${wanted} is bound, but cf restart ${target} failed: ${cfTail(restart)}`, step: "restart", cfApp: target };
     }
-    log("l3", "ok", `${wanted} bound to ${target}${already ? " (was already bound)" : ""} and ${target} restarted`);
+    log("faid", "ok", `${wanted} bound to ${target}${already ? " (was already bound)" : ""} and ${target} restarted`);
     return { ok: true, service: wanted, cfApp: target, alreadyBound: already };
   }
 
@@ -896,10 +896,10 @@ function createL3Handlers(ctx) {
    */
   function reportOutcome(action, appId, r) {
     if (r && r.ok) {
-      log("l3", "ok", `${action} ${appId}: done`);
+      log("faid", "ok", `${action} ${appId}: done`);
     } else {
       const where = [r && r.step ? `at step "${r.step}"` : "", r && r.cfApp ? `(${r.cfApp})` : ""].filter(Boolean).join(" ");
-      log("l3", "err", `${action} ${appId} FAILED${where ? " " + where : ""}: ${(r && r.error) || "unknown error"}`);
+      log("faid", "err", `${action} ${appId} FAILED${where ? " " + where : ""}: ${(r && r.error) || "unknown error"}`);
     }
     return r;
   }
@@ -936,7 +936,7 @@ function createL3Handlers(ctx) {
           // Exists. A FAILED instance blocks re-creation under the same name;
           // remove it and create again (the admin already asked to provision).
           if (serviceStatusFromCf(probe.code, probe.stdout) !== "failed") continue;
-          log("l3", "warn", `${s.name} is in a failed state — deleting it before creating again`);
+          log("faid", "warn", `${s.name} is in a failed state — deleting it before creating again`);
           const del = await run(resolveCf(), ["delete-service", s.name, "-f"], { source: "cf" });
           if (del.code !== 0) { failed.push({ name: s.name, error: `could not delete the failed instance: ${cfTail(del)}` }); continue; }
           // Deletion is asynchronous — wait until the name is free.
@@ -967,22 +967,22 @@ function createL3Handlers(ctx) {
           if (text.includes(APPS_DOMAIN_PLACEHOLDER)) {
             const dom = await resolveAppsDomain();
             if (!dom.ok) { failed.push({ name: s.name, error: dom.error }); continue; }
-            const cfgDir = path.join(host.getUserDataDir(), "l3-services");
+            const cfgDir = path.join(host.getUserDataDir(), "faid-services");
             fs.mkdirSync(cfgDir, { recursive: true });
             cfgPath = path.join(cfgDir, s.configFile);
             fs.writeFileSync(cfgPath, text.split(APPS_DOMAIN_PLACEHOLDER).join(dom.domain));
-            log("l3", "dim", `${s.configFile}: ${APPS_DOMAIN_PLACEHOLDER} -> ${dom.domain}`);
+            log("faid", "dim", `${s.configFile}: ${APPS_DOMAIN_PLACEHOLDER} -> ${dom.domain}`);
           }
           args.push("-c", cfgPath);
         } else if (s.config && typeof s.config === "object") {
           // cf -c accepts a file path; never pass JSON on the command line.
-          const cfgDir = path.join(host.getUserDataDir(), "l3-services");
+          const cfgDir = path.join(host.getUserDataDir(), "faid-services");
           fs.mkdirSync(cfgDir, { recursive: true });
           const file = path.join(cfgDir, `${s.name}.json`);
           fs.writeFileSync(file, JSON.stringify(s.config));
           args.push("-c", file);
         }
-        log("l3", "line", `Creating service instance ${s.name} (${s.offering} / ${plan}) …`);
+        log("faid", "line", `Creating service instance ${s.name} (${s.offering} / ${plan}) …`);
         const r = await run(resolveCf(), args, { source: "cf" });
         if (r.code !== 0) { failed.push({ name: s.name, error: `cf create-service ${s.name} failed: ${cfTail(r)}` }); continue; }
         created.push(s.name);
@@ -1002,7 +1002,7 @@ function createL3Handlers(ctx) {
         if (st === "failed") failed.push({ name, error: "service operation failed (see cf service)" });
         else if (st !== "ready") pending.push(name);
       }
-      if (pending.length) log("l3", "line", `${pending.join(", ")}: still being created — not waited for, see Setup step 3`);
+      if (pending.length) log("faid", "line", `${pending.join(", ")}: still being created — not waited for, see Setup step 3`);
       const ok = failed.length === 0 && timedOut.length === 0;
       return {
         ok, created, failed, timedOut, pending,
@@ -1030,7 +1030,7 @@ function createL3Handlers(ctx) {
      * version, or latest on an empty space (`version` names another one for
      * a read). Carries where the release came from.
      */
-    async "l3:catalog"({ version } = {}) {
+    async "faid:catalog"({ version } = {}) {
       const rel = await currentRelease({ version });
       if (!rel.ok) return { ok: false, error: rel.error };
       const c = { catalog: rel.catalog };
@@ -1061,7 +1061,7 @@ function createL3Handlers(ctx) {
      * The versions the store offers, against what is installed (decision
      * 0010). `refresh` re-reads index.json now. For the release panel.
      */
-    async "l3:releases"({ refresh } = {}) {
+    async "faid:releases"({ refresh } = {}) {
       const rel = await currentRelease({ refresh });
       if (!rel.ok) return { ok: false, error: rel.error, source: store() ? store().describe() : null };
       const { compareSemver } = require("./release-config");
@@ -1085,7 +1085,7 @@ function createL3Handlers(ctx) {
       };
     },
 
-    async "l3:status"() {
+    async "faid:status"() {
       const rel = await currentRelease();
       if (!rel.ok) return { ok: false, error: rel.error };
       const c = { catalog: rel.catalog };
@@ -1172,7 +1172,7 @@ function createL3Handlers(ctx) {
      * needed - an instance created AFTER the backend was pushed. A fresh
      * install binds the optional instances on its own (SPEC section 4.1).
      */
-    async "l3:services"() {
+    async "faid:services"() {
       const rel = await currentRelease();
       if (!rel.ok) return { ok: false, error: rel.error };
       const c = { catalog: rel.catalog };
@@ -1212,7 +1212,7 @@ function createL3Handlers(ctx) {
      * the optional services of these groups. Progress lines go to the
      * terminal drawer.
      */
-    async "l3:provisionServices"(args) {
+    async "faid:provisionServices"(args) {
       return provisionServices(args || {});
     },
 
@@ -1220,7 +1220,7 @@ function createL3Handlers(ctx) {
      * Make the shared XSUAA instance carry the current roles of the manager
      * and the apps (create or update, decision 0009). See ensureXsuaa().
      */
-    async "l3:ensureXsuaa"(args) {
+    async "faid:ensureXsuaa"(args) {
       return ensureXsuaa(args || {});
     },
 
@@ -1231,7 +1231,7 @@ function createL3Handlers(ctx) {
      * activates the binding, so the management user can be stored right after
      * the IAS sign-in and no second passcode is needed.
      */
-    async "l3:prepareManagerServices"({ plans } = {}) {
+    async "faid:prepareManagerServices"({ plans } = {}) {
       if (!store()) return { ok: true, created: [], bound: [], note: "no release source on this host - nothing to prepare" };
       const rel = await currentRelease();
       if (!rel.ok) return { ok: false, error: rel.error };
@@ -1253,8 +1253,8 @@ function createL3Handlers(ctx) {
     },
 
     /**
-     * Setup step 1 "Prepare the space" (docs/l3-console/SPEC.md 5.2): create every
-     * MISSING catalog instance except the XSUAA one (l3:ensureXsuaa owns it)
+     * Setup step 1 "Prepare the space" (docs/faid-apps-console/SPEC.md 5.2): create every
+     * MISSING catalog instance except the XSUAA one (faid:ensureXsuaa owns it)
      * with the plans the person chose on the page, wait only for the
      * manager-bound ones (the Credential Store) and bind them to the manager
      * - no restart; the restage at the end of the step activates the binding.
@@ -1263,7 +1263,7 @@ function createL3Handlers(ctx) {
      * with IAS and stores the management user (Setup step 3 shows it).
      * Result: { ok, created, bound, pending, failed, error?, note? }.
      */
-    async "l3:prepareSpaceServices"({ plans, groups } = {}) {
+    async "faid:prepareSpaceServices"({ plans, groups } = {}) {
       if (!store()) return { ok: true, created: [], bound: [], pending: [], failed: [], note: "no release source on this host - nothing to prepare" };
       const rel = await currentRelease();
       if (!rel.ok) return { ok: false, error: rel.error };
@@ -1300,7 +1300,7 @@ function createL3Handlers(ctx) {
     },
 
     /** Bind a bindToManager catalog service to the manager app itself. */
-    async "l3:bindManagerService"({ name } = {}) {
+    async "faid:bindManagerService"({ name } = {}) {
       return bindManagerService(name);
     },
 
@@ -1309,7 +1309,7 @@ function createL3Handlers(ctx) {
      * (decision 0011). Under the same lock as a deploy: it restarts the shared
      * backend, so it must not overlap an install.
      */
-    async "l3:bindPlatformService"({ name } = {}) {
+    async "faid:bindPlatformService"({ name } = {}) {
       if (!name) return { ok: false, error: "name required" };
       return exclusive("bind-platform-service", String(name), () => bindPlatformService(name));
     },
@@ -1318,10 +1318,10 @@ function createL3Handlers(ctx) {
      * Restart the manager itself so new bindings take effect. Fire-and-forget:
      * this process is stopped by the restart, so the command never "returns".
      */
-    async "l3:restartSelf"() {
+    async "faid:restartSelf"() {
       const self = selfAppName();
       if (!self) return { ok: false, error: "cannot determine the manager's own app name (not running in CF?)" };
-      log("l3", "warn", `Restarting ${self} — this session ends; reload the page in ~30 s (token mode: claim a new token from the logs).`);
+      log("faid", "warn", `Restarting ${self} — this session ends; reload the page in ~30 s (token mode: claim a new token from the logs).`);
       run(resolveCf(), ["restart", self], { source: "cf" }).catch(() => {});
       return { ok: true, note: "restart started" };
     },
@@ -1331,7 +1331,7 @@ function createL3Handlers(ctx) {
      * (a reload, a second tab, a second session). `{ ok:true, running:null }`
      * = nothing is running. No cf call.
      */
-    async "l3:running"() {
+    async "faid:running"() {
       return { ok: true, running: runningAction() };
     },
 
@@ -1340,10 +1340,10 @@ function createL3Handlers(ctx) {
      * `version` is accepted only when it IS that version — moving the
      * installation is Update's job (decision 0010).
      */
-    async "l3:install"({ appId, version } = {}) {
+    async "faid:install"({ appId, version } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
       return exclusive("install", appId, async () => {
-        log("l3", "line", `Installing ${appId} …`);
+        log("faid", "line", `Installing ${appId} …`);
         return reportOutcome("install", appId, await deployAll(appId, { version }));
       });
     },
@@ -1357,31 +1357,31 @@ function createL3Handlers(ctx) {
      *                Re-deploy button; the shared backend is pushed again first,
      *                as with Install).
      */
-    async "l3:update"({ appId, version } = {}) {
+    async "faid:update"({ appId, version } = {}) {
       if (version) {
         return exclusive("update", "platform", async () =>
           reportOutcome("update", `installation to ${version}`, await updateInstallation(version)));
       }
       if (!appId) return { ok: false, error: "appId or version required" };
       return exclusive("update", appId, async () => {
-        log("l3", "line", `Re-deploying ${appId} …`);
+        log("faid", "line", `Re-deploying ${appId} …`);
         return reportOutcome("update", appId, await deployAll(appId));
       });
     },
 
-    async "l3:disable"({ appId } = {}) {
+    async "faid:disable"({ appId } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
       return exclusive("disable", appId, async () =>
         reportOutcome("disable", appId, await forEachPart(appId, (c) => ["stop", c.name], { reverse: true })));
     },
 
-    async "l3:enable"({ appId } = {}) {
+    async "faid:enable"({ appId } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
       return exclusive("enable", appId, async () =>
         reportOutcome("enable", appId, await forEachPart(appId, (c) => ["start", c.name])));
     },
 
-    async "l3:remove"({ appId } = {}) {
+    async "faid:remove"({ appId } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
       return exclusive("remove", appId, async () =>
         reportOutcome("remove", appId, await forEachPart(appId, (c) => ["delete", c.name, "-f"], { reverse: true })));
@@ -1391,12 +1391,12 @@ function createL3Handlers(ctx) {
      * Discover Figaf Tool deployments visible to the current cf login, so the
      * Configure form can offer them as a dropdown instead of a typed URL.
      * Detection (same as the manager's Update flow): app pairs `X-app` +
-     * `X-router` where X-app runs a `figaf/app:*` Docker image. The URL an L3
+     * `X-router` where X-app runs a `figaf/app:*` Docker image. The URL a FAID
      * app needs is the ROUTER's route. Note: visibility follows the cf login —
      * a single-space technical user only sees its own space; the form keeps
      * manual URL entry as the fallback.
      */
-    async "l3:figafSystems"() {
+    async "faid:figafSystems"() {
       // Accepted Figaf Tool Docker repos. `figaf/app` = official releases
       // (what Alex's wizard deploys); `ilnfigaf/app` = Figaf's internal CI
       // builds (run-btp-instance-pipeline.Jenkinsfile). Override / extend via
@@ -1459,7 +1459,7 @@ function createL3Handlers(ctx) {
      * shared backend, so it must not overlap an install (decision: one
      * lifecycle action at a time).
      */
-    async "l3:configure"({ appId, env } = {}) {
+    async "faid:configure"({ appId, env } = {}) {
       if (!appId) return { ok: false, error: "appId required" };
       return exclusive("configure", appId, () => configure(appId, env));
     },
@@ -1475,7 +1475,7 @@ function createL3Handlers(ctx) {
      * `ok:true, found:false` means the backend looked and saw no such
      * destination.
      */
-    async "l3:destinationCheck"({ destinationName } = {}) {
+    async "faid:destinationCheck"({ destinationName } = {}) {
       const name = String(destinationName || "").trim();
       if (!name) return { ok: false, error: "destinationName is required" };
       const rel = await currentRelease();
@@ -1492,7 +1492,7 @@ function createL3Handlers(ctx) {
         };
       }
       const url = `${base}/health/destination?name=${encodeURIComponent(name)}`;
-      log("l3", "line", `GET ${url}`);
+      log("faid", "line", `GET ${url}`);
       const get = ctx.httpsBody || (async (u) => ({ status: 200, body: await httpsText(u) }));
       let body = null;
       let status = 0;
@@ -1529,7 +1529,7 @@ function createL3Handlers(ctx) {
       };
     },
 
-    async "l3:health"({ appId } = {}) {
+    async "faid:health"({ appId } = {}) {
       const req = await requireApp(appId);
       if (req.error) return { ok: false, error: req.error };
       if (!req.app.healthPath) return { ok: false, error: "app declares no healthPath" };
@@ -1537,7 +1537,7 @@ function createL3Handlers(ctx) {
       const base = await routeUrl(target);
       if (!base) return { ok: false, error: `${target} has no route — is it deployed?` };
       const url = base + req.app.healthPath;
-      log("l3", "line", `GET ${url}`);
+      log("faid", "line", `GET ${url}`);
       // Health endpoints answer non-2xx WITH a diagnostic body (e.g. 503 when
       // a connection is unconfigured) — keep the body either way.
       const get = ctx.httpsBody || (async (u) => ({ status: 200, body: await httpsText(u) }));
@@ -1573,5 +1573,5 @@ module.exports = {
   validateConfigEnv,
   serviceStatusFromCf,
   wantedService,
-  createL3Handlers,
+  createFaidHandlers,
 };

@@ -10,11 +10,11 @@ function ScreenChoice({ ctx, setCtx, onNext, onBack }) {
   const cfOnly = !!ctx.login.cfOnly;
   const showXsuaaUpgrade = !!(window.figafModeFlags.features && window.figafModeFlags.features.xsuaaUpgrade);
   const showUpdate = !!(window.figafModeFlags.features && window.figafModeFlags.features.updateFigafTool);
-  const showManageL3 = !!(window.figafModeFlags.features && window.figafModeFlags.features.manageL3Apps);
+  const showManageFaid = !!(window.figafModeFlags.features && window.figafModeFlags.features.manageFaidApps);
   // CF-only has no BTP landscape label — fall back to the API host / org.
   const target = ctx.login.landscape || (ctx.login.apiUrl || "").replace(/^https?:\/\//, "") || ctx.login.org || "your space";
   // CF-only login supports the flows that need nothing but the cf CLI:
-  // Update Figaf Tool and the L3 App Manager.
+  // Update Figaf Tool and the FAID Apps manager.
   function pick(v) { if (cfOnly && v !== "update" && v !== "manage") return; setCtx(c => ({ ...c, choice: v })); }
 
   return (
@@ -79,18 +79,18 @@ function ScreenChoice({ ctx, setCtx, onNext, onBack }) {
             </button>
           )}
 
-          {showManageL3 && (
+          {showManageFaid && (
             <button
               className={`choice ${sel === "manage" ? "selected" : ""}`}
               onClick={() => pick("manage")}
             >
               <div className="choice-icon"><Ico.Box /></div>
               <div className="choice-title">
-                Manage L3 apps
+                Manage FAID Apps
                 <span className="pill blue">PoC</span>
               </div>
               <div className="choice-desc">
-                Install, update, disable, or remove Figaf L3 applications (e.g. B2B Archiving Setup) in this space from the bundled app catalog.
+                Install, update, disable, or remove FAID Apps (e.g. B2B Archiving Setup) in this space from the bundled app catalog.
               </div>
             </button>
           )}

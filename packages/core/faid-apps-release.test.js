@@ -1,15 +1,15 @@
 "use strict";
-// Tests for the release-store side of l3-apps.js (figaf-l3-l4 decision 0010):
-//   - l3:releases — source, installed vs latest, which versions Update may choose;
-//   - l3:install deploys at the INSTALLED version (latest on an empty space),
+// Tests for the release-store side of faid-apps.js (figaf-platform decision 0010):
+//   - faid:releases — source, installed vs latest, which versions Update may choose;
+//   - faid:install deploys at the INSTALLED version (latest on an empty space),
 //     downloads only that version's artifacts, refuses another version;
-//   - l3:update({version}) moves the whole installation upwards: shared
+//   - faid:update({version}) moves the whole installation upwards: shared
 //     backend first, then every installed frontend; downwards / unknown /
-//     empty space refused; l3:update({appId}) re-deploys one app;
+//     empty space refused; faid:update({appId}) re-deploys one app;
 //   - a failed or corrupt download is the step "download", nothing is pushed;
 //   - an unreachable store is one clear error naming the URL.
 // The store is an in-memory bucket behind fake httpsJson / httpsDownload; cf
-// is a fake `run` recorder, as in l3-apps.test.js.
+// is a fake `run` recorder, as in faid-apps.test.js.
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
@@ -18,10 +18,10 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 
-const { VERSION_ENV, createL3Handlers } = require("./l3-apps");
+const { VERSION_ENV, createFaidHandlers } = require("./faid-apps");
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
-const BASE = "https://store.example/l3";
+const BASE = "https://store.example/platform";
 
 function catalogFor(v) {
   return {
@@ -62,8 +62,8 @@ function makeRemoteCtx({ versions, installed, respond }) {
   const ctx = {
     host: {
       isHosted: true,
-      getUserDataDir: () => fs.mkdtempSync(path.join(os.tmpdir(), "l3-user-")),
-      resolveL3ReleaseSource: () => ({ kind: "remote", url: BASE, cacheDir: fs.mkdtempSync(path.join(os.tmpdir(), "l3-cache-")) }),
+      getUserDataDir: () => fs.mkdtempSync(path.join(os.tmpdir(), "faid-user-")),
+      resolvePlatformReleaseSource: () => ({ kind: "remote", url: BASE, cacheDir: fs.mkdtempSync(path.join(os.tmpdir(), "faid-cache-")) }),
     },
     run: async (cmd, args, opts = {}) => {
       calls.push({ cmd, args, opts });
@@ -88,9 +88,9 @@ const frontendsAbsent = (args) => ((args[0] === "app" && args[2] === "--guid") ?
 const pushes = (calls) => calls.filter((c) => c.args[0] === "push").map((c) => c.args[1]);
 const stamps = (calls) => calls.filter((c) => c.args[0] === "set-env" && c.args[2] === VERSION_ENV).map((c) => c.args[3]);
 
-test("l3:releases: source, installed vs latest, which versions Update may choose", async () => {
+test("faid:releases: source, installed vs latest, which versions Update may choose", async () => {
   const { ctx } = makeRemoteCtx({ versions: ["0.4.0", "0.4.1", "0.4.2"], installed: "0.4.1" });
-  const r = await createL3Handlers(ctx)["l3:releases"]({});
+  const r = await createFaidHandlers(ctx)["faid:releases"]({});
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.source.kind, "remote");
   assert.equal(r.source.location, BASE);
@@ -108,16 +108,16 @@ test("l3:releases: source, installed vs latest, which versions Update may choose
 
   // empty space: nothing selectable, Install will use latest
   const empty = makeRemoteCtx({ versions: ["0.4.1", "0.4.2"], installed: null });
-  const e = await createL3Handlers(empty.ctx)["l3:releases"]({});
+  const e = await createFaidHandlers(empty.ctx)["faid:releases"]({});
   assert.equal(e.installed, null);
   assert.equal(e.current, "0.4.2");
   assert.equal(e.updateAvailable, false);
   assert.ok(e.versions.every((v) => !v.selectable));
 });
 
-test("l3:install deploys at the INSTALLED version even when the store has a newer one; only that version's artifacts are downloaded and verified", async () => {
+test("faid:install deploys at the INSTALLED version even when the store has a newer one; only that version's artifacts are downloaded and verified", async () => {
   const { ctx, calls, logLines, gets } = makeRemoteCtx({ versions: ["0.4.1", "0.4.2"], installed: "0.4.1", respond: frontendsAbsent });
-  const r = await createL3Handlers(ctx)["l3:install"]({ appId: "arch" });
+  const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.version, "0.4.1");
   assert.ok(gets.includes(`${BASE}/0.4.1/backend.zip`));
@@ -127,32 +127,32 @@ test("l3:install deploys at the INSTALLED version even when the store has a newe
   assert.deepEqual(stamps(calls), ["0.4.1", "0.4.1"]);
   assert.ok(logLines.includes(`>> GET ${BASE}/0.4.1/arch.zip`), "every download is a visible line");
   assert.ok(logLines.some((l) => /arch\.zip .* sha256 ok/.test(l)));
-  assert.ok(logLines.some((l) => /release 0\.4\.1 from https:\/\/store\.example\/l3 \(release store\)/.test(l)));
+  assert.ok(logLines.some((l) => /release 0\.4\.1 from https:\/\/store\.example\/platform \(release store\)/.test(l)));
 
   // asking Install for another version is refused before any cf change
   const two = makeRemoteCtx({ versions: ["0.4.1", "0.4.2"], installed: "0.4.1" });
-  const bad = await createL3Handlers(two.ctx)["l3:install"]({ appId: "arch", version: "0.4.2" });
+  const bad = await createFaidHandlers(two.ctx)["faid:install"]({ appId: "arch", version: "0.4.2" });
   assert.equal(bad.ok, false);
   assert.match(bad.error, /Install uses the installed version 0\.4\.1/);
   assert.deepEqual(pushes(two.calls), []);
 });
 
-test("l3:install on an empty space uses the latest release", async () => {
+test("faid:install on an empty space uses the latest release", async () => {
   const { ctx, calls } = makeRemoteCtx({ versions: ["0.4.1", "0.4.2"], installed: null, respond: frontendsAbsent });
-  const r = await createL3Handlers(ctx)["l3:install"]({ appId: "arch" });
+  const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.version, "0.4.2");
   assert.deepEqual(stamps(calls), ["0.4.2", "0.4.2"]);
 });
 
-test("l3:update({version}) moves the whole installation: shared backend first, then every INSTALLED frontend, not the others; downwards is refused", async () => {
+test("faid:update({version}) moves the whole installation: shared backend first, then every INSTALLED frontend, not the others; downwards is refused", async () => {
   const present = new Set(["arch-backend", "arch-frontend"]); // "other" is not installed
   const { ctx, calls, logLines } = makeRemoteCtx({
     versions: ["0.4.0", "0.4.1", "0.4.2"], installed: "0.4.1",
     respond: (args) => ((args[0] === "app" && args[2] === "--guid") ? (present.has(args[1]) ? { code: 0, stdout: "g\n" } : { code: 1, stdout: "" }) : null),
   });
-  const handlers = createL3Handlers(ctx);
-  const r = await handlers["l3:update"]({ version: "0.4.2" });
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:update"]({ version: "0.4.2" });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual({ from: r.from, version: r.version, apps: r.apps }, { from: "0.4.1", version: "0.4.2", apps: ["arch"] });
   assert.deepEqual(pushes(calls), ["arch-backend", "arch-frontend"], "backend first, installed frontend second, the absent app untouched");
@@ -161,17 +161,17 @@ test("l3:update({version}) moves the whole installation: shared backend first, t
   assert.ok(logLines.some((l) => /update installation to 0\.4\.2: done/.test(l)));
 
   calls.length = 0;
-  const down = await handlers["l3:update"]({ version: "0.4.0" });
+  const down = await handlers["faid:update"]({ version: "0.4.0" });
   assert.equal(down.ok, false);
   assert.match(down.error, /lower than the installed 0\.4\.1.*rollback is not supported/);
   assert.deepEqual(pushes(calls), [], "a refused update changes nothing");
-  assert.match((await handlers["l3:update"]({ version: "9.9.9" })).error, /not in the release store/);
-  assert.match((await handlers["l3:update"]({})).error, /appId or version required/);
+  assert.match((await handlers["faid:update"]({ version: "9.9.9" })).error, /not in the release store/);
+  assert.match((await handlers["faid:update"]({})).error, /appId or version required/);
 });
 
-test("l3:update({version}) on an empty space is refused; l3:update({appId}) re-deploys one app at the installed version", async () => {
+test("faid:update({version}) on an empty space is refused; faid:update({appId}) re-deploys one app at the installed version", async () => {
   const empty = makeRemoteCtx({ versions: ["0.4.1", "0.4.2"], installed: null });
-  const e = await createL3Handlers(empty.ctx)["l3:update"]({ version: "0.4.2" });
+  const e = await createFaidHandlers(empty.ctx)["faid:update"]({ version: "0.4.2" });
   assert.equal(e.ok, false);
   assert.match(e.error, /nothing is installed yet/);
 
@@ -179,7 +179,7 @@ test("l3:update({version}) on an empty space is refused; l3:update({appId}) re-d
     versions: ["0.4.1", "0.4.2"], installed: "0.4.1",
     respond: (args) => ((args[0] === "app" && args[2] === "--guid") ? { code: 0, stdout: "g\n" } : null),
   });
-  const r = await createL3Handlers(ctx)["l3:update"]({ appId: "arch" });
+  const r = await createFaidHandlers(ctx)["faid:update"]({ appId: "arch" });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.version, "0.4.1", "re-deploy stays at the installed version");
   assert.deepEqual(pushes(calls), ["arch-backend", "arch-frontend"]);
@@ -188,7 +188,7 @@ test("l3:update({version}) on an empty space is refused; l3:update({appId}) re-d
 test("a failed or corrupt download is the step 'download': nothing is pushed for that part", async () => {
   const { ctx, calls, objects } = makeRemoteCtx({ versions: ["0.4.1"], installed: null, respond: frontendsAbsent });
   objects["0.4.1/backend.zip"] = "backend-TAMPERED";
-  const r = await createL3Handlers(ctx)["l3:install"]({ appId: "arch" });
+  const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.equal(r.step, "download");
   assert.equal(r.cfApp, "arch-backend");
@@ -197,7 +197,7 @@ test("a failed or corrupt download is the step 'download': nothing is pushed for
 
   delete objects["0.4.1/arch.zip"];
   objects["0.4.1/backend.zip"] = "backend-0.4.1";
-  const r2 = await createL3Handlers(ctx)["l3:install"]({ appId: "arch" });
+  const r2 = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
   assert.equal(r2.ok, false);
   assert.equal(r2.step, "download");
   assert.match(r2.error, /download of arch\.zip failed: HTTP 404/);
@@ -207,14 +207,14 @@ test("a failed or corrupt download is the step 'download': nothing is pushed for
 test("an unreachable store is one clear error on every read handler; the catalog names the source", async () => {
   const { ctx } = makeRemoteCtx({ versions: ["0.4.1"], installed: null });
   ctx.httpsJson = async () => { throw new Error("getaddrinfo ENOTFOUND store.example"); };
-  const handlers = createL3Handlers(ctx);
-  for (const ch of ["l3:catalog", "l3:status", "l3:services", "l3:releases"]) {
+  const handlers = createFaidHandlers(ctx);
+  for (const ch of ["faid:catalog", "faid:status", "faid:services", "faid:releases"]) {
     const r = await handlers[ch]({});
     assert.equal(r.ok, false, ch);
-    assert.match(r.error, /cannot read https:\/\/store\.example\/l3\/index\.json: getaddrinfo ENOTFOUND/);
+    assert.match(r.error, /cannot read https:\/\/store\.example\/platform\/index\.json: getaddrinfo ENOTFOUND/);
   }
   const good = makeRemoteCtx({ versions: ["0.4.1"], installed: null });
-  const c = await createL3Handlers(good.ctx)["l3:catalog"]({});
+  const c = await createFaidHandlers(good.ctx)["faid:catalog"]({});
   assert.equal(c.ok, true);
   assert.equal(c.source.label, `${BASE} (release store)`);
   assert.equal(c.releaseVersion, "0.4.1");

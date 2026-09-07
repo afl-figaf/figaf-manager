@@ -144,7 +144,7 @@ function AccessMapCard({ ctx }) {
     {
       name: "Browser access",
       purpose: ssoMode
-        ? "SAP IAS sign-in through the approuter; the FigafL3L4-Manager-Admin (or -Operator) role collection is required. Survives restarts and redeploys."
+        ? "SAP IAS sign-in through the approuter; the FAID-Manager-Admin (or -Operator) role collection is required. Survives restarts and redeploys."
         : "A one-time setup token from the app logs, until step 1 of the Setup (Prepare the space) is done. Dies on every restart.",
       state: ssoMode ? { cls: "green", text: "SAP IAS" } : { cls: "gray", text: "setup token" },
     },

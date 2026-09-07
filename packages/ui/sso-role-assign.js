@@ -1,5 +1,5 @@
 // Role assignment in the persistent-SSO upgrade: the decision the upgrade
-// screen makes BEFORE "Start upgrade" (docs/l3-console/SPEC.md "Role assignment in
+// screen makes BEFORE "Start upgrade" (docs/faid-apps-console/SPEC.md "Role assignment in
 // the SSO upgrade", run #4 finding 2).
 // Pure logic, browser-globals like setup-checklist.js: screen-xsuaa.jsx renders
 // the result, sso-role-assign.test.js runs it under node:test. No React, no I/O.

@@ -24,8 +24,8 @@ The wizards diverge only at the host-environment seam (file dialogs, persistent
 storage, deploy-template sourcing).
 
 > **Status (2026-09-03).** The hosted **figaf-manager** is the product going
-> forward: since September 2026 it also installs and manages the Figaf L3 apps
-> (branch `poc/l3-app-manager`, see [docs/PROJECT-CONTEXT.md](docs/PROJECT-CONTEXT.md)).
+> forward: since September 2026 it also installs and manages the FAID Apps
+> (branch `poc/faid-apps-manager`, see [docs/PROJECT-CONTEXT.md](docs/PROJECT-CONTEXT.md)).
 > The desktop **figaf-local** is **frozen**: it keeps working and keeps building,
 > but gets no new features; its release job in `release.yml` is already disabled.
 

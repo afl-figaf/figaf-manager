@@ -6,7 +6,7 @@
    ScreenConnectProvision, ScreenConnectIdp,
    ScreenConnectIdpSuser, ScreenConnectIdpPassport, ScreenConnectIdpIas,
    ScreenConnectIdpCustomTrust, ScreenConnectIdpCustomAssign,
-   ScreenL3Apps, ScreenConnections, ConsoleFrame,
+   ScreenFaidApps, ScreenConnections, ConsoleFrame,
    UpdatePreflightModal, SelfUpdateBanner */
 
 function App() {
@@ -176,7 +176,7 @@ function App() {
     };
   }, []);
 
-  // Lane-1 routing: `#/apps` is the L3 dashboard's own address and
+  // Lane-1 routing: `#/apps` is the FAID Apps dashboard's own address and
   // `#/connections` the system-connections page's. The target is remembered
   // here and consumed by the navigation effect below once a cf login exists
   // (resumed, auto, or manual).
@@ -282,7 +282,7 @@ function App() {
     const target = pendingRoute.current;
     pendingRoute.current = null;
     setCtx(c => ({ ...c, choice: "manage" }));
-    // baseSteps(3) + manageSteps → index 3 = l3-apps, index 4 = l3-connections
+    // baseSteps(3) + manageSteps → index 3 = faid-apps, index 4 = faid-connections
     setStepRaw(target === "connections" ? 4 : 3);
   }, [ctx.login.cfStatus]);
 
@@ -348,10 +348,10 @@ function App() {
     { id: "done",           label: "Finish",           sub: "New image live" },
   ];
 
-  // L3 App Manager (PoC): dashboard + connections, not a wizard tail.
+  // FAID Apps manager: dashboard + connections, not a wizard tail.
   const manageSteps = [
-    { id: "l3-apps",        label: "Manage apps", sub: "Install · update · disable" },
-    { id: "l3-connections", label: "Connections", sub: "Figaf tool · SAP systems" },
+    { id: "faid-apps",        label: "Manage apps", sub: "Install · update · disable" },
+    { id: "faid-connections", label: "Connections", sub: "Figaf tool · SAP systems" },
   ];
 
   // The stepper rail shows only the 3 base steps (Welcome / Sign in / Choose
@@ -387,8 +387,8 @@ function App() {
       case "deploy":            return <ScreenDeploy ctx={ctx} setCtx={setCtx} onNext={next} onBack={back} appendLog={appendLog} />;
       case "xsuaa-upgrade":     return <ScreenXsuaaUpgrade ctx={ctx} setCtx={setCtx} onNext={next} onBack={back} setStep={setStepRaw} STEPS={STEPS} />;
       case "xsuaa-assign-role": return <ScreenXsuaaAssignRole ctx={ctx} setCtx={setCtx} onNext={next} onBack={back} />;
-      case "l3-apps":           return <ScreenL3Apps ctx={ctx} setCtx={setCtx} onBack={back} onConnections={next} />;
-      case "l3-connections":    return <ScreenConnections ctx={ctx} setCtx={setCtx} onBack={back} />;
+      case "faid-apps":           return <ScreenFaidApps ctx={ctx} setCtx={setCtx} onBack={back} onConnections={next} />;
+      case "faid-connections":    return <ScreenConnections ctx={ctx} setCtx={setCtx} onBack={back} />;
       case "updateConfig":      return <ScreenUpdateConfig ctx={ctx} setCtx={setCtx} onNext={next} onBack={back} />;
       case "updateProgress":    return <ScreenUpdateProgress ctx={ctx} setCtx={setCtx} onNext={next} onBack={back} />;
       case "connect-provision": return <ScreenConnectProvision ctx={ctx} setCtx={setCtx} onNext={next} onBack={back} appendLog={appendLog} />;
@@ -410,13 +410,13 @@ function App() {
 
   const currentStepId = STEPS[currentStep] && STEPS[currentStep].id;
 
-  // Keep the address bar honest: the L3 dashboard carries #/apps, the
+  // Keep the address bar honest: the FAID Apps dashboard carries #/apps, the
   // connections page #/connections; leaving them clears the hash.
   // replaceState avoids polluting the browser history.
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     if (consoleUI) return; // the console owns the address bar
-    const OWN_HASHES = { "l3-apps": "#/apps", "l3-connections": "#/connections" };
+    const OWN_HASHES = { "faid-apps": "#/apps", "faid-connections": "#/connections" };
     const wanted = OWN_HASHES[currentStepId];
     if (wanted) {
       if (window.location.hash !== wanted) window.history.replaceState(null, "", wanted);

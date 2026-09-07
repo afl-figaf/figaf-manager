@@ -1,7 +1,7 @@
 "use strict";
-// System connections (decision 0006 vertical slice, figaf-l3-l4 repo).
+// System connections (decision 0006 vertical slice, figaf-platform repo).
 //
-// The manager is the ONLY WRITER of connection entries; L3 app backends READ
+// The manager is the ONLY WRITER of connection entries; FAID Apps backends READ
 // them at runtime straight from the SAP Credential Store. That store is the
 // hand-off between the two sides — the manager never touches an app database.
 //
@@ -29,7 +29,7 @@
 // and only stores what worked. No secret value is ever returned to the
 // renderer, logged, or echoed in an error message.
 //
-// KEEP IN SYNC: the reader side lives in the figaf-l3-l4 repo,
+// KEEP IN SYNC: the reader side lives in the figaf-platform repo,
 // spikes/archiving-setup-playground/backend/srv/lib/platform-connections.js —
 // namespace, credential names, and the JSON value shape must match.
 
@@ -37,7 +37,7 @@ const credstoreClientDefault = require("./credstore-client");
 
 const CONNECTIONS_NAMESPACE = "figaf-connections";
 const FIGAF_TOOL_CREDENTIAL = "figaf-tool";
-// Same scope set the L3 backend connector uses for its Figaf public-API login.
+// Same scope set the shared backend connector uses for its Figaf public-API login.
 const DEFAULT_FIGAF_SCOPE = "agent:read ctt:sync";
 const STATUS_CACHE_MS = 60 * 1000; // credstore reads are rate-limited
 const MAX_STATUS_READS = 20;
@@ -99,7 +99,7 @@ function accessHeaders(entry) {
     : {};
 }
 
-/** Tolerant agent-array extraction (same shapes the L3 connector accepts). */
+/** Tolerant agent-array extraction (same shapes the shared backend connector accepts). */
 function extractAgents(response) {
   if (Array.isArray(response)) return response;
   for (const key of ["content", "value", "items", "data", "agents", "results"]) {
@@ -173,7 +173,7 @@ function parseServiceKey(text) {
  *   locationId, error? }. Verification of a PI/PO entry is DELEGATED to the
  *   shared backend (decision 0011): only the backend is bound to the
  *   destination service, so only it can read a destination. Wired in
- *   orchestrator.js to the l3:destinationCheck handler.
+ *   orchestrator.js to the faid:destinationCheck handler.
  */
 function createConnectionsHandlers(ctx = {}) {
   const credstore = ctx.credstore || credstoreClientDefault;

@@ -25,8 +25,8 @@
 // isXsuaaActive() so the tests can drive both branches deterministically.
 
 const crypto = require("crypto");
-// One XSUAA instance for the manager and the apps (figaf-l3-l4 decision 0009):
-// the shared instance (xsappname figaf-l3l4, scope FigafL3L4ManagerOperator)
+// One XSUAA instance for the manager and the apps (figaf-platform decision 0009):
+// the shared instance (xsappname figaf-faid, scope FAIDManagerOperator)
 // is the rule for new installations; the legacy instance (xsappname
 // figaf-manager-xsuaa, scope FigafManagerOperator) keeps working for Alex's
 // shipped installations. The bound xsappname decides which scope is checked.
@@ -60,7 +60,7 @@ function isXsuaaActive() {
 
 // The required scope for the manager. Constructed from xsappname at validation
 // time so it's tied to the actual bound service, not a hardcoded string:
-// shared instance -> <xsappname>.FigafL3L4ManagerOperator, legacy ->
+// shared instance -> <xsappname>.FAIDManagerOperator, legacy ->
 // <xsappname>.FigafManagerOperator.
 function operatorScopeFor(binding) {
   const app = (binding && binding.credentials && binding.credentials.xsappname) || "figaf-manager-xsuaa";

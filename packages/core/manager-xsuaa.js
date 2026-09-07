@@ -1,12 +1,12 @@
 "use strict";
-// One XSUAA instance for the Figaf Manager and the L3 apps (figaf-l3-l4
+// One XSUAA instance for the Figaf Manager and the FAID Apps (figaf-platform
 // decision 0009). The manager's roles live in the same instance as the apps'
-// roles: xsappname `figaf-l3l4`, instance `figaf-l3l4-xsuaa` (frozen names,
+// roles: xsappname `figaf-faid`, instance `figaf-faid-xsuaa` (frozen names,
 // decision 0008).
 //
 // Two parts, two owners:
 //   - manager part: ./manager-xsuaa-part.json (ships with the manager)
-//   - release part: xs-security.json in the L3 release (ships with the apps)
+//   - release part: xs-security.json in the platform release (ships with the apps)
 // composeXsSecurity() builds the full document whenever the manager creates or
 // updates the instance (Setup step 1 "Prepare the space", Setup step 3, before every
 // install/update). Union by name, the release entry wins on a name clash,
@@ -20,12 +20,12 @@
 
 const MANAGER_PART = require("./manager-xsuaa-part.json");
 
-const SHARED_INSTANCE = "figaf-l3l4-xsuaa";
-const SHARED_XSAPPNAME = "figaf-l3l4";
-const SHARED_OPERATOR_SCOPE = "FigafL3L4ManagerOperator";
-const SHARED_ADMIN_SCOPE = "FigafL3L4ManagerAdmin";
-const SHARED_OPERATOR_COLLECTION = "FigafL3L4-Manager-Operator";
-const SHARED_ADMIN_COLLECTION = "FigafL3L4-Manager-Admin";
+const SHARED_INSTANCE = "figaf-faid-xsuaa";
+const SHARED_XSAPPNAME = "figaf-faid";
+const SHARED_OPERATOR_SCOPE = "FAIDManagerOperator";
+const SHARED_ADMIN_SCOPE = "FAIDManagerAdmin";
+const SHARED_OPERATOR_COLLECTION = "FAID-Manager-Operator";
+const SHARED_ADMIN_COLLECTION = "FAID-Manager-Admin";
 
 const LEGACY_INSTANCE = "figaf-manager-xsuaa";
 const LEGACY_XSAPPNAME = "figaf-manager-xsuaa";
@@ -33,13 +33,13 @@ const LEGACY_OPERATOR_SCOPE = "FigafManagerOperator";
 const LEGACY_ADMIN_COLLECTION = "FigafManagerAdmin";
 const LEGACY_OPERATOR_COLLECTION = "FigafManagerOperator";
 
-// Same placeholder as l3-apps.js (decision 0008): filled with the landscape's
+// Same placeholder as faid-apps.js (decision 0008): filled with the landscape's
 // shared `cfapps.` domain by whoever creates or updates the instance.
 const APPS_DOMAIN_PLACEHOLDER = "__CF_APPS_DOMAIN__";
 
 /**
  * The xsappname as written in xs-security.json. A binding reports it with a
- * tenant suffix (`figaf-l3l4!t12345`); strip everything from the first `!`.
+ * tenant suffix (`figaf-faid!t12345`); strip everything from the first `!`.
  */
 function xsappnameBase(name) {
   const s = String(name || "");
@@ -57,7 +57,7 @@ function isLegacyXsappname(name) {
 
 /**
  * The scope the manager requires for its operator, by the xsappname of the
- * bound instance. Shared instance -> FigafL3L4ManagerOperator; the legacy
+ * bound instance. Shared instance -> FAIDManagerOperator; the legacy
  * instance (and anything unknown, to stay compatible with old installations)
  * -> FigafManagerOperator.
  */

@@ -1,6 +1,6 @@
 "use strict";
-// The release store (figaf-l3-l4 decision 0010), end to end on the REMOTE
-// code path: the manager on :8089 has FIGAF_L3_RELEASE_URL pointing at a
+// The release store (figaf-platform decision 0010), end to end on the REMOTE
+// code path: the manager on :8089 has FIGAF_PLATFORM_RELEASE_URL pointing at a
 // static server (:8090) that serves e2e/fixtures/store in the bucket layout,
 // two versions (0.0.1, 0.0.2). No internet, and no cf change: the fixture's
 // required service instance does not exist, so any Install is refused early.
@@ -16,7 +16,7 @@
 const { test, expect } = require("@playwright/test");
 
 const APP_ID = "b2b-archiving-setup-e2e-store";
-const STORE = "http://127.0.0.1:8090/l3";
+const STORE = "http://127.0.0.1:8090/platform";
 
 async function rpc(page, channel, body) {
   return page.evaluate(async ({ channel, body }) => {
@@ -29,7 +29,7 @@ async function rpc(page, channel, body) {
 
 test("the page names the release store, its versions, and works with the latest one on an empty space", async ({ page }) => {
   await page.goto("/#/apps");
-  await expect(page.locator("h1.pane-title")).toHaveText("Figaf L3 applications");
+  await expect(page.locator("h1.pane-title")).toHaveText("FAID Apps");
   await expect(page.locator(".pane-desc")).toContainText("release 0.0.2");
 
   const panel = page.locator("[data-release-panel]");
@@ -42,7 +42,7 @@ test("the page names the release store, its versions, and works with the latest 
   await expect(panel).toContainText("Nothing is installed yet. Install uses the latest release, 0.0.2.");
   await expect(panel.locator("[data-release-target]")).toHaveCount(0); // no dropdown without an installation
 
-  const row = page.locator(`.l3-app-row[data-app="${APP_ID}"]`);
+  const row = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
   await expect(row).toContainText("Not installed");
   await expect(row).toContainText("release: 0.0.2");
   await expect(row.getByRole("button", { name: "Install 0.0.2" })).toBeVisible();
@@ -55,7 +55,7 @@ test("the page names the release store, its versions, and works with the latest 
   // `>> GET …/catalog.json` lines are not part of this page's drawer.
   await page.locator(".terminal-bar").click();
   const terminal = page.locator(".terminal");
-  const done = page.waitForResponse((r) => decodeURIComponent(r.url()).includes("/rpc/l3:releases"));
+  const done = page.waitForResponse((r) => decodeURIComponent(r.url()).includes("/rpc/faid:releases"));
   await panel.getByRole("button", { name: "Refresh releases" }).click();
   await done;
   await expect(terminal).toContainText(`>> GET ${STORE}/index.json`);
@@ -75,7 +75,7 @@ test("Refresh releases reads index.json again; the page's own reads do not flood
   const count = async () => (await terminal.innerText()).split(`>> GET ${STORE}/index.json`).length - 1;
   const before = await count();
   for (let i = 0; i < 2; i++) {
-    const done = page.waitForResponse((r) => decodeURIComponent(r.url()).includes("/rpc/l3:releases"));
+    const done = page.waitForResponse((r) => decodeURIComponent(r.url()).includes("/rpc/faid:releases"));
     await panel.getByRole("button", { name: "Refresh releases" }).click();
     await done;
   }
@@ -88,31 +88,31 @@ test("Refresh releases reads index.json again; the page's own reads do not flood
 
 test("Update refuses when nothing is installed and for unknown versions; Install refuses a version other than latest on an empty space; nothing changes", async ({ page }) => {
   await page.goto("/#/apps");
-  await expect(page.locator(`.l3-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
+  await expect(page.locator(`.faid-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
 
-  const noInstall = await rpc(page, "l3:update", { version: "0.0.2" });
+  const noInstall = await rpc(page, "faid:update", { version: "0.0.2" });
   expect(noInstall.ok).toBe(false);
   expect(noInstall.error).toMatch(/nothing is installed yet/);
 
-  const unknown = await rpc(page, "l3:update", { version: "9.9.9" });
+  const unknown = await rpc(page, "faid:update", { version: "9.9.9" });
   expect(unknown.ok).toBe(false);
   expect(unknown.error).toMatch(/version 9\.9\.9 is not in the release store \(available: 0\.0\.2, 0\.0\.1\)/);
 
-  const older = await rpc(page, "l3:install", { appId: APP_ID, version: "0.0.1" });
+  const older = await rpc(page, "faid:install", { appId: APP_ID, version: "0.0.1" });
   expect(older.ok).toBe(false);
   expect(older.error).toMatch(/Install uses the latest release, 0\.0\.2, not 0\.0\.1/);
 
   // The normal early refusal of this fixture: the store worked, cf was not changed.
-  const install = await rpc(page, "l3:install", { appId: APP_ID });
+  const install = await rpc(page, "faid:install", { appId: APP_ID });
   expect(install.ok).toBe(false);
-  expect(install.error).toMatch(/required service instance\(s\) missing: figaf-l3l4-e2e-missing/);
+  expect(install.error).toMatch(/required service instance\(s\) missing: figaf-faid-e2e-missing/);
 
-  const releases = await rpc(page, "l3:releases", {});
+  const releases = await rpc(page, "faid:releases", {});
   expect(releases.ok).toBe(true);
   expect(releases.source).toMatchObject({ kind: "remote", location: STORE });
   expect(releases.installed).toBeNull();
   expect(releases.latest).toBe("0.0.2");
   expect(releases.versions.map((v) => v.version)).toEqual(["0.0.2", "0.0.1"]);
   expect(releases.versions.every((v) => v.selectable === false)).toBe(true);
-  await expect(page.locator(`.l3-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
+  await expect(page.locator(`.faid-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
 });

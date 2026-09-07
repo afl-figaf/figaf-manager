@@ -7,7 +7,7 @@ dist/
 *.zip
 *.sig
 *.cert
-# L3 app artifact channel — built by figaf-l3-l4/spikes/app-manager-poc/build-artifacts.ps1
-l3-artifacts/
+# FAID app artifact channel — built by figaf-platform/spikes/app-manager-poc/build-artifacts.ps1
+platform-artifacts/
 # build record written by scripts/build-zip.js - a build artifact, never committed
 bin/VERSIONS.json

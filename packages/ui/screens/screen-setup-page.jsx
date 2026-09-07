@@ -1,12 +1,12 @@
-/* global React, Ico, CheckRow, ScreenLogin, BaseServicesCard, L3ActionOutcome */
-// Console page: Setup (#/setup) - docs/l3-console/SPEC.md section 6.
+/* global React, Ico, CheckRow, ScreenLogin, BaseServicesCard, FaidActionOutcome */
+// Console page: Setup (#/setup) - docs/faid-apps-console/SPEC.md section 6.
 // ONE page owns the installation of a fresh space. The steps come from the
 // pure model (setup-checklist.js, built by console.jsx); this file renders
 // them and gives each open step its body:
 //   1 Prepare the space   sign-in card (token mode), then plans + role
 //                         assignment + the run (prepare-space.js)
 //   2 Management user     the store form (no passcode button on this page)
-//   3 Base services       the panel of screen-l3-apps.jsx (status + repair)
+//   3 Base services       the panel of screen-faid-apps.jsx (status + repair)
 //   4 / 5                 a button to the page where the work happens
 // Written for a person who sees the manager for the first time on an empty
 // space: one visible path, the next button is always the obvious one.
@@ -220,7 +220,7 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged 
   const [started, setStarted] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [outcome, setOutcome] = React.useState(null); // result of the run + managerMode
-  const roleName = (outcome && outcome.roleName) || "FigafL3L4-Manager-Admin";
+  const roleName = (outcome && outcome.roleName) || "FAID-Manager-Admin";
 
   const rolePlan = React.useMemo(() => {
     if (precheck === null) return null;
@@ -561,7 +561,7 @@ function ManagementUserStep({ ctx, setCtx, appendLog, stored, onStored }) {
   );
 }
 
-// ── Step 3: Base services - the panel of screen-l3-apps.jsx, plus the
+// ── Step 3: Base services - the panel of screen-faid-apps.jsx, plus the
 // self-refresh while an instance is being created.
 function BaseServicesStep({ ctx, services, onRefresh, onOpenTerminal }) {
   const api = fgSetup();
@@ -599,17 +599,17 @@ function BaseServicesStep({ ctx, services, onRefresh, onOpenTerminal }) {
   }
   return (
     <div className="setup-step-body" data-body="services">
-      <L3ActionOutcome outcome={outcome} onDismiss={() => setOutcome(null)} onOpenTerminal={onOpenTerminal} />
+      <FaidActionOutcome outcome={outcome} onDismiss={() => setOutcome(null)} onOpenTerminal={onOpenTerminal} />
       <BaseServicesCard
         services={services}
         busy={busy}
         onRefresh={onRefresh}
-        onProvision={(plans, only) => serviceAction("provision", () => api.l3.provisionServices(only && only.length ? { plans, only } : { plans }))}
-        onBind={(name) => serviceAction("bind", () => api.l3.bindManagerService({ name }))}
-        onBindPlatform={api.l3.bindPlatformService
-          ? (name) => serviceAction("bind-platform", () => api.l3.bindPlatformService({ name }))
+        onProvision={(plans, only) => serviceAction("provision", () => api.faid.provisionServices(only && only.length ? { plans, only } : { plans }))}
+        onBind={(name) => serviceAction("bind", () => api.faid.bindManagerService({ name }))}
+        onBindPlatform={api.faid.bindPlatformService
+          ? (name) => serviceAction("bind-platform", () => api.faid.bindPlatformService({ name }))
           : null}
-        onRestart={() => serviceAction("restart", () => api.l3.restartSelf())}
+        onRestart={() => serviceAction("restart", () => api.faid.restartSelf())}
       />
     </div>
   );
@@ -684,7 +684,7 @@ function ScreenSetupPage({ ctx, setCtx, appendLog, data, setup, navigate, onRefr
             <strong>Everything is in place.</strong> The manager signs itself in, the apps run, the connections are stored.
             This page stays here as the status of the installation; a missing instance can be repaired in step 3.
             <div style={{ marginTop: 10 }}>
-              <button className="btn btn-primary" onClick={() => navigate("apps")}>Open L3 Applications</button>
+              <button className="btn btn-primary" onClick={() => navigate("apps")}>Open FAID Apps</button>
             </div>
           </div>
         )}

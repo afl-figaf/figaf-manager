@@ -12,12 +12,12 @@ applications:
     env:
       NODE_ENV: production
       FIGAF_LOG_LEVEL: cli
-      # The L3 platform release store (figaf-l3-l4 decision 0010): the manager
+      # The Figaf Platform release store (figaf-platform decision 0010): the manager
       # lists, downloads and verifies releases from here. Public read URL of the
-      # Cloudflare R2 bucket (figaf-l3-l4 release/publish.js writes it). A
+      # Cloudflare R2 bucket (figaf-platform release/publish.js writes it). A
       # custom domain or a mirror is a change of this value only. For a local
-      # release directory (development, e2e) set FIGAF_L3_ARTIFACTS_DIR instead.
-      FIGAF_L3_RELEASE_URL: https://pub-086a7914662e477595f40f58270518b9.r2.dev/l3
+      # release directory (development, e2e) set FIGAF_PLATFORM_ARTIFACTS_DIR instead.
+      FIGAF_PLATFORM_RELEASE_URL: https://pub-086a7914662e477595f40f58270518b9.r2.dev/platform
       # FIGAF_LOG_LEVEL controls the verbosity of logs emitted by the wizard.
       #│ off   │ nothing (no-op fast path)                                     │
       #├───────┼───────────────────────────────────────────────────────────────┤
@@ -29,7 +29,7 @@ applications:
     
       # Optional: pin deployment template source (defaults to GitHub btp-users branch tip)
       # FIGAF_DEPLOYMENT_ZIP_URL: https://your-mirror.example.com/btp-users.zip
-      # Maintenance mode is OFF on this branch: the L3 App Manager is a
+      # Maintenance mode is OFF on this branch: the FAID Apps manager is a
       # persistent console that is redeployed often, and every push re-applies
       # the manifest env (a `cf unset-env` does not survive the next push).
       # Set FIGAF_MANAGER_MAINTENANCE: 1 explicitly when a maintenance window

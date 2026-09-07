@@ -4,21 +4,21 @@
 // node:test. No React, no I/O.
 //
 // Input `data` = the four results the console fetches:
-//   services: l3:services            -> { ok, services: [{ name, status, bindToManager, boundToManager,
+//   services: faid:services            -> { ok, services: [{ name, status, bindToManager, boundToManager,
 //                                          optional, backendDeployed, boundToBackend }] }
 //   stored:   login:storedUserStatus -> { available, bindingPresent }
-//   l3:       l3:status              -> { ok, platform: { status } }
+//   faid:     faid:status              -> { ok, platform: { status } }
 //   figaf:    connections:figafStatus-> { configured }
 // plus `ssoDone` (window.figafXsuaaMode). Every value may be missing.
 //
-// Order (docs/l3-console/SPEC.md section 6, 2026-09-03):
+// Order (docs/faid-apps-console/SPEC.md section 6, 2026-09-03):
 //   1 Prepare the space   creates the instances (plans asked here), turns on
 //                         SAP IAS sign-in, restarts the manager once; the
 //                         database is started here and finishes later
 //   2 Management user     stored right after the IAS sign-in, on this page
 //   3 Base services       status of the instances (the database finishing),
 //                         repair actions when something is missing
-//   4 Shared backend and first app   Install on L3 Applications
+//   4 Shared backend and first app   Install on FAID Apps
 //   5 Figaf tool connection          Connections
 // Everything after step 1 is blocked until step 1 is done: one token, one
 // passcode, one restart.
@@ -39,7 +39,7 @@
     var bindingActive = !!(stored && stored.bindingPresent);
     var storedDone = !!(stored && stored.available);
     var figafDone = !!(data.figaf && data.figaf.configured);
-    var platform = data.l3 && data.l3.ok ? data.l3.platform : null;
+    var platform = data.faid && data.faid.ok ? data.faid.platform : null;
     var platformDone = !!(platform && platform.status === "running");
 
     // Optional instances (catalog v4: connectivity / destination for on-premise
@@ -116,12 +116,12 @@
       id: "platform",
       n: steps.length + 1,
       title: "Shared backend and first app",
-      why: "Install the first app on L3 Applications. The shared backend connector every app uses is " +
+      why: "Install the first app on FAID Apps. The shared backend connector every app uses is " +
         "deployed with it, automatically.",
       when: hasServices ? "Waits until every base service is ready." : "",
       done: platformDone,
       blocked: platformDone ? "" : (!ssoDone ? afterPrepare : (hasServices && !allReady ? "after step " + servicesStepN : "")),
-      cta: "Open L3 Applications",
+      cta: "Open FAID Apps",
     });
 
     steps.push({

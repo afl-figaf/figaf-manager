@@ -41,9 +41,9 @@
       // gapped deployments that can't reach api.github.com.
       selfUpdateBanner:
         !(typeof window !== "undefined" && window.figafDisableSelfUpdate === true),
-      // L3 App Manager (PoC): catalog-driven install/manage of Figaf L3 apps.
+      // FAID Apps manager: catalog-driven install/manage of FAID Apps.
       // Hosted only — the artifact channel is bundled into the cockpit zip.
-      manageL3Apps:  hosted,
+      manageFaidApps:  hosted,
       // Console frame: persistent left-rail navigation instead of the
       // one-time wizard. Hosted only — desktop really is a one-time
       // installer and keeps the wizard frame. server.js injects
@@ -51,7 +51,7 @@
       // FIGAF_CONSOLE_UI=0 in the manifest to restore the classic wizard).
       consoleUI: hosted && window.figafConsoleUI !== false,
       // Console sign-in gate, first sign-in: Cloud Foundry is the primary
-      // action (the L3 install needs only cf); the BTP login is optional
+      // action (the FAID Apps install needs only cf); the BTP login is optional
       // (persistent-SSO role assignment, Figaf Tool deployments). Same
       // condition as consoleUI - the wizard frame keeps BTP first.
       cfFirstLogin: hosted && window.figafConsoleUI !== false,

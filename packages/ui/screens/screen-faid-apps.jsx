@@ -1,13 +1,13 @@
 /* global React, Ico */
 
 // ═══════════════════════════════════════════════════════════
-// L3 App Manager (PoC) — catalog dashboard
+// FAID Apps manager — catalog dashboard
 // One row per catalog app: status, versions, and the actions
 // Install / Update / Configure / Health / Disable / Enable / Remove.
 // Every action streams its cf commands into the terminal drawer.
 // ═══════════════════════════════════════════════════════════
 
-const L3_STATUS_META = {
+const FAID_STATUS_META = {
   "not-installed": { label: "Not installed", cls: "gray" },
   "running":       { label: "Running",       cls: "blue" },
   // A fresh install pushes with --no-start, so Cloud Foundry keeps the app
@@ -21,14 +21,14 @@ const L3_STATUS_META = {
 
 // What the pill says while an action runs. Same words for the page that
 // started it and for a page that only learned about it from the server.
-const L3_BUSY_LABEL = {
+const FAID_BUSY_LABEL = {
   install: "installing…", update: "updating…", disable: "stopping…",
   enable: "starting…", remove: "removing…", configure: "configuring…",
   health: "health check…",
 };
 
-function L3StatusPill({ status }) {
-  const meta = L3_STATUS_META[status] || { label: status || "…", cls: "gray" };
+function FaidStatusPill({ status }) {
+  const meta = FAID_STATUS_META[status] || { label: status || "…", cls: "gray" };
   return <span className={`pill ${meta.cls}`}>{meta.label}</span>;
 }
 
@@ -36,7 +36,7 @@ function L3StatusPill({ status }) {
 // It stays until the operator dismisses it or starts the next action — the
 // status refresh that follows every action must never remove it (live
 // 2026-09-03: the error flashed for under a second, then "no logs, nothing").
-function L3ActionOutcome({ outcome, onDismiss, onOpenTerminal }) {
+function FaidActionOutcome({ outcome, onDismiss, onOpenTerminal }) {
   const [copied, setCopied] = React.useState(false);
   React.useEffect(() => { setCopied(false); }, [outcome]);
   if (!outcome || outcome.ok) return null;
@@ -83,7 +83,7 @@ function L3ActionOutcome({ outcome, onDismiss, onOpenTerminal }) {
   );
 }
 
-function L3ConfigForm({ app, busy, figafSystems, onApply, onCancel }) {
+function FaidConfigForm({ app, busy, figafSystems, onApply, onCancel }) {
   const [values, setValues] = React.useState({});
   const fields = app.configForm || [];
   return (
@@ -143,7 +143,7 @@ function L3ConfigForm({ app, busy, figafSystems, onApply, onCancel }) {
 // ONE action that changes the installation's version: Update installation.
 // Install of an app never changes the version (it uses the installed one);
 // the dropdown lists only versions Update may choose (installed or higher).
-function L3ReleasePanel({ releases, busy, onRefresh, onUpdate }) {
+function FaidReleasePanel({ releases, busy, onRefresh, onUpdate }) {
   const [picked, setPicked] = React.useState("");
   const [confirm, setConfirm] = React.useState(false);
   const ok = !!(releases && releases.ok);
@@ -238,7 +238,7 @@ function L3ReleasePanel({ releases, busy, onRefresh, onUpdate }) {
   );
 }
 
-function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
+function FaidAppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
   const [showConfig, setShowConfig] = React.useState(false);
   const [confirmRemove, setConfirmRemove] = React.useState(false);
   const [health, setHealth] = React.useState(null);
@@ -260,10 +260,10 @@ function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
   }
 
   return (
-    <div className="l3-app-row" data-app={app.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 12 }}>
+    <div className="faid-app-row" data-app={app.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 700 }}>{app.name}</div>
-        <L3StatusPill status={st} />
+        <FaidStatusPill status={st} />
         {busy && <span className="pill gray">{busyLabel || "working…"}</span>}
         <div className="spacer" style={{ flex: 1 }} />
         <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
@@ -329,7 +329,7 @@ function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
       </div>
 
       {showConfig && (
-        <L3ConfigForm
+        <FaidConfigForm
           app={app}
           figafSystems={figafSystems}
           busy={locked}
@@ -377,7 +377,7 @@ function L3AppRow({ app, status, busy, busyLabel, figafSystems, onAction }) {
 // ─── Base services (catalog v3) ──────────────────────────────────────────────
 // The service INSTANCES the platform needs, created by the manager when
 // missing. PostgreSQL takes minutes: the terminal drawer shows the waiting.
-const L3_SERVICE_STATUS_META = {
+const FAID_SERVICE_STATUS_META = {
   "ready":       { label: "Ready",         cls: "green" },
   "missing":     { label: "Missing",       cls: "gray" },
   "in-progress": { label: "Creating…",     cls: "blue" },
@@ -449,7 +449,7 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform,
         )}
       </div>
       {required.map((s) => {
-        const meta = L3_SERVICE_STATUS_META[s.status] || L3_SERVICE_STATUS_META.unknown;
+        const meta = FAID_SERVICE_STATUS_META[s.status] || FAID_SERVICE_STATUS_META.unknown;
         return (
           <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid var(--line)", marginTop: 7, flexWrap: "wrap" }}>
             <span className="kbd">{s.name}</span>
@@ -496,10 +496,10 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform,
             replaced. The shared backend binds them when it is installed, so on a fresh install there is nothing
             to do here. Only an instance created AFTER the backend was installed needs
             <strong>Bind to backend &amp; restart backend</strong>: a binding reaches an app only after a restart,
-            so the button does both (about 30-60 s of downtime for the L3 apps; the manager itself is not restarted).
+            so the button does both (about 30-60 s of downtime for the FAID Apps; the manager itself is not restarted).
           </div>
           {optional.map((s) => {
-            const meta = L3_SERVICE_STATUS_META[s.status] || L3_SERVICE_STATUS_META.unknown;
+            const meta = FAID_SERVICE_STATUS_META[s.status] || FAID_SERVICE_STATUS_META.unknown;
             return (
               <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid var(--line)", marginTop: 7, flexWrap: "wrap" }} data-optional-service={s.name}>
                 <span className="kbd">{s.name}</span>
@@ -591,23 +591,23 @@ function BaseServicesSummary({ services, onOpenSetup }) {
   );
 }
 
-// onStatus (optional): receives every fresh l3:status result, so a host frame
+// onStatus (optional): receives every fresh faid:status result, so a host frame
 // (the console's Setup model) can follow install/remove without polling.
-// onServices (optional): the same for l3:services results.
+// onServices (optional): the same for faid:services results.
 // onOpenSetup (optional): opens the Setup page (repair of the base services).
 // onOpenTerminal (optional): opens the terminal drawer (the console frame
 // passes it so the outcome panel can offer "Show CLI output").
-function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatus, onServices, onOpenTerminal }) {
+function ScreenFaidApps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatus, onServices, onOpenTerminal }) {
   const [catalog, setCatalog] = React.useState(null);   // { releaseVersion, platform, apps } | { error }
   const [statuses, setStatuses] = React.useState({});   // appId → status row
   const [platformStatus, setPlatformStatus] = React.useState(null); // catalog-v2 platform row
-  // The release store (decision 0010): l3:releases result, or { ok:false, error }.
+  // The release store (decision 0010): faid:releases result, or { ok:false, error }.
   const [releases, setReleases] = React.useState(null);
   const [refreshing, setRefreshing] = React.useState(false);
   const [busyApp, setBusyApp] = React.useState(null);   // appId currently running an action
   const [busyLabel, setBusyLabel] = React.useState("");
   // The action the MANAGER says is running: { action, appId, startedAt } or
-  // null. It comes with every l3:status and on the l3:running event, so a
+  // null. It comes with every faid:status and on the faid:running event, so a
   // page that just reloaded (or a second tab) also shows "installing…" and
   // keeps its buttons off. Without it, the operator sees a stopped app and
   // clicks Install again — the second push then replaces the package Cloud
@@ -615,7 +615,7 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
   const [running, setRunning] = React.useState(null);
   // The outcome of the LAST action (action-outcome.js model). Set when an
   // action fails; cleared ONLY by Dismiss or by the start of the next action.
-  // Never cleared by the status refresh (see L3ActionOutcome).
+  // Never cleared by the status refresh (see FaidActionOutcome).
   const [outcome, setOutcome] = React.useState(null);
   const failed = React.useCallback((action, target, r) => {
     const build = (typeof window !== "undefined" && window.figafActionOutcome) || null;
@@ -648,9 +648,9 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
   const api = typeof window !== "undefined" ? window.figaf : null;
 
   const refreshServices = React.useCallback(async () => {
-    if (!api || !api.l3 || !api.l3.services) { setServices([]); return; }
+    if (!api || !api.faid || !api.faid.services) { setServices([]); return; }
     try {
-      const s = await api.l3.services();
+      const s = await api.faid.services();
       const list = s && s.ok ? s.services : [];
       setServices(list);
       if (onServices) onServices(s);
@@ -660,9 +660,9 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
   }, [api, onServices]);
 
   const refreshReleases = React.useCallback(async (opts) => {
-    if (!api || !api.l3 || !api.l3.releases) { setReleases({ ok: false, error: "release surface unavailable" }); return; }
+    if (!api || !api.faid || !api.faid.releases) { setReleases({ ok: false, error: "release surface unavailable" }); return; }
     try {
-      const r = await api.l3.releases(opts || {});
+      const r = await api.faid.releases(opts || {});
       setReleases(r || { ok: false, error: "no response from the manager" });
     } catch (e) {
       setReleases({ ok: false, error: (e && e.message) || "release store read failed" });
@@ -670,10 +670,10 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
   }, [api]);
 
   const refresh = React.useCallback(async () => {
-    if (!api || !api.l3) return;
+    if (!api || !api.faid) return;
     setRefreshing(true);
     try {
-      const s = await api.l3.status();
+      const s = await api.faid.status();
       if (s && s.ok) {
         const map = {};
         for (const row of s.apps) map[row.id] = row;
@@ -692,8 +692,8 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!api || !api.l3) { setCatalog({ error: "l3 surface unavailable" }); return; }
-      const c = await api.l3.catalog();
+      if (!api || !api.faid) { setCatalog({ error: "platform surface unavailable" }); return; }
+      const c = await api.faid.catalog();
       if (cancelled) return;
       setCatalog(c && c.ok ? c : { error: (c && c.error) || "catalog load failed" });
       if (c && !c.ok) setReleases({ ok: false, error: c.error || "catalog load failed", source: c.source || null });
@@ -703,8 +703,8 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
         refreshReleases();
         // Discover Figaf Tool deployments only when some app's form wants one.
         const wantsFigaf = c.apps.some((a) => (a.configForm || []).some((f) => f.type === "figaf-system"));
-        if (wantsFigaf && api.l3.figafSystems) {
-          const fs = await api.l3.figafSystems();
+        if (wantsFigaf && api.faid.figafSystems) {
+          const fs = await api.faid.figafSystems();
           if (!cancelled) setFigafSystems(fs && fs.ok ? fs.systems : []);
         }
       }
@@ -717,7 +717,7 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
   // while an install was running.
   React.useEffect(() => {
     if (!api || !api.on) return undefined;
-    const off = api.on("l3:running", (p) => {
+    const off = api.on("faid:running", (p) => {
       const next = p && p.action ? p : null;
       setRunning(next);
       if (!next) refresh();   // it just finished — show the new state
@@ -735,17 +735,17 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
   }, [runningKey, refresh]);
 
   async function doAction(app, action, extra) {
-    if (!api || !api.l3 || busyApp) return { ok: false, error: "busy" };
+    if (!api || !api.faid || busyApp) return { ok: false, error: "busy" };
     // One action at a time, also across pages: the row's buttons are off
     // while the manager reports a running action, and this is the guard for
     // any other caller. A health check is included on purpose — its answer
     // would be about an app that is being replaced.
     if (running) return { ok: false, error: "busy" };
     setBusyApp(app.id);
-    setBusyLabel(L3_BUSY_LABEL[action] || "working…");
+    setBusyLabel(FAID_BUSY_LABEL[action] || "working…");
     setOutcome(null);
     try {
-      const r = await api.l3[action]({ appId: app.id, ...(extra || {}) });
+      const r = await api.faid[action]({ appId: app.id, ...(extra || {}) });
       // Health answers non-2xx WITH a diagnostic body and no `error` — that
       // is a result, not a failed action; only a real error opens the panel.
       if (r && !r.ok && r.error) failed(action, app.name, r);
@@ -765,12 +765,12 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
   // installed frontend, to `version`. Locked server-side as "platform"; the
   // rows read that from `running` and keep their buttons off.
   async function doInstallationUpdate(version) {
-    if (!api || !api.l3 || busyApp || running) return { ok: false, error: "busy" };
+    if (!api || !api.faid || busyApp || running) return { ok: false, error: "busy" };
     setBusyApp("platform");
     setBusyLabel("updating…");
     setOutcome(null);
     try {
-      const r = await api.l3.update({ version });
+      const r = await api.faid.update({ version });
       if (r && !r.ok && r.error) failed("update", `installation to ${version}`, r);
       return r;
     } catch (e) {
@@ -789,8 +789,8 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
     <>
       <div className="pane-body">
         <div className="pane-head">
-          <div className="pane-eyebrow">Manage L3 apps</div>
-          <h1 className="pane-title">Figaf L3 applications</h1>
+          <div className="pane-eyebrow">Manage FAID Apps</div>
+          <h1 className="pane-title">FAID Apps</h1>
           <p className="pane-desc">
             Installed into <span className="kbd">{ctx.login.org || "?"} / {ctx.login.space || "?"}</span>.
             Apps install from the release store
@@ -800,7 +800,7 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
           </p>
         </div>
 
-        <L3ActionOutcome outcome={outcome} onDismiss={() => setOutcome(null)} onOpenTerminal={onOpenTerminal} />
+        <FaidActionOutcome outcome={outcome} onDismiss={() => setOutcome(null)} onOpenTerminal={onOpenTerminal} />
 
         {!catalog && <div style={{ color: "var(--ink-3)" }}>Loading catalog…</div>}
         {catalog && catalog.error && (
@@ -814,7 +814,7 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
         )}
 
         {catalog && !catalog.error && (
-          <L3ReleasePanel
+          <FaidReleasePanel
             releases={releases}
             busy={!!busyApp || !!running}
             onRefresh={() => refreshReleases({ refresh: true })}
@@ -826,9 +826,9 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
           <div data-platform-row="" style={{ border: "1px dashed var(--line)", borderRadius: 10, padding: 12, marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 700 }}>{catalog.platform.name || "Shared backend"}</div>
-              <L3StatusPill status={platformStatus ? platformStatus.status : null} />
+              <FaidStatusPill status={platformStatus ? platformStatus.status : null} />
               {running && (running.action === "install" || running.action === "update") && (
-                <span className="pill gray">{L3_BUSY_LABEL[running.action]}</span>
+                <span className="pill gray">{FAID_BUSY_LABEL[running.action]}</span>
               )}
               <div className="spacer" style={{ flex: 1 }} />
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
@@ -856,12 +856,12 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
           // touches the shared backend, so a run on ANY app blocks this row.
           const mine = busyApp === app.id || (running && running.appId === app.id);
           const label = mine
-            ? (busyLabel || L3_BUSY_LABEL[running && running.action] || "working…")
+            ? (busyLabel || FAID_BUSY_LABEL[running && running.action] || "working…")
             : (running
-              ? `waiting — ${L3_BUSY_LABEL[running.action] || "an action"} ${running.appId === "platform" ? "the installation" : running.appId}`
+              ? `waiting — ${FAID_BUSY_LABEL[running.action] || "an action"} ${running.appId === "platform" ? "the installation" : running.appId}`
               : (busyApp ? "waiting — updating the installation" : ""));
           return (
-            <L3AppRow
+            <FaidAppRow
               key={app.id}
               app={app}
               status={statuses[app.id]}
@@ -897,6 +897,6 @@ function ScreenL3Apps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onStatu
   );
 }
 
-// BaseServicesCard and L3ActionOutcome are reused by the Setup page
+// BaseServicesCard and FaidActionOutcome are reused by the Setup page
 // (screen-setup-page.jsx, step 3).
-Object.assign(window, { ScreenL3Apps, BaseServicesCard, L3ActionOutcome });
+Object.assign(window, { ScreenFaidApps, BaseServicesCard, FaidActionOutcome });

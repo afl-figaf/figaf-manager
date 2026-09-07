@@ -21,12 +21,12 @@ function FigafToolActionCard({ title, desc, cta, disabled, hint, onClick }) {
 
 function ScreenFigafToolHub({ ctx, onStartFlow, onGoSession }) {
   const api = typeof window !== "undefined" ? window.figaf : null;
-  const [discovery, setDiscovery] = React.useState(null); // l3:figafSystems result
+  const [discovery, setDiscovery] = React.useState(null); // faid:figafSystems result
   const cfOnly = !!ctx.login.cfOnly;
 
   const discover = React.useCallback(async () => {
     setDiscovery(null);
-    try { setDiscovery(await api.l3.figafSystems()); }
+    try { setDiscovery(await api.faid.figafSystems()); }
     catch (e) { setDiscovery({ ok: false, error: e.message }); }
   }, []);
   React.useEffect(() => { discover(); }, [discover]);

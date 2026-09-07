@@ -1,13 +1,13 @@
 /* global React, Ico */
 
 // ═══════════════════════════════════════════════════════════
-// System connections (decision 0006, figaf-l3-l4 repo)
+// System connections (decision 0006, figaf-platform repo)
 // Level 1: the ONE Figaf tool of this installation.
 // Level 2: SAP Integration Suite systems — the list comes live
 // from the Figaf tool (/api/v1/agent/search); per system the
 // operator pastes the it-rt (plan api) service key, the manager
 // verifies it against SAP, then stores it in the Credential
-// Store (namespace figaf-connections). L3 app backends read the
+// Store (namespace figaf-connections). FAID Apps backends read the
 // entries at runtime — apps never collect credentials themselves.
 // ═══════════════════════════════════════════════════════════
 
@@ -240,7 +240,7 @@ function ConnAgentRow({ agent, busy, onConnect, onDisconnect }) {
 function ScreenConnections({ ctx, onBack }) {
   const [figaf, setFigaf] = React.useState(null);        // connections:figafStatus result
   const [agents, setAgents] = React.useState(null);      // null = loading, {error} or {list}
-  const [figafSystems, setFigafSystems] = React.useState(null); // l3:figafSystems (CF discovery)
+  const [figafSystems, setFigafSystems] = React.useState(null); // faid:figafSystems (CF discovery)
   const [showFigafForm, setShowFigafForm] = React.useState(false);
   const [busy, setBusy] = React.useState(null);          // "figaf" | agentId | null
   const [lastError, setLastError] = React.useState(null);
@@ -273,8 +273,8 @@ function ScreenConnections({ ctx, onBack }) {
       if (!api || !api.connections) { setFigaf({ ok: false, error: "connections surface unavailable" }); return; }
       await refresh();
       if (cancelled) return;
-      if (api.l3 && api.l3.figafSystems) {
-        const fs = await api.l3.figafSystems();
+      if (api.faid && api.faid.figafSystems) {
+        const fs = await api.faid.figafSystems();
         if (!cancelled) setFigafSystems(fs && fs.ok ? fs.systems : []);
       }
     })();
@@ -331,9 +331,9 @@ function ScreenConnections({ ctx, onBack }) {
   const hasPipoAgent = agentList.some((a) => a.kind === "pipo");
 
   React.useEffect(() => {
-    if (!hasPipoAgent || !api || !api.l3 || !api.l3.services) return;
+    if (!hasPipoAgent || !api || !api.faid || !api.faid.services) return;
     let cancelled = false;
-    api.l3.services()
+    api.faid.services()
       .then((r) => {
         if (cancelled) return;
         const list = (r && r.ok && r.services) || [];
@@ -353,7 +353,7 @@ function ScreenConnections({ ctx, onBack }) {
           <h1 className="pane-title">Figaf tool &amp; SAP systems</h1>
           <p className="pane-desc">
             Connections are stored in the SAP Credential Store
-            (namespace <span className="kbd">figaf-connections</span>) and read by the L3 apps at
+            (namespace <span className="kbd">figaf-connections</span>) and read by the FAID Apps at
             runtime. The manager is the only writer; every entry is verified against the real
             endpoint before it is stored.
           </p>

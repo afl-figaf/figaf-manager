@@ -134,29 +134,29 @@ contextBridge.exposeInMainWorld("figaf", {
     state: () => ipcRenderer.invoke("session:state"),
   },
 
-  // L3 App Manager (PoC) — surface parity with the cloud client. On desktop
+  // FAID Apps manager — surface parity with the cloud client. On desktop
   // the handlers work too when an artifact channel dir is configured via
-  // host.resolveL3ArtifactsDir (not implemented yet → friendly error).
-  l3: {
-    catalog:   (a) => ipcRenderer.invoke("l3:catalog", a || {}),
-    status:    () => ipcRenderer.invoke("l3:status"),
-    running:   () => ipcRenderer.invoke("l3:running"),
-    releases:  (a) => ipcRenderer.invoke("l3:releases", a || {}),
-    figafSystems: () => ipcRenderer.invoke("l3:figafSystems"),
-    services:           ()  => ipcRenderer.invoke("l3:services"),
-    provisionServices:  (a) => ipcRenderer.invoke("l3:provisionServices", a || {}),
-    bindManagerService: (a) => ipcRenderer.invoke("l3:bindManagerService", a || {}),
-    restartSelf:        ()  => ipcRenderer.invoke("l3:restartSelf"),
-    ensureXsuaa:            (a) => ipcRenderer.invoke("l3:ensureXsuaa", a || {}),
-    prepareManagerServices: (a) => ipcRenderer.invoke("l3:prepareManagerServices", a || {}),
-    prepareSpaceServices:   (a) => ipcRenderer.invoke("l3:prepareSpaceServices", a || {}),
-    install:   (a) => ipcRenderer.invoke("l3:install", a || {}),
-    update:    (a) => ipcRenderer.invoke("l3:update", a || {}),
-    disable:   (a) => ipcRenderer.invoke("l3:disable", a || {}),
-    enable:    (a) => ipcRenderer.invoke("l3:enable", a || {}),
-    remove:    (a) => ipcRenderer.invoke("l3:remove", a || {}),
-    configure: (a) => ipcRenderer.invoke("l3:configure", a || {}),
-    health:    (a) => ipcRenderer.invoke("l3:health", a || {}),
+  // host.resolvePlatformArtifactsDir (not implemented yet → friendly error).
+  faid: {
+    catalog:   (a) => ipcRenderer.invoke("faid:catalog", a || {}),
+    status:    () => ipcRenderer.invoke("faid:status"),
+    running:   () => ipcRenderer.invoke("faid:running"),
+    releases:  (a) => ipcRenderer.invoke("faid:releases", a || {}),
+    figafSystems: () => ipcRenderer.invoke("faid:figafSystems"),
+    services:           ()  => ipcRenderer.invoke("faid:services"),
+    provisionServices:  (a) => ipcRenderer.invoke("faid:provisionServices", a || {}),
+    bindManagerService: (a) => ipcRenderer.invoke("faid:bindManagerService", a || {}),
+    restartSelf:        ()  => ipcRenderer.invoke("faid:restartSelf"),
+    ensureXsuaa:            (a) => ipcRenderer.invoke("faid:ensureXsuaa", a || {}),
+    prepareManagerServices: (a) => ipcRenderer.invoke("faid:prepareManagerServices", a || {}),
+    prepareSpaceServices:   (a) => ipcRenderer.invoke("faid:prepareSpaceServices", a || {}),
+    install:   (a) => ipcRenderer.invoke("faid:install", a || {}),
+    update:    (a) => ipcRenderer.invoke("faid:update", a || {}),
+    disable:   (a) => ipcRenderer.invoke("faid:disable", a || {}),
+    enable:    (a) => ipcRenderer.invoke("faid:enable", a || {}),
+    remove:    (a) => ipcRenderer.invoke("faid:remove", a || {}),
+    configure: (a) => ipcRenderer.invoke("faid:configure", a || {}),
+    health:    (a) => ipcRenderer.invoke("faid:health", a || {}),
   },
 
   // System connections (decision 0006) — surface parity with the cloud client.

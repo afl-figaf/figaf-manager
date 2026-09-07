@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 "use strict";
 // Builds e2e/fixtures/store/: a release STORE in the bucket layout of
-// figaf-l3-l4 release/publish.js, with two versions, for release-store.spec.js.
+// figaf-platform release/publish.js, with two versions, for release-store.spec.js.
 //
-//   l3/index.json
-//   l3/<version>/catalog.json, release.json, xs-security.json, *.zip
+//   platform/index.json
+//   platform/<version>/catalog.json, release.json, xs-security.json, *.zip
 //
 // The catalogs name CF apps that never exist in the dev space and a service
 // instance that never exists, so the page shows "Not installed" and every
@@ -17,7 +17,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const OUT = path.join(__dirname, "..", "fixtures", "store", "l3");
+const OUT = path.join(__dirname, "..", "fixtures", "store", "platform");
 const VERSIONS = ["0.0.1", "0.0.2"];
 const sha = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
 
@@ -25,21 +25,21 @@ function catalogFor(version, backendZip, frontendZip) {
   return {
     releaseVersion: version,
     services: [
-      { name: "figaf-l3l4-e2e-missing", offering: "postgresql-db", plan: "free",
+      { name: "figaf-faid-e2e-missing", offering: "postgresql-db", plan: "free",
         purpose: "E2E FIXTURE - this instance must never exist; its absence makes every Install fail early, before any cf change" },
-      { name: "figaf-l3l4-e2e-xsuaa", offering: "xsuaa", plan: "application", configFile: "xs-security.json",
+      { name: "figaf-faid-e2e-xsuaa", offering: "xsuaa", plan: "application", configFile: "xs-security.json",
         purpose: "E2E FIXTURE - a config file the store must deliver with the catalog" },
     ],
     platform: {
       name: "Platform base (e2e store fixture)",
-      cfApps: [{ name: "figaf-l3l4-e2e-store-backend", artifact: "backend.zip", sha256: sha(backendZip), buildpack: "nodejs_buildpack", memory: "64M", services: ["figaf-l3l4-e2e-missing"] }],
+      cfApps: [{ name: "figaf-faid-e2e-store-backend", artifact: "backend.zip", sha256: sha(backendZip), buildpack: "nodejs_buildpack", memory: "64M", services: ["figaf-faid-e2e-missing"] }],
     },
     apps: [{
       id: "b2b-archiving-setup-e2e-store",
       name: "B2B Archiving Setup (e2e store fixture)",
       version,
       description: `Fixture release ${version} served from a local release store for release-store.spec.js. Install is always refused (required service missing).`,
-      cfApps: [{ name: "figaf-l3-e2e-store-frontend", artifact: "b2b-archiving-setup-e2e-store.zip", sha256: sha(frontendZip), buildpack: "nodejs_buildpack", memory: "64M", services: ["figaf-l3l4-e2e-missing"] }],
+      cfApps: [{ name: "figaf-faid-apps-e2e-store-frontend", artifact: "b2b-archiving-setup-e2e-store.zip", sha256: sha(frontendZip), buildpack: "nodejs_buildpack", memory: "64M", services: ["figaf-faid-e2e-missing"] }],
       healthPath: "/health",
     }],
   };
@@ -53,7 +53,7 @@ for (const v of VERSIONS) {
   // Not real zips: nothing here is ever extracted (Install is refused first).
   const backendZip = Buffer.from(`e2e fixture backend ${v}\n`);
   const frontendZip = Buffer.from(`e2e fixture frontend ${v}\n`);
-  const xs = Buffer.from(JSON.stringify({ xsappname: "figaf-l3l4", "oauth2-configuration": { "redirect-uris": ["https://*.__CF_APPS_DOMAIN__/**"] } }, null, 2) + "\n");
+  const xs = Buffer.from(JSON.stringify({ xsappname: "figaf-faid", "oauth2-configuration": { "redirect-uris": ["https://*.__CF_APPS_DOMAIN__/**"] } }, null, 2) + "\n");
   const catalog = Buffer.from(JSON.stringify(catalogFor(v, backendZip, frontendZip), null, 2) + "\n");
   const files = [
     ["backend.zip", backendZip], ["b2b-archiving-setup-e2e-store.zip", frontendZip], ["xs-security.json", xs], ["catalog.json", catalog],
@@ -66,7 +66,7 @@ for (const v of VERSIONS) {
     source: { repository: "FigafManager e2e fixture", commit: "0000000000000000000000000000000000000000", branch: "fixture" },
   };
   fs.writeFileSync(path.join(dir, "release.json"), JSON.stringify(release, null, 2) + "\n");
-  index.versions.push({ version: v, publishedAt: release.publishedAt, catalog: `l3/${v}/catalog.json` });
+  index.versions.push({ version: v, publishedAt: release.publishedAt, catalog: `platform/${v}/catalog.json` });
 }
 index.versions.reverse();
 fs.writeFileSync(path.join(OUT, "index.json"), JSON.stringify(index, null, 2) + "\n");

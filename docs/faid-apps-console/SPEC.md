@@ -1,26 +1,26 @@
-# Figaf App Manager for L3 apps — specification (current state)
+# Figaf Manager for FAID Apps — specification (current state)
 
-Status: current state of the L3 console in `figaf/FigafManager`, branch
-`poc/l3-app-manager` (pushed 2026-09-03, not merged into master). This file
+Status: current state of the FAID Apps console in `figaf/FigafManager`, branch
+`poc/faid-apps-manager` (pushed 2026-09-03, not merged into master). This file
 describes how the manager behaves TODAY, by topic. It is edited in place when
 behavior changes; superseded text is removed, not kept. Reasons for the design
-are in the figaf-l3-l4 repo (`decisions/`); the human install procedure is
-figaf-l3-l4 `docs/d1/MANUAL-RUNBOOK.md`; run records are figaf-l3-l4
+are in the figaf-platform repo (`decisions/`); the human install procedure is
+figaf-platform `docs/d1/MANUAL-RUNBOOK.md`; run records are figaf-platform
 `docs/d1/RUNBOOK-VIRGIN.md`; what to do when an action fails is
 `TROUBLESHOOTING.md` and what is still open is `OPEN-ITEMS.md` (this folder).
 Last edited 2026-09-04 (the release store and one version per installation,
-figaf-l3-l4 decision 0010; the CF sign-in targets the manager's own space by
+figaf-platform decision 0010; the CF sign-in targets the manager's own space by
 itself, section 5.3).
 
 Delivery unit: the versioned platform release installed by the manager, not
-an MTAR (figaf-l3-l4 `decisions/0007-delivery-unit-platform-release.md`,
+an MTAR (figaf-platform `decisions/0007-delivery-unit-platform-release.md`,
 accepted 2026-09-06; the governance text follows).
 
 ## 1. Purpose
 
-A BTP-hosted manager app lists the releases of the L3 platform in the Figaf
-release store, installs, updates, disables, enables, removes and checks L3
-applications in its own Cloud Foundry space from a browser, with every CLI
+A BTP-hosted manager app lists the releases of the Figaf Platform in the Figaf
+release store, installs, updates, disables, enables, removes and checks the FAID Apps
+in its own Cloud Foundry space from a browser, with every CLI
 command and every download visible, and without stored personal credentials.
 It also creates the service instances the platform needs, sets up its own
 persistent sign-in, and holds the system connections the apps use.
@@ -29,25 +29,25 @@ persistent sign-in, and holds the system connections the apps use.
 
 A RELEASE is a versioned set: `catalog.json`, `release.json` (checksums and
 the source commit), `xs-security.json` and one zip per CF app. Releases live
-in the RELEASE STORE (figaf-l3-l4 decision 0010): the Cloudflare R2 bucket
-behind a public URL, written only by figaf-l3-l4 `release/publish.js`. The
-word "channel" is retired. figaf-l3-l4 `release/build.js` builds
-a release; the developer procedure is figaf-l3-l4 `release/README.md`.
+in the RELEASE STORE (figaf-platform decision 0010): the Cloudflare R2 bucket
+behind a public URL, written only by figaf-platform `release/publish.js`. The
+word "channel" is retired. figaf-platform `release/build.js` builds
+a release; the developer procedure is figaf-platform `release/README.md`.
 
 ### 2.1 The release source
 
-Exactly one source per manager process, named on the L3 Applications page:
+Exactly one source per manager process, named on the FAID Apps page:
 
 | Setting | Kind | Used for |
 |---|---|---|
-| `FIGAF_L3_RELEASE_URL` (manifest.yml, e.g. `https://pub-<id>.r2.dev/l3`) | remote | every shipped manager; a custom domain or a mirror is a change of this value |
-| `FIGAF_L3_ARTIFACTS_DIR` (a directory with ONE release in the flat build shape) | local | development, the e2e fixtures, the install smoke; wins over the URL when set |
-| `l3-artifacts/` next to `host.cloud.js`, nothing set | local | a developer's `npm start` after a local build |
+| `FIGAF_PLATFORM_RELEASE_URL` (manifest.yml, e.g. `https://pub-<id>.r2.dev/platform`) | remote | every shipped manager; a custom domain or a mirror is a change of this value |
+| `FIGAF_PLATFORM_ARTIFACTS_DIR` (a directory with ONE release in the flat build shape) | local | development, the e2e fixtures, the install smoke; wins over the URL when set |
+| `platform-artifacts/` next to `host.cloud.js`, nothing set | local | a developer's `npm start` after a local build |
 
 The manager zip bundles NO release any more (`build-zip.js` refuses to build
 without the URL in `manifest.yml`). No fallback from one source to another.
 
-Store layout (the contract with figaf-l3-l4): `<url>/index.json` =
+Store layout (the contract with figaf-platform): `<url>/index.json` =
 `{ latest, versions: [{ version, publishedAt }] }`; `<url>/<version>/` holds
 `catalog.json`, `release.json`, `xs-security.json`, the zips. Versions are
 immutable.
@@ -57,7 +57,7 @@ immutable.
 - `index.json` is read on every page load (remembered 30 s; **Refresh
   releases** reads it now). It is the only object that changes.
 - A version's small files (`catalog.json`, the `configFile`s) are downloaded
-  once into `<tmp>/figaf-l3-releases/<version>/` and checked against the
+  once into `<tmp>/figaf-platform-releases/<version>/` and checked against the
   sha256 in `release.json` every time they are used. Zips are downloaded when
   an install or update needs them and checked against the sha256 in the
   catalog before extraction. A mismatch deletes the file and fails the
@@ -80,7 +80,7 @@ immutable.
 - **Install app X** deploys the app at the installed version; on an empty
   space at `latest`. A `version` argument is accepted only when it names
   exactly that version.
-- **Update installation to V** (`l3:update { version }`): the shared backend,
+- **Update installation to V** (`faid:update { version }`): the shared backend,
   then every frontend that is installed in the space, in catalog order.
   Only `V >= installed`; equal = re-deploy everything. Apps not installed are
   not installed by it. On the page: with a newer version in the store, a
@@ -88,41 +88,41 @@ immutable.
   installation to V**; when up to date, the text "Up to date. Nothing newer
   than X in the store." and the plain repair button **Re-deploy everything
   at X** (same call, `V = installed`). Both ask for a confirmation.
-- **Re-deploy** (`l3:update { appId }`): one app again, at the installed
+- **Re-deploy** (`faid:update { appId }`): one app again, at the installed
   version (shared backend pushed first, as with Install).
 - Before an installation exists, `latest` is used for the service instances
   and the roles (Setup step 1).
-- `l3:releases` returns the source, installed, latest, `updateAvailable`, and
+- `faid:releases` returns the source, installed, latest, `updateAvailable`, and
   per version whether Update may choose it and why not.
 
 ```json
 {
   "releaseVersion": "0.4.0",
   "services": [
-    { "name": "figaf-l3l4-db", "offering": "postgresql-db", "plan": "free",
+    { "name": "figaf-faid-db", "offering": "postgresql-db", "plan": "free",
       "plans": ["free", "standard"], "purpose": "Application database" },
-    { "name": "figaf-l3l4-xsuaa", "offering": "xsuaa", "plan": "application",
-      "configFile": "xs-security.json", "purpose": "Roles of the L3 apps" },
-    { "name": "figaf-l3l4-credstore", "offering": "credstore", "plan": "free",
+    { "name": "figaf-faid-xsuaa", "offering": "xsuaa", "plan": "application",
+      "configFile": "xs-security.json", "purpose": "Roles of the FAID Apps" },
+    { "name": "figaf-faid-credstore", "offering": "credstore", "plan": "free",
       "plans": ["free", "standard"], "config": { "authentication": { "type": "basic" } },
       "purpose": "Credential Store", "bindToManager": true }
   ],
   "platform": {
     "name": "Shared backend (connector)",
-    "cfApps": [ { "name": "figaf-l3l4-backend", "artifact": "backend.zip", "sha256": "...",
+    "cfApps": [ { "name": "figaf-faid-backend", "artifact": "backend.zip", "sha256": "...",
                   "buildpack": "nodejs_buildpack", "memory": "256M", "disk": "1024M",
-                  "services": ["figaf-l3l4-db", "figaf-l3l4-xsuaa"],
-                  "optionalServices": ["figaf-l3l4-credstore"], "env": { } } ]
+                  "services": ["figaf-faid-db", "figaf-faid-xsuaa"],
+                  "optionalServices": ["figaf-faid-credstore"], "env": { } } ]
   },
   "apps": [
     { "id": "b2b-archiving-setup", "name": "B2B Archiving Setup", "version": "0.4.0",
-      "cfApps": [ { "name": "figaf-l3-b2b-archiving-setup", "artifact": "b2b-archiving-setup.zip",
+      "cfApps": [ { "name": "figaf-faid-apps-b2b-archiving-setup", "artifact": "b2b-archiving-setup.zip",
                     "sha256": "...", "buildpack": "nodejs_buildpack", "memory": "128M", "disk": "512M",
-                    "services": ["figaf-l3l4-xsuaa"], "env": { },
-                    "destinationTo": "figaf-l3l4-backend", "destinationName": "figaf-l3l4-backend" } ],
-      "configTargetCfApp": "figaf-l3l4-backend",
+                    "services": ["figaf-faid-xsuaa"], "env": { },
+                    "destinationTo": "figaf-faid-backend", "destinationName": "figaf-faid-backend" } ],
+      "configTargetCfApp": "figaf-faid-backend",
       "healthPath": "/health/connections",
-      "roleCollections": ["FigafL3L4-B2BArchivingSetup-Viewer", "FigafL3L4-B2BArchivingSetup-Admin", "FigafL3L4-Platform-Admin"] }
+      "roleCollections": ["FAID-B2BArchivingSetup-Viewer", "FAID-B2BArchivingSetup-Admin", "FAID-Platform-Admin"] }
   ]
 }
 ```
@@ -139,40 +139,40 @@ Rules:
   `bindToManager` = bound to the manager itself (the Credential Store).
 - `sha256` per artifact is verified before extraction; a mismatch deploys
   nothing.
-- Names are frozen (decision 0008): CF apps `figaf-l3l4-backend`,
-  `figaf-l3-<app-id>`; instances `figaf-l3l4-db/-xsuaa/-credstore`; approuter
-  destination `figaf-l3l4-backend`. `channelVersion` is read as a legacy
+- Names are frozen (decision 0008): CF apps `figaf-faid-backend`,
+  `figaf-faid-apps-<app-id>`; instances `figaf-faid-db/-xsuaa/-credstore`; approuter
+  destination `figaf-faid-backend`. `channelVersion` is read as a legacy
   alias of `releaseVersion`.
 - The release's `xs-security.json` holds the APPS' roles only; the manager
   merges its own roles in (section 5).
 
 ## 3. Lifecycle operations
 
-RPC channels are `l3:*`, implemented in `packages/core/l3-apps.js`. Every cf
+RPC channels are `faid:*`, implemented in `packages/core/faid-apps.js`. Every cf
 call is shown in the terminal drawer; secret values are masked there and in
 the audit log.
 
 | Operation | Behind it |
 |---|---|
-| `l3:catalog({version?})`, `l3:status` | the catalog of the installation's version (installed, else latest; section 2.3) with `source`, `installed`, `latest`; live state per CF app from `cf curl /v3/apps` (scoped to the targeted space), installed version from the env var `FIGAF_APP_VERSION`, the in-flight action (`running`), per part `staging` (a STOPPED part with a build in `STAGING`, one `cf curl /v3/builds`), and `release` (the version the rows were computed against) |
-| `l3:releases({refresh?})` | the release store: `source`, `installed`, `latest`, `current`, `updateAvailable`, `versions[]` with `selectable` / `reason` (section 2.3). `refresh` re-reads `index.json` now. No cf call beyond the installed-version probe |
-| `l3:running` | the lifecycle action running now, or null. No cf call. For a page that did not start it (reload, second tab, second session) |
-| `l3:services`, `l3:provisionServices({plans, only, waitOnly})` | `cf service <name>`; `cf create-service` for missing instances, poll every 10 s until `succeeded` (15 min limit); a `failed` instance is deleted and created again. With `waitOnly`, only those names are awaited; the others are started and reported as `pending`. Per row `boundToManager` (Credential Store, one `cf curl /v3/service_credential_bindings`); for optional instances (catalog v4) also `backendDeployed` (from the same `cf app <backend> --guid` probe that reads the installed version, no extra call) and `boundToBackend` (the same curl against the shared backend, one per instance), so the panel offers the bind only when it is needed (section 4.1) |
-| `l3:bindManagerService`, `l3:restartSelf` | `cf bind-service <manager> <name>`; `cf restart <manager>` (fire-and-forget) |
-| `l3:ensureXsuaa({updateOnly})` | create or `cf update-service figaf-l3l4-xsuaa` with the composed document (section 5) |
-| `l3:prepareSpaceServices({plans})` | Setup step 1: create every missing catalog instance except XSUAA with the plans the person chose; wait only for the manager-bound ones (Credential Store) and bind them, no restart; the database is started and left creating (`pending`) (section 5.2) |
-| `l3:prepareManagerServices` | legacy: the wizard frame's SSO upgrade (Credential Store only, default plan). Not used by the console |
-| `l3:install({appId, version?})` | one app at the installed version (latest on an empty space); see below |
-| `l3:update({version})` / `l3:update({appId})` | installation-wide update to `version` (lock name `platform`) / re-deploy of one app at the installed version; see below and section 2.3 |
-| `l3:disable`, `l3:enable`, `l3:remove` | `cf stop` / `cf start` / `cf delete -f -r` of the app's own CF apps, frontend first on teardown |
-| `l3:health` | HTTPS GET `<route><healthPath>` on `configTargetCfApp`; a non-2xx answer WITH a body is a result, not a failure |
-| `l3:configure` | `cf set-env` (whitelisted keys, masked) + restart; kept for rare infrastructure fixes, no form in the UI (behavior settings live in the app, decision 0006) |
-| `l3:figafSystems` | discover Figaf-tool deployments visible to the cf login (`figaf/app:*`, `ilnfigaf/app:*` images; `FIGAF_TOOL_IMAGE_PREFIXES`) |
+| `faid:catalog({version?})`, `faid:status` | the catalog of the installation's version (installed, else latest; section 2.3) with `source`, `installed`, `latest`; live state per CF app from `cf curl /v3/apps` (scoped to the targeted space), installed version from the env var `FIGAF_APP_VERSION`, the in-flight action (`running`), per part `staging` (a STOPPED part with a build in `STAGING`, one `cf curl /v3/builds`), and `release` (the version the rows were computed against) |
+| `faid:releases({refresh?})` | the release store: `source`, `installed`, `latest`, `current`, `updateAvailable`, `versions[]` with `selectable` / `reason` (section 2.3). `refresh` re-reads `index.json` now. No cf call beyond the installed-version probe |
+| `faid:running` | the lifecycle action running now, or null. No cf call. For a page that did not start it (reload, second tab, second session) |
+| `faid:services`, `faid:provisionServices({plans, only, waitOnly})` | `cf service <name>`; `cf create-service` for missing instances, poll every 10 s until `succeeded` (15 min limit); a `failed` instance is deleted and created again. With `waitOnly`, only those names are awaited; the others are started and reported as `pending`. Per row `boundToManager` (Credential Store, one `cf curl /v3/service_credential_bindings`); for optional instances (catalog v4) also `backendDeployed` (from the same `cf app <backend> --guid` probe that reads the installed version, no extra call) and `boundToBackend` (the same curl against the shared backend, one per instance), so the panel offers the bind only when it is needed (section 4.1) |
+| `faid:bindManagerService`, `faid:restartSelf` | `cf bind-service <manager> <name>`; `cf restart <manager>` (fire-and-forget) |
+| `faid:ensureXsuaa({updateOnly})` | create or `cf update-service figaf-faid-xsuaa` with the composed document (section 5) |
+| `faid:prepareSpaceServices({plans})` | Setup step 1: create every missing catalog instance except XSUAA with the plans the person chose; wait only for the manager-bound ones (Credential Store) and bind them, no restart; the database is started and left creating (`pending`) (section 5.2) |
+| `faid:prepareManagerServices` | legacy: the wizard frame's SSO upgrade (Credential Store only, default plan). Not used by the console |
+| `faid:install({appId, version?})` | one app at the installed version (latest on an empty space); see below |
+| `faid:update({version})` / `faid:update({appId})` | installation-wide update to `version` (lock name `platform`) / re-deploy of one app at the installed version; see below and section 2.3 |
+| `faid:disable`, `faid:enable`, `faid:remove` | `cf stop` / `cf start` / `cf delete -f -r` of the app's own CF apps, frontend first on teardown |
+| `faid:health` | HTTPS GET `<route><healthPath>` on `configTargetCfApp`; a non-2xx answer WITH a body is a result, not a failure |
+| `faid:configure` | `cf set-env` (whitelisted keys, masked) + restart; kept for rare infrastructure fixes, no form in the UI (behavior settings live in the app, decision 0006) |
+| `faid:figafSystems` | discover Figaf-tool deployments visible to the cf login (`figaf/app:*`, `ilnfigaf/app:*` images; `FIGAF_TOOL_IMAGE_PREFIXES`) |
 
 Install / update algorithm:
 
-0. One lifecycle action at a time. `l3:install`, `l3:update`, `l3:disable`,
-   `l3:enable`, `l3:remove` and `l3:configure` share one lock, held in module
+0. One lifecycle action at a time. `faid:install`, `faid:update`, `faid:disable`,
+   `faid:enable`, `faid:remove` and `faid:configure` share one lock, held in module
    scope (so it covers every browser session of the container; an entry older
    than 30 minutes is treated as gone). A second action is refused with
    `{ ok:false, busy:true, running, error }` and changes nothing. Why: the
@@ -180,8 +180,8 @@ Install / update algorithm:
    CF app STOPPED for the whole staging time — on 2026-09-04 Install was
    pressed again while the shared backend was staging; the second push
    replaced the package and Cloud Foundry dropped the running build.
-   While an action runs, the manager sends `l3:running` to every page of the
-   session (payload `null` when it ends), `l3:status` carries `running`, and
+   While an action runs, the manager sends `faid:running` to every page of the
+   session (payload `null` when it ends), `faid:status` carries `running`, and
    the console shows the status **Installing…** with every action button off
    and a status refresh every 10 s.
 1. Resolve the release (section 2.3): the version rule decides which one;
@@ -190,7 +190,7 @@ Install / update algorithm:
    Install) is a failed result before any cf call.
 2. Refuse when a REQUIRED instance (any name in a cfApp's `services`) is
    missing: "create them first (Setup, step 3)".
-3. Role refresh: `l3:ensureXsuaa({ updateOnly: true, version })` — the shared
+3. Role refresh: `faid:ensureXsuaa({ updateOnly: true, version })` — the shared
    XSUAA instance gets the roles of the release being deployed and of the
    manager. A failure stops the install (step `roles`).
 4. Shared backend first, then the app's CF apps (Update installation: then
@@ -221,19 +221,19 @@ every 10 s while an instance is being created, and is the REPAIR path: a plan
 dropdown and **Create missing services** for missing or failed instances, and
 for the Credential Store **Bind to manager** and **Restart manager** when the
 binding is missing (failure path of step 1). Before step 1 the panel is
-blocked; nothing on it can restart the manager in token mode. L3 Applications
+blocked; nothing on it can restart the manager in token mode. FAID Apps
 shows only a one-line status of the instances with a link to the Setup.
 
 Reusing an existing PostgreSQL instance works by NAME: an instance called
-`figaf-l3l4-db` is bound, never re-created. Only an instance dedicated to this
+`figaf-faid-db` is bound, never re-created. Only an instance dedicated to this
 platform may be reused (a previous installation, or an empty pre-created
 one), never the Figaf tool's database or one another application writes to.
 
 ### 4.1 Optional services: on-premise PI/PO (catalog v4, decision 0011)
 
 A catalog service may carry `optional: true` and a `group`. Optional instances
-are never created by the normal runs: `l3:prepareSpaceServices` and
-`l3:provisionServices` skip them unless the caller passes `groups: ["pipo"]`
+are never created by the normal runs: `faid:prepareSpaceServices` and
+`faid:provisionServices` skip them unless the caller passes `groups: ["pipo"]`
 or names the instance in `only`. They also never count as "missing": an
 installation without a PI/PO system is complete, so they do not hold step 3
 open and do not block step 4 (`setup-checklist.js` filters them out).
@@ -258,15 +258,15 @@ Two ways in:
   the backend is ever pushed and no later restart is needed.
 - **Base services (step 3)** — a separate "Optional: on-premise PI/PO systems"
   block with one **Create** button per instance
-  (`l3:provisionServices({ only: [name] })`). A ready instance then shows ONE
-  of three things, from `l3:services` (`backendDeployed`, `boundToBackend`):
+  (`faid:provisionServices({ only: [name] })`). A ready instance then shows ONE
+  of three things, from `faid:services` (`backendDeployed`, `boundToBackend`):
   - backend not deployed yet (a fresh install, before step 4): the note
     "bound automatically when the platform is installed" — the push in step 4
     binds every optional instance that exists, nothing to do here;
   - backend deployed and bound: the pill "bound to backend";
   - backend deployed, binding missing (the instance was created AFTER the
     backend was pushed): **Bind to backend & restart backend**
-    (`l3:bindPlatformService`). This exists because `optionalServices` are
+    (`faid:bindPlatformService`). This exists because `optionalServices` are
     bound while the backend is PUSHED, and an Update installation is refused
     when the store holds nothing newer. It binds the instance to the shared
     backend and restarts THAT app (a CF binding only reaches an app after a
@@ -278,17 +278,17 @@ Two ways in:
 
 ### 5.1 One XSUAA instance (decision 0009)
 
-`figaf-l3l4-xsuaa` (xsappname `figaf-l3l4`) carries the roles of the manager
+`figaf-faid-xsuaa` (xsappname `figaf-faid`) carries the roles of the manager
 AND of the apps. The manager composes the document from two parts:
 
 - manager part `packages/core/manager-xsuaa-part.json`: scopes
-  `FigafL3L4ManagerOperator` / `-Admin`, role templates with the same names,
-  role collections `FigafL3L4-Manager-Operator` / `-Admin`, token validity
+  `FAIDManagerOperator` / `-Admin`, role templates with the same names,
+  role collections `FAID-Manager-Operator` / `-Admin`, token validity
   3600 s / 86400 s;
 - release part: the release's `xs-security.json`.
 
 `composeXsSecurity()` (`packages/core/manager-xsuaa.js`): union by name, the
-release wins on a name clash, xsappname always `figaf-l3l4` (another one is
+release wins on a name clash, xsappname always `figaf-faid` (another one is
 refused), redirect URIs united, `__CF_APPS_DOMAIN__` filled with the
 landscape's `cfapps.` domain (`cf curl /v3/domains`; no such domain = clear
 error, nothing created). Used on create and on every update.
@@ -296,7 +296,7 @@ error, nothing created). Used on create and on every update.
 `figaf-manager-xsuaa` is not created any more. A manager bound to it (Alex's
 shipped installations) keeps working: every `xsuaa:*` handler talks to the
 bound instance; the approuter `xs-app.json` accepts either
-`FigafL3L4ManagerOperator` or `FigafManagerOperator`; the JWT check picks the
+`FAIDManagerOperator` or `FigafManagerOperator`; the JWT check picks the
 scope from the bound xsappname. The teardown (`cf:uninstallManager`) deletes
 the instance and the manager collections only for the legacy instance.
 
@@ -310,11 +310,11 @@ everything it needs; the run itself needs no input.
 | Part | Handler | Effect |
 |---|---|---|
 | Sign in to Cloud Foundry | `ScreenLogin` embedded in step 1 | one-time passcode, once; the BTP login stays optional |
-| Service plans | `l3:services` | one dropdown per instance that is missing and has more than one plan (PostgreSQL, Credential Store: `free` / `standard`, each with a one-line note); existing instances are shown as "exists" |
+| Service plans | `faid:services` | one dropdown per instance that is missing and has more than one plan (PostgreSQL, Credential Store: `free` / `standard`, each with a one-line note); existing instances are shown as "exists" |
 | Role assignment | `xsuaa:roleAssignmentPrecheck` | as before: with a BTP login the collection is assigned automatically to the named person; without it the button says so ("... without role assignment") |
-| Prepare the XSUAA instance | `cf:createXsuaa` -> `l3:ensureXsuaa` | create or update `figaf-l3l4-xsuaa`, composed document; always runs |
-| Assign role collection (optional) | `xsuaa:assignRoleCollection` | `btp assign security/role-collection FigafL3L4-Manager-Admin --to-user <e-mail>`; needs a BTP login in THIS session (a restart forgets it); subaccount GUID from the BTP login or from a throw-away service key of the instance |
-| Create the base services | `l3:prepareSpaceServices({plans})` | every missing instance except XSUAA, with the chosen plans; the Credential Store is awaited and bound to the manager (no restart); the database is started and NOT awaited; non-fatal (the success state explains the repair path: Setup step 3) |
+| Prepare the XSUAA instance | `cf:createXsuaa` -> `faid:ensureXsuaa` | create or update `figaf-faid-xsuaa`, composed document; always runs |
+| Assign role collection (optional) | `xsuaa:assignRoleCollection` | `btp assign security/role-collection FAID-Manager-Admin --to-user <e-mail>`; needs a BTP login in THIS session (a restart forgets it); subaccount GUID from the BTP login or from a throw-away service key of the instance |
+| Create the base services | `faid:prepareSpaceServices({plans})` | every missing instance except XSUAA, with the chosen plans; the Credential Store is awaited and bound to the manager (no restart); the database is started and NOT awaited; non-fatal (the success state explains the repair path: Setup step 3) |
 | Deploy approuter | `cf:pushManagerApprouter` | `cf push figaf-manager-approuter --no-manifest`, bound to the instance, internal route mapped to the manager, `destinations` env set |
 | Hand off public route | `cf:mapRoute` | the approuter takes the public hostname |
 | Restart manager | `cf:restage` | bind the manager to the instance, unmap its public route, `cf restage` once (30-90 s); the page polls `/_manager-health` until `mode: "xsuaa"`, then **Continue** reloads `/#/setup` |
@@ -358,7 +358,7 @@ IAS sign-in succeeds.
      host without that method keeps the picker.
 
   **Switch Org** on Session & access still moves a signed-in session to
-  another org/space on purpose (the Figaf-tool flows need it) - the L3
+  another org/space on purpose (the Figaf-tool flows need it) - the FAID Apps
   lifecycle handlers do not check the target yet, see OPEN-ITEMS 14.
 - **SAP BTP login**: optional; only for the automatic role assignment and for
   Figaf-tool deployments. Forgotten on every restart.
@@ -391,26 +391,26 @@ green, later steps are compact and gray with the reason ("after step 1").
 | 1 | Prepare the space | token mode without a CF login: the sign-in card (passcode). With a login: service plans, role assignment, **Prepare the space** button, progress rows, success state with **Continue** | XSUAA mode | - |
 | 2 | Management user | form: technical user + password, **Verify & store**; the manager then signs itself in. Link "sign in with a passcode instead" for the failure path (no Credential Store) | stored | step 1; Credential Store binding active |
 | 3 | Base services | the panel of section 4 (status list, self-refresh every 10 s while creating, repair actions when missing / failed / unbound) | all ready; Credential Store bound and active | step 1 |
-| 4 | Shared backend and first app | button **Open L3 Applications** (Install deploys the shared backend before the app) | platform running | step 3 (all instances ready) |
+| 4 | Shared backend and first app | button **Open FAID Apps** (Install deploys the shared backend before the app) | platform running | step 3 (all instances ready) |
 | 5 | Figaf tool connection | button **Open Connections** | configured | step 1; binding active |
 
 Step 3 is omitted for a release without `services`. Each step has a why-line
 (what it gives) and a when-line (what it needs). The management-user and
-Figaf states are read again every time the Setup or L3 Applications page is
+Figaf states are read again every time the Setup or FAID Apps page is
 shown; install and services states arrive from the pages themselves.
 
 When every step is done the page shows "Installation complete", the landing
-page becomes L3 Applications, and the Setup entry stays in the rail as the
+page becomes FAID Apps, and the Setup entry stays in the rail as the
 status and repair page.
 
 Order enforcement, seen by a new person on a fresh space:
 
-- In token mode the rail entries L3 Applications, Connections and Figaf Tool
+- In token mode the rail entries FAID Apps, Connections and Figaf Tool
   are disabled ("after step 1"); clicking them opens the Setup. A deep link
   (bookmark) still opens the page, with a notice "Setup not finished - N of M
   done, next: <step>" and a button **Open Setup**. (The e2e harness runs in
   token mode and reaches the pages this way.)
-- L3 Applications has no setup banner and no service-creation button any more;
+- FAID Apps has no setup banner and no service-creation button any more;
   Session & access has no "Secure access" card any more.
 - The legacy route `#/session/sso-upgrade` opens `#/setup`.
 
@@ -446,7 +446,7 @@ the setup stay in one place. The runbook carries the steps.
 
 **How a PI/PO entry is verified.** By delegation, because the manager is not
 bound to the destination service and the shared backend is. `savePipoSystem`
-calls `l3:destinationCheck`, which GETs `<backend route>/health/destination?name=…`.
+calls `faid:destinationCheck`, which GETs `<backend route>/health/destination?name=…`.
 The backend answers from its own binding (`srv/lib/destinations.js`), with a
 fixed set of safe fields only — never `User`, `Password` or `authTokens`, and
 any user:password part of the URL is stripped. One call proves the binding,
@@ -484,12 +484,12 @@ is `platformConn.pipoConnection(agentId)`, and `/health/connections` reports a
 `pipo` section: one destination lookup per stored entry, neutral when the
 installation has none. API client scopes stay
 installation-level: the catalog will declare per app the Figaf scopes it
-needs; never per-app credentials (design note in figaf-l3-l4 `docs/SOLUTION.md` 2.5).
+needs; never per-app credentials (design note in figaf-platform `docs/SOLUTION.md` 2.5).
 
 ## 8. Console frame (hosted only)
 
 Left rail = navigation: Setup (`#/setup`, landing while the space is not
-prepared; sub label "N of M done") · L3 Applications (`#/apps`, landing once
+prepared; sub label "N of M done") · FAID Apps (`#/apps`, landing once
 prepared) · Connections · Figaf Tool · Session & access (`#/session`,
 sub-route `add-btp`) · About & updates. Hash routes; a page that needs cf
 waits behind the sign-in gate; silent auto sign-in (session resume, then
@@ -550,7 +550,7 @@ a row in `TROUBLESHOOTING.md`. Known: one pre-existing cloud test
 - Release store hardening: a signature on `release.json` checked with a
   public key inside the manager; a download token header if the bucket
   stops being public; a custom domain instead of `r2.dev` (a change of
-  `FIGAF_L3_RELEASE_URL`). The manager's own release publishing.
+  `FIGAF_PLATFORM_RELEASE_URL`). The manager's own release publishing.
 - Apps installed in the space but absent from the target catalog are not
   reported by Update installation (the new catalog does not know them).
 - Migration of legacy installations from `figaf-manager-xsuaa` to the shared

@@ -6,7 +6,7 @@
 //
 // The local server runs in TOKEN mode (no XSUAA binding): the space counts as
 // "not prepared", so the Setup page is the landing page and the pages that
-// need a prepared space are disabled in the rail (docs/l3-console/SPEC.md section 6).
+// need a prepared space are disabled in the rail (docs/faid-apps-console/SPEC.md section 6).
 // Deep links still open them - that is how the specs below reach them.
 
 const { test, expect } = require("@playwright/test");
@@ -75,14 +75,14 @@ test("setup step 1 (signed in): asks for the plans and the role assignment BEFOR
   await expect(plans).toContainText("Service plans");
   const rows = plans.locator(".setup-plan-row");
   await expect(rows).toHaveCount(3);
-  for (const name of ["figaf-l3l4-db", "figaf-l3l4-xsuaa", "figaf-l3l4-credstore"]) {
+  for (const name of ["figaf-faid-db", "figaf-faid-xsuaa", "figaf-faid-credstore"]) {
     const row = plans.locator(`.setup-plan-row[data-service="${name}"]`);
     await expect(row).toContainText(name);
     const exists = (await row.locator(".pill", { hasText: "exists" }).count()) === 1;
     const dropdowns = await row.locator("select").count();
     if (exists) {
       expect(dropdowns).toBe(0);
-    } else if (name === "figaf-l3l4-xsuaa") {
+    } else if (name === "figaf-faid-xsuaa") {
       expect(dropdowns).toBe(0);                    // one plan: nothing to choose
       await expect(row).toContainText("plan application");
     } else {
@@ -135,7 +135,7 @@ test("rail: the pages that need a prepared space are disabled in token mode and 
 
 test("deep link #/apps still opens the dashboard, with the setup notice; the base services are a one-line status, the panel lives on the Setup", async ({ page }) => {
   await page.goto("/#/apps");
-  await expect(page.locator("h1.pane-title")).toHaveText("Figaf L3 applications");
+  await expect(page.locator("h1.pane-title")).toHaveText("FAID Apps");
   const notice = page.locator('[data-setup-notice=""]');
   await expect(notice).toContainText("Setup not finished");
   await expect(notice).toContainText("Next: step 1, Prepare the space");
@@ -144,9 +144,9 @@ test("deep link #/apps still opens the dashboard, with the setup notice; the bas
   const summary = page.locator('[data-services-summary=""]');
   await expect(summary).toContainText("Base services");
   await expect(summary.locator(".pill")).toHaveText(/^(all ready|\d not ready)$/);
-  await expect(summary).toContainText(/figaf-l3l4-db: (ready|missing|in-progress|failed)/);
-  await expect(summary).toContainText("figaf-l3l4-xsuaa:");
-  await expect(summary).toContainText("figaf-l3l4-credstore:");
+  await expect(summary).toContainText(/figaf-faid-db: (ready|missing|in-progress|failed)/);
+  await expect(summary).toContainText("figaf-faid-xsuaa:");
+  await expect(summary).toContainText("figaf-faid-credstore:");
   const allReady = (await summary.locator(".pill").textContent()) === "all ready";
   await expect(summary.getByRole("button", { name: "Repair in Setup (step 3)" })).toHaveCount(allReady ? 0 : 1);
   // No creation button and no checklist banner on the dashboard any more.

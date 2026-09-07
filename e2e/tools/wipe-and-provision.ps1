@@ -1,36 +1,36 @@
-# wipe-and-provision.ps1 - virgin e2e run for the L3 platform (D1 seed).
+# wipe-and-provision.ps1 - virgin e2e run for the Figaf Platform (D1 seed).
 #
 # Transparency contract (same as the release build script):
 #   - Every cf command is printed with ">>" before it runs.
 #   - Ends with "<MODE> PASSED" (exit 0) or "FAILED: <reason>" (exit 1).
 #   - Guardrail: refuses to run unless the cf target is EXACTLY
-#     org "Figaf ApS_figafpartner-1" / space "figaf-l3-l4".
+#     org "Figaf ApS_figafpartner-1" / space "figaf-platform".
 #
 # Modes:
 #   -Mode status              print apps + service instances in the space
 #   -Mode wipe                DRY RUN: print what would be deleted
 #   -Mode wipe -Force         delete ALL apps, service keys, service
 #                             instances, and orphaned routes in the space
-#   -Mode wipe -Force -Keep figaf-l3l4-db
+#   -Mode wipe -Force -Keep figaf-faid-db
 #                             same, but keep the named service instances
 #                             (PostgreSQL alone costs ~15 min to delete and
 #                             re-create; xsuaa and credstore take seconds).
 #                             Apps are always deleted, so bindings to a kept
 #                             instance are removed with them.
-#   -Mode provision           create the base services of a virgin L3 install:
-#                               figaf-l3l4-db         postgresql-db / free
-#                               figaf-l3l4-xsuaa      xsuaa / application  (xs-security.json)
-#                               figaf-l3l4-credstore  credstore / free     (basic auth on instance)
+#   -Mode provision           create the base services of a virgin FAID Apps install:
+#                               figaf-faid-db         postgresql-db / free
+#                               figaf-faid-xsuaa      xsuaa / application  (xs-security.json)
+#                               figaf-faid-credstore  credstore / free     (basic auth on instance)
 #                             and wait until every create succeeded.
-#                             NOTE: it-rt/api is NOT created here - the L3
-#                             apps do not bind it (the Archiving Setup app
+#                             NOTE: it-rt/api is NOT created here - the FAID
+#                             Apps do not bind it (the Archiving Setup app
 #                             needs only db + xsuaa + credstore). The Figaf
 #                             tool's own it-rt service is a separate concern
 #                             (Connect-to-Integration-Suite flow), and its
 #                             broker was returning 500s on 2026-09-02.
 #
 # The manager itself is NOT deployed by this script - that follows the
-# runbook (build + cf push): docs/d1/MANUAL-RUNBOOK.md in the figaf-l3-l4 repo.
+# runbook (build + cf push): docs/d1/MANUAL-RUNBOOK.md in the figaf-platform repo.
 
 param(
     [Parameter(Mandatory = $true)][ValidateSet('status', 'wipe', 'provision')][string]$Mode,
@@ -47,7 +47,7 @@ if (-not (Get-Command cf -ErrorAction SilentlyContinue)) {
 }
 
 $AllowedOrg = 'Figaf ApS_figafpartner-1'
-$AllowedSpace = 'figaf-l3-l4'
+$AllowedSpace = 'figaf-platform'
 
 function Fail {
     param([string]$Reason)
@@ -169,7 +169,7 @@ if ($Mode -eq 'provision') {
     # Re-running provision is fine as long as only the base services are present
     # (a partial or retried provision). Any OTHER leftover service means the wipe
     # was incomplete - stop rather than build on a dirty space.
-    $baseServices = @('figaf-l3l4-db', 'figaf-l3l4-xsuaa', 'figaf-l3l4-credstore')
+    $baseServices = @('figaf-faid-db', 'figaf-faid-xsuaa', 'figaf-faid-credstore')
     $unexpected = @($services | Where-Object { $baseServices -notcontains $_ })
     if ($unexpected.Count) {
         Fail ("unexpected leftover services: " + ($unexpected -join ', ') + " - run -Mode wipe -Force first.")
@@ -177,29 +177,29 @@ if ($Mode -eq 'provision') {
     # xs-security.json is landscape-independent (decision 0008): its redirect
     # URI carries __CF_APPS_DOMAIN__. Fill it with this landscape's shared cfapps
     # domain before create-service - the App Manager does exactly the same.
-    # Default: the release bundled into the manager (built by figaf-l3-l4
+    # Default: the release bundled into the manager (built by figaf-platform
     # release\build-artifacts.ps1). Override with -XsSecurity <path>.
-    if (-not $XsSecurity) { $XsSecurity = Join-Path $PSScriptRoot '..\..\apps\figaf-manager\l3-artifacts\xs-security.json' }
+    if (-not $XsSecurity) { $XsSecurity = Join-Path $PSScriptRoot '..\..\apps\figaf-manager\platform-artifacts\xs-security.json' }
     $xsSecurityTemplate = $XsSecurity
-    if (-not (Test-Path $xsSecurityTemplate)) { Fail "$xsSecurityTemplate not found - build the release first (figaf-l3-l4 release\build-artifacts.ps1) or pass -XsSecurity" }
+    if (-not (Test-Path $xsSecurityTemplate)) { Fail "$xsSecurityTemplate not found - build the release first (figaf-platform release\build-artifacts.ps1) or pass -XsSecurity" }
     $domainLine = (& cf domains | Where-Object { $_ -match '^\s*cfapps\.' } | Select-Object -First 1)
     if (-not $domainLine) { Fail 'no cfapps.* shared domain found (cf domains) - cannot fill the XSUAA redirect URI.' }
     $appsDomain = ([string]$domainLine).Trim() -split '\s+' | Select-Object -First 1
     Write-Host ">> XSUAA redirect URI domain: $appsDomain"
-    $xsSecurity = Join-Path $env:TEMP 'figaf-l3l4-xs-security.json'
+    $xsSecurity = Join-Path $env:TEMP 'figaf-faid-xs-security.json'
     (Get-Content $xsSecurityTemplate -Raw).Replace('__CF_APPS_DOMAIN__', $appsDomain) | Set-Content -Encoding Ascii $xsSecurity
     # Basic authentication MUST be configured on the credstore INSTANCE: the
     # broker rejects it on binding level (learned 2026-08-31).
-    $credstoreConfig = Join-Path $env:TEMP 'figaf-l3l4-credstore-config.json'
+    $credstoreConfig = Join-Path $env:TEMP 'figaf-faid-credstore-config.json'
     '{"authentication":{"type":"basic"}}' | Set-Content -Encoding Ascii $credstoreConfig
 
     # Idempotent: skip a service that already exists (e.g. after a partial run).
     $existing = @(Get-SpaceServices)
-    if ($existing -notcontains 'figaf-l3l4-db') { Invoke-Cf @('create-service', 'postgresql-db', 'free', 'figaf-l3l4-db') }
-    if ($existing -notcontains 'figaf-l3l4-xsuaa') { Invoke-Cf @('create-service', 'xsuaa', 'application', 'figaf-l3l4-xsuaa', '-c', $xsSecurity) }
-    if ($existing -notcontains 'figaf-l3l4-credstore') { Invoke-Cf @('create-service', 'credstore', 'free', 'figaf-l3l4-credstore', '-c', $credstoreConfig) }
+    if ($existing -notcontains 'figaf-faid-db') { Invoke-Cf @('create-service', 'postgresql-db', 'free', 'figaf-faid-db') }
+    if ($existing -notcontains 'figaf-faid-xsuaa') { Invoke-Cf @('create-service', 'xsuaa', 'application', 'figaf-faid-xsuaa', '-c', $xsSecurity) }
+    if ($existing -notcontains 'figaf-faid-credstore') { Invoke-Cf @('create-service', 'credstore', 'free', 'figaf-faid-credstore', '-c', $credstoreConfig) }
 
-    $wanted = @('figaf-l3l4-db', 'figaf-l3l4-xsuaa', 'figaf-l3l4-credstore')
+    $wanted = @('figaf-faid-db', 'figaf-faid-xsuaa', 'figaf-faid-credstore')
     $deadline = (Get-Date).AddMinutes(9)
     while ($true) {
         $pending = @()

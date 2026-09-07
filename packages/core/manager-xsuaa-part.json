@@ -1,47 +1,47 @@
 {
-  "xsappname": "figaf-l3l4",
+  "xsappname": "figaf-faid",
   "tenant-mode": "dedicated",
-  "description": "Figaf L3/L4 apps platform: roles of the Figaf Manager and of all L3 apps in this installation. Identifiers frozen by decisions 0008 and 0009 - add, never rename.",
+  "description": "Figaf Platform: roles of the Figaf Manager and of all FAID Apps in this installation. Identifiers frozen by decisions 0008, 0009 and 0014 - add, never rename.",
   "scopes": [
     {
-      "name": "$XSAPPNAME.FigafL3L4ManagerOperator",
+      "name": "$XSAPPNAME.FAIDManagerOperator",
       "description": "Figaf Manager: operate the installation (install, update, connect, sign in)"
     },
     {
-      "name": "$XSAPPNAME.FigafL3L4ManagerAdmin",
+      "name": "$XSAPPNAME.FAIDManagerAdmin",
       "description": "Figaf Manager: destructive operations (remove apps, delete deployments)"
     }
   ],
   "role-templates": [
     {
-      "name": "FigafL3L4ManagerOperator",
+      "name": "FAIDManagerOperator",
       "description": "Figaf Manager - operator",
       "scope-references": [
-        "$XSAPPNAME.FigafL3L4ManagerOperator"
+        "$XSAPPNAME.FAIDManagerOperator"
       ]
     },
     {
-      "name": "FigafL3L4ManagerAdmin",
+      "name": "FAIDManagerAdmin",
       "description": "Figaf Manager - administrator (includes operator)",
       "scope-references": [
-        "$XSAPPNAME.FigafL3L4ManagerOperator",
-        "$XSAPPNAME.FigafL3L4ManagerAdmin"
+        "$XSAPPNAME.FAIDManagerOperator",
+        "$XSAPPNAME.FAIDManagerAdmin"
       ]
     }
   ],
   "role-collections": [
     {
-      "name": "FigafL3L4-Manager-Operator",
+      "name": "FAID-Manager-Operator",
       "description": "Figaf Manager - operator",
       "role-template-references": [
-        "$XSAPPNAME.FigafL3L4ManagerOperator"
+        "$XSAPPNAME.FAIDManagerOperator"
       ]
     },
     {
-      "name": "FigafL3L4-Manager-Admin",
+      "name": "FAID-Manager-Admin",
       "description": "Figaf Manager - administrator",
       "role-template-references": [
-        "$XSAPPNAME.FigafL3L4ManagerAdmin"
+        "$XSAPPNAME.FAIDManagerAdmin"
       ]
     }
   ],

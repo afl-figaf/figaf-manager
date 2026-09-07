@@ -19,8 +19,8 @@ test.use({ permissions: ["clipboard-read", "clipboard-write"] });
 
 test("a refused install stays visible (where / what / next), survives the status refresh, opens the terminal, copies a report, can be dismissed", async ({ page }) => {
   await page.goto("/#/apps");
-  await expect(page.locator("h1.pane-title")).toHaveText("Figaf L3 applications");
-  const row = page.locator(`.l3-app-row[data-app="${APP_ID}"]`);
+  await expect(page.locator("h1.pane-title")).toHaveText("FAID Apps");
+  const row = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
   await expect(row).toContainText("Not installed");
   const panel = page.locator('[data-outcome="error"]');
   await expect(panel).toHaveCount(0);
@@ -29,18 +29,18 @@ test("a refused install stays visible (where / what / next), survives the status
   // the screen runs right after every action (the one that used to wipe the
   // error). The page-load status has already answered — the row says
   // "Not installed" — so the second wait can only catch the post-action one.
-  const installDone = page.waitForResponse(isRpc("l3:install"));
-  const statusAfter = page.waitForResponse(isRpc("l3:status"));
+  const installDone = page.waitForResponse(isRpc("faid:install"));
+  const statusAfter = page.waitForResponse(isRpc("faid:status"));
   await row.getByRole("button", { name: /^Install / }).click();
 
   const result = await (await installDone).json();
   expect(result.ok).toBe(false);
-  expect(result.error).toMatch(/required service instance\(s\) missing: figaf-l3l4-e2e-missing/);
+  expect(result.error).toMatch(/required service instance\(s\) missing: figaf-faid-e2e-missing/);
 
   // 1. The outcome panel: action + app, the error, the next step.
   await expect(panel).toBeVisible();
   await expect(panel).toContainText("Install of B2B Archiving Setup (e2e fixture) failed");
-  await expect(panel).toContainText("figaf-l3l4-e2e-missing");
+  await expect(panel).toContainText("figaf-faid-e2e-missing");
   await expect(panel).toContainText("Create the base services first");
 
   // 2. The refresh comes back, the row is re-rendered — and the panel stays.
@@ -62,7 +62,7 @@ test("a refused install stays visible (where / what / next), survives the status
   expect(clip).toContain("Figaf App Manager - action report");
   expect(clip).toContain("release: 0.0.0-e2e");
   expect(clip).toContain("action: Install of B2B Archiving Setup (e2e fixture)");
-  expect(clip).toContain("figaf-l3l4-e2e-missing");
+  expect(clip).toContain("figaf-faid-e2e-missing");
   expect(clip).toContain("next: Create the base services first");
   expect(clip).not.toMatch(/Token:/);
 
@@ -74,7 +74,7 @@ test("a refused install stays visible (where / what / next), survives the status
 
 test("the refused install touched nothing in Cloud Foundry", async () => {
   const cf = process.platform === "win32" ? "cf.exe" : "cf";
-  for (const name of ["figaf-l3l4-e2e-backend", "figaf-l3-e2e-frontend"]) {
+  for (const name of ["figaf-faid-e2e-backend", "figaf-faid-apps-e2e-frontend"]) {
     let exists = true;
     try { execFileSync(cf, ["app", name, "--guid"], { stdio: ["ignore", "pipe", "pipe"] }); } catch { exists = false; }
     expect(exists, `${name} must not exist`).toBe(false);
@@ -82,12 +82,12 @@ test("the refused install touched nothing in Cloud Foundry", async () => {
 });
 
 test("a failed status refresh is shown too (the manager answers, the space listing fails)", async ({ page }) => {
-  // The fixture server has a real cf login, so l3:status succeeds. This spec
+  // The fixture server has a real cf login, so faid:status succeeds. This spec
   // only pins the UI contract on the RPC surface: a status error opens the
   // panel with the "Status refresh" title. It intercepts ONE status answer.
-  await page.route("**/rpc/l3%3Astatus", async (route) => {
+  await page.route("**/rpc/faid%3Astatus", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: false, error: "cf curl /v3/apps failed — are you logged in and targeted?" }) });
-    await page.unroute("**/rpc/l3%3Astatus");
+    await page.unroute("**/rpc/faid%3Astatus");
   });
   await page.goto("/#/apps");
   const panel = page.locator('[data-outcome="error"]');
@@ -105,7 +105,7 @@ test("a failed status refresh is shown too (the manager answers, the space listi
 
 test("a second lifecycle action is refused while one is running, and changes nothing", async ({ page }) => {
   await page.goto("/#/apps");
-  await expect(page.locator("h1.pane-title")).toHaveText("Figaf L3 applications");
+  await expect(page.locator("h1.pane-title")).toHaveText("FAID Apps");
 
   // Two installs fired together: the first takes the lock and spawns cf, the
   // second must be refused. Retried a few times so a slow first spawn cannot
@@ -113,7 +113,7 @@ test("a second lifecycle action is refused while one is running, and changes not
   let pair = null;
   for (let attempt = 0; attempt < 5 && !pair; attempt++) {
     const results = await page.evaluate(async (appId) => {
-      const call = () => fetch("/rpc/l3%3Ainstall", {
+      const call = () => fetch("/rpc/faid%3Ainstall", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ appId }),
@@ -134,16 +134,16 @@ test("a second lifecycle action is refused while one is running, and changes not
 
   // Nothing runs any more, and the row is untouched.
   const running = await page.evaluate(() =>
-    fetch("/rpc/l3%3Arunning", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", credentials: "same-origin" }).then((r) => r.json()));
+    fetch("/rpc/faid%3Arunning", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", credentials: "same-origin" }).then((r) => r.json()));
   expect(running.running).toBeNull();
-  await expect(page.locator(`.l3-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
+  await expect(page.locator(`.faid-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
 });
 
 test("a deploy started elsewhere shows as Installing… and every action button is off", async ({ page }) => {
   // The manager reports the in-flight action with every status, so a page
   // that did not start it (a reload, a second tab) shows it too. Simulated on
-  // the RPC seam — the same contract l3:status carries live.
-  await page.route("**/rpc/l3%3Astatus", async (route) => {
+  // the RPC seam — the same contract faid:status carries live.
+  await page.route("**/rpc/faid%3Astatus", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -153,18 +153,18 @@ test("a deploy started elsewhere shows as Installing… and every action button 
         platform: {
           id: "platform", name: "Platform base (e2e fixture)", status: "installing",
           installedVersion: null, catalogVersion: "0.0.0-e2e",
-          parts: [{ name: "figaf-l3l4-e2e-backend", exists: true, state: "STOPPED", staging: true, route: null }],
+          parts: [{ name: "figaf-faid-e2e-backend", exists: true, state: "STOPPED", staging: true, route: null }],
         },
         apps: [{
           id: APP_ID, name: "B2B Archiving Setup (e2e fixture)", status: "installing",
           installedVersion: null, catalogVersion: "0.0.0-e2e",
-          parts: [{ name: "figaf-l3-e2e-frontend", exists: false, state: null, route: null }],
+          parts: [{ name: "figaf-faid-apps-e2e-frontend", exists: false, state: null, route: null }],
         }],
       }),
     });
   });
   await page.goto("/#/apps");
-  const row = page.locator(`.l3-app-row[data-app="${APP_ID}"]`);
+  const row = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
   await expect(row).toContainText("Installing…");
   await expect(row).toContainText("installing…");                 // the busy pill
   await expect(page.locator("[data-platform-row]")).toContainText("staging");
@@ -172,7 +172,7 @@ test("a deploy started elsewhere shows as Installing… and every action button 
   for (const b of await row.getByRole("button").all()) {
     expect(await b.isDisabled(), `${(await b.textContent()) || ""} must be disabled`).toBe(true);
   }
-  await page.unroute("**/rpc/l3%3Astatus");
+  await page.unroute("**/rpc/faid%3Astatus");
 });
 
 
@@ -182,12 +182,12 @@ test("a deploy started elsewhere shows as Installing… and every action button 
 // cf change, and the refusal must be visible like every other failed action.
 
 test("a refused Update installation is visible: panel with the version rule, terminal line, report; nothing changes", async ({ page }) => {
-  // The real l3:releases of this fixture offers nothing to update (nothing is
+  // The real faid:releases of this fixture offers nothing to update (nothing is
   // installed). Pretend the fixture version is installed and up to date, so
   // the panel shows the repair action "Re-deploy everything" (the same
-  // l3:update {version} call as an update); the real handler then refuses it
+  // faid:update {version} call as an update); the real handler then refuses it
   // - the failure path.
-  await page.route("**/rpc/l3%3Areleases", async (route) => {
+  await page.route("**/rpc/faid%3Areleases", async (route) => {
     await route.fulfill({
       status: 200, contentType: "application/json",
       body: JSON.stringify({
@@ -203,7 +203,7 @@ test("a refused Update installation is visible: panel with the version rule, ter
   await expect(panel.locator("[data-release-target]")).toHaveCount(0); // up to date: no dropdown, no "Update installation"
   await expect(panel.getByRole("button", { name: /^Update installation/ })).toHaveCount(0);
   await panel.getByRole("button", { name: "Re-deploy everything at 0.0.0-e2e" }).click();
-  const done = page.waitForResponse(isRpc("l3:update"));
+  const done = page.waitForResponse(isRpc("faid:update"));
   await panel.getByRole("button", { name: "Confirm: re-deploy everything at 0.0.0-e2e" }).click();
   const result = await (await done).json();
   expect(result.ok).toBe(false);
@@ -217,6 +217,6 @@ test("a refused Update installation is visible: panel with the version rule, ter
   await outcome.getByRole("button", { name: "Show CLI output" }).click();
   await expect(page.locator(".terminal")).toBeVisible();
   await expect(page.locator(".terminal")).toContainText("update installation to 0.0.0-e2e FAILED");
-  await expect(page.locator(`.l3-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
-  await page.unroute("**/rpc/l3%3Areleases");
+  await expect(page.locator(`.faid-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
+  await page.unroute("**/rpc/faid%3Areleases");
 });

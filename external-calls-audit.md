@@ -95,7 +95,7 @@ Binary resolved via `host.resolveBinary("cf")`.
 | 19 | `cf delete <appName> -f` | `cf:deleteApp`, `update:deleteApps` | both/cloud | `cf:deleteApp` is both; `update:deleteApps` is cloud |
 | 20 | `cf delete <name> -r -f` | `cf:uninstallManager` | cloud | Delete with routes (`-r`) |
 | 21 | `cf app <name>` | `update:detectDeployment`, `update:verify`, `xsuaa:upgradeStatus` | cloud | |
-| 22 | `cf app --guid <name>` | `update:detectDeployment`, `update:verify`; every `l3:*` handler (as `cf app <backend> --guid` in `installedPlatformState`: installed version and "backend deployed", memoized) | cloud | |
+| 22 | `cf app --guid <name>` | `update:detectDeployment`, `update:verify`; every `faid:*` handler (as `cf app <backend> --guid` in `installedPlatformState`: installed version and "backend deployed", memoized) | cloud | |
 
 | 23 | `cf start figaf-manager-approuter` | `cf:pushManagerApprouter` | cloud | |
 | 24 | `cf bind-service figaf-manager-approuter figaf-manager-xsuaa` | `cf:pushManagerApprouter` | cloud | |
@@ -124,7 +124,7 @@ Binary resolved via `host.resolveBinary("cf")`.
 | 37 | `cf curl /v3/apps/<guid>/environment_variables` | `update:readCurrentConfig` | cloud | Read live config to pre-fill update form |
 | 38 | `cf curl /v3/apps/<guid>/processes/web` | `update:readCurrentConfig` | cloud | Read memory / instances |
 | 39 | `cf curl /v3/service_credential_bindings?app_guids=<guid>&include=service_instance` | `update:readCurrentConfig` | cloud | Read service bindings |
-| 39a | `cf curl /v3/service_credential_bindings?type=app&service_instance_names=<instance>&app_names=<app>` | `l3:services` | cloud | `boundToManager` (Credential Store ↔ manager) and, catalog v4, `boundToBackend` (optional PI/PO instance ↔ shared backend); one call per instance |
+| 39a | `cf curl /v3/service_credential_bindings?type=app&service_instance_names=<instance>&app_names=<app>` | `faid:services` | cloud | `boundToManager` (Credential Store ↔ manager) and, catalog v4, `boundToBackend` (optional PI/PO instance ↔ shared backend); one call per instance |
 
 ---
 

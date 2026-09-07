@@ -94,7 +94,7 @@ function makeHost(userDir) {
     getDeployTargetForSelf: () => ({
       apiUrl: "https://api.cf.eu10-004.hana.ondemand.com",
       orgName: "Figaf ApS_figafpartner-1",
-      spaceName: "figaf-l3-l4",
+      spaceName: "figaf-platform",
       appName: "figaf-manager",
       uris: ["figaf-manager-x.cfapps.eu10-004.hana.ondemand.com"],
     }),
@@ -123,7 +123,7 @@ test("login:withStoredUser: api → auth (env-only credentials, masked) → targ
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.user, "tech@figaf.com");
   assert.equal(r.org, "Figaf ApS_figafpartner-1");
-  assert.equal(r.space, "figaf-l3-l4");
+  assert.equal(r.space, "figaf-platform");
 
   const seq = spawnCalls.map((c) => c.args[0]);
   assert.deepEqual(seq, ["api", "auth", "target"]);
@@ -135,7 +135,7 @@ test("login:withStoredUser: api → auth (env-only credentials, masked) → targ
   // session isolation still applies on top
   assert.ok(auth.opts.env.CF_HOME, "CF_HOME must be session-scoped");
   const target = spawnCalls[2];
-  assert.deepEqual(target.args, ["target", "-o", "Figaf ApS_figafpartner-1", "-s", "figaf-l3-l4"]);
+  assert.deepEqual(target.args, ["target", "-o", "Figaf ApS_figafpartner-1", "-s", "figaf-platform"]);
 });
 
 test("login:withStoredUser: no credstore binding → friendly error, nothing spawned", async () => {
@@ -225,7 +225,7 @@ test("session:state: resumes from a logged-in cf target; reports logged-out hone
 
   responses = [{
     match: (a) => a[0] === "target",
-    stdout: "API endpoint:   https://api.cf.eu10-004.hana.ondemand.com\nAPI version:    3.225.0\nuser:           ais@figaf.com\norg:            Figaf ApS_figafpartner-1\nspace:          figaf-l3-l4\n",
+    stdout: "API endpoint:   https://api.cf.eu10-004.hana.ondemand.com\nAPI version:    3.225.0\nuser:           ais@figaf.com\norg:            Figaf ApS_figafpartner-1\nspace:          figaf-platform\n",
     code: 0,
   }];
   const resumed = await handlers["session:state"]();
@@ -234,7 +234,7 @@ test("session:state: resumes from a logged-in cf target; reports logged-out hone
     cfLoggedIn: true,
     user: "ais@figaf.com",
     org: "Figaf ApS_figafpartner-1",
-    space: "figaf-l3-l4",
+    space: "figaf-platform",
     apiUrl: "https://api.cf.eu10-004.hana.ondemand.com",
     btp: { loggedIn: false }, // no BTP login in this server session
   });

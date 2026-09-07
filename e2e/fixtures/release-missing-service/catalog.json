@@ -2,7 +2,7 @@
   "releaseVersion": "0.0.0-e2e",
   "services": [
     {
-      "name": "figaf-l3l4-e2e-missing",
+      "name": "figaf-faid-e2e-missing",
       "offering": "postgresql-db",
       "plan": "free",
       "purpose": "E2E FIXTURE - this instance must never exist; its absence makes every Install fail early, before any cf change"
@@ -12,11 +12,11 @@
     "name": "Platform base (e2e fixture)",
     "cfApps": [
       {
-        "name": "figaf-l3l4-e2e-backend",
+        "name": "figaf-faid-e2e-backend",
         "artifact": "backend-fixture.bin",
         "buildpack": "nodejs_buildpack",
         "memory": "64M",
-        "services": ["figaf-l3l4-e2e-missing"]
+        "services": ["figaf-faid-e2e-missing"]
       }
     ]
   },
@@ -28,11 +28,11 @@
       "description": "Fixture release for failure-visibility.spec.js. Install is always refused (required service missing) and never touches Cloud Foundry.",
       "cfApps": [
         {
-          "name": "figaf-l3-e2e-frontend",
+          "name": "figaf-faid-apps-e2e-frontend",
           "artifact": "frontend-fixture.bin",
           "buildpack": "nodejs_buildpack",
           "memory": "64M",
-          "services": ["figaf-l3l4-e2e-missing"]
+          "services": ["figaf-faid-e2e-missing"]
         }
       ],
       "healthPath": "/health"

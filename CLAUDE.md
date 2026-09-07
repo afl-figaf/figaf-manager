@@ -1,11 +1,13 @@
 # CLAUDE.md
 
-> **Session start (added 2026-09-03 for the L3/L4 stream).** Before any task:
-> 1. Read `docs/PROJECT-CONTEXT.md` — who Figaf is, the L3/L4 platform, Danfoss as the first customer, the rules that apply here.
-> 2. Read `docs/l3-console/SPEC.md` — the current behavior of the L3 console. `OPEN-ITEMS.md` and `TROUBLESHOOTING.md` sit next to it.
-> 3. Then use the conventions below. They were written for the Figaf-tool wizard (Alex's product). The L3 console lives in `packages/ui/console.jsx`, `packages/core/l3-apps.js`, `connections.js`, `credstore-client.js`, `manager-xsuaa.js` and `e2e/`.
+> **Session start (added 2026-09-03 for the Figaf Platform stream).** Before any task:
+> 1. Read `docs/PROJECT-CONTEXT.md` — who Figaf is, the Figaf Platform, Danfoss as the first customer, the rules that apply here.
+> 2. Read `docs/faid-apps-console/SPEC.md` — the current behavior of the FAID Apps console. `OPEN-ITEMS.md` and `TROUBLESHOOTING.md` sit next to it.
+> 3. Then use the conventions below. They were written for the Figaf-tool wizard (Alex's product). The FAID Apps console lives in `packages/ui/console.jsx`, `packages/core/faid-apps.js`, `connections.js`, `credstore-client.js`, `manager-xsuaa.js` and `e2e/`.
 >
-> The governance rules of the L3/L4 platform live in the figaf-l3-l4 repo (`docs/GOVERNANCE.md`). They are Figaf-owned and read-only.
+> The governance rules of the Figaf Platform live in the figaf-platform repo (`docs/GOVERNANCE.md`). They are Figaf-owned and read-only.
+>
+> **Naming (figaf-platform decision 0014, 2026-09-07).** In UI text and documents: **Figaf Platform**, **Figaf Tool**, **FAID Apps** (Figaf AI-Driven Apps), **FAID Agents**. In technical names: `faid`, `faid-apps`, `faid-agents`, `platform` (for example `figaf-faid-backend`, `figaf-faid-apps-<app-id>`, scope prefix `FAID`, RPC channels `faid:*`, `FIGAF_PLATFORM_RELEASE_URL`). The old terms L2, L3 and L4 are banned in code, UI, identifiers and current documents; nothing carrying them may reach a customer.
 
 Architecture backbone for **Figaf Installer** — an npm-workspaces monorepo that
 ships **two parallel wizards** for deploying the [Figaf Tool](https://figaf.com)
@@ -37,7 +39,7 @@ template sourcing).
 
 ## Docs
 
-- `docs/l3-console/FIGAF-TOOL-MANAGEMENT-GAPS.md` — Figaf-tool management gaps (next to `SPEC.md`).
+- `docs/faid-apps-console/FIGAF-TOOL-MANAGEMENT-GAPS.md` — Figaf-tool management gaps (next to `SPEC.md`).
 - `docs/CLEANUP-2026-09-03.md` — what was deleted from this repo on 2026-09-03 and why.
 
 ---

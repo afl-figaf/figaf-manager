@@ -3,8 +3,8 @@
 Written 2026-09-03 for the talk between Arsenii and Alex. Question to answer:
 what does the hosted manager still lack to deploy, update and connect the
 **Figaf tool** from the console frame, in a customer's space, as reliably as
-it installs the L3 apps? Facts come from the code on branch
-`poc/l3-app-manager`. Each gap ends with the decision it needs.
+it installs the FAID Apps? Facts come from the code on branch
+`poc/faid-apps-manager`. Each gap ends with the decision it needs.
 
 ## 1. What exists today (facts)
 
@@ -49,7 +49,7 @@ person leaves the flow and comes back.
 Why it matters: the console is what customers will see; the wizard frame is
 going away.
 Decision: run Deploy and Update once in the dev space through the console and
-record it like the virgin runs (figaf-l3-l4 `docs/d1/RUNBOOK-VIRGIN.md`);
+record it like the virgin runs (figaf-platform `docs/d1/RUNBOOK-VIRGIN.md`);
 then decide whether the Figaf-tool pages are **in** release 1 or **hidden**
 behind a flag until they pass.
 
@@ -58,7 +58,7 @@ behind a flag until they pass.
 Fact: the manager stores nothing about a Figaf-tool deployment. After a
 restart it re-derives what it can from the deployed app's environment; the
 rest (Docker Hub user, memory, plan, chosen tag, half-finished update) is gone.
-The L3 console does not have this problem because a release version env var
+The FAID Apps console does not have this problem because a release version env var
 on each app is the whole state.
 Why it matters: "update never silently changes memory, domain, location or
 SMTP" is the promise of the update flow; it needs the previous values.
@@ -68,18 +68,18 @@ the deployed app's own environment or CF metadata labels at deploy time, so
 they can be read back like the others; (c) keep the current best-effort
 re-derivation and ask the person for the rest.
 Decision: pick (a) or (b); (b) keeps the runtime independent of the manager,
-which is the rule for the L3 apps too.
+which is the rule for the FAID Apps too.
 
 ### 2.3 Which identity runs Figaf-tool operations
 
-Fact: the L3 console signs in as the stored technical user after Setup step 1.
+Fact: the FAID Apps console signs in as the stored technical user after Setup step 1.
 Alex's flows expect the person's own CF session and optionally a BTP login.
 Cross-space discovery under the technical user needs at least Space Auditor
 in the Figaf-tool spaces (`OPEN-ITEMS.md` item 5); the BTP login does not
 survive a restart, so `btp assign` steps fail after one.
 Decision: is the technical user also allowed to deploy and update the Figaf
 tool? If yes: its roles per space become part of the customer prerequisites
-(figaf-l3-l4 `docs/d1/MANUAL-RUNBOOK.md`, top section). If no: the console
+(figaf-platform `docs/d1/MANUAL-RUNBOOK.md`, top section). If no: the console
 must ask for a passcode before these flows and say why.
 
 ### 2.4 Templates are unversioned and fetched from GitHub at run time
@@ -93,7 +93,7 @@ Why it matters: "one build, one version, one delivery" (governance decision
 restricted egress cannot reach GitHub; `FIGAF_DEPLOYMENT_ZIP_URL` and
 `FIGAF_DISABLE_SELF_UPDATE` are the only knobs today.
 Decision: ship the templates versioned inside the manager release (the same
-shape as the L3 release catalog), or version them in the source repository
+shape as the platform release catalog), or version them in the source repository
 by tag and pin the tag in the manager. Either way the Docker Hub and GitHub
 calls need a documented offline story.
 
@@ -107,20 +107,20 @@ Decision: which modes does release 1 support? Hide the stubs.
 ### 2.6 Legacy installations and the shared XSUAA instance
 
 Fact: existing Figaf Manager installations are bound to `figaf-manager-xsuaa`
-(legacy mode, decision 0009). New installations use `figaf-l3l4-xsuaa`. The
+(legacy mode, decision 0009). New installations use `figaf-faid-xsuaa`. The
 approuter accepts both scopes; no migration exists.
 Decision: when and how legacy installations move (rebind, restage, reassign
-the collection), and whether Alex or the L3 stream owns it.
+the collection), and whether Alex or the Figaf Platform stream owns it.
 
 ### 2.7 Manual
 
 Fact: the published manual describes the wizard frame screen by screen. The
 console frame changes navigation, sign-in order and the Setup page.
-Decision: one manual for the console (Figaf tool and L3 apps), or two.
+Decision: one manual for the console (Figaf tool and FAID Apps), or two.
 
 ## 3. Gaps on the Figaf tool side (L2 API)
 
-Recorded in figaf-l3-l4 `docs/SOLUTION.md` 5.1: there is no published
+Recorded in figaf-platform `docs/SOLUTION.md` 5.1: there is no published
 `/api/v1` endpoint to create or list API clients, and none that reports a
 client's scopes. Until they exist, connecting the manager to a Figaf tool
 means typing a client id and secret created by hand in the Figaf tool's admin

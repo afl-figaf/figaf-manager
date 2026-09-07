@@ -323,11 +323,11 @@ app.post("/rpc/:channel", requireAuth, async (req, res) => {
   // request (xsuaa-auth sets req.figafUser); v1 has no per-user identity, just
   // the session cookie.
   const user = (req.figafUser && (req.figafUser.email || req.figafUser.name)) || null;
-  // l3:configure carries connection secrets in body.env, and
+  // faid:configure carries connection secrets in body.env, and
   // login:storeManagementUser carries a password — never let their VALUES
   // reach the audit stream (visible in cockpit logs / log drains).
   let auditArgs = req.body || {};
-  if (channel === "l3:configure" && auditArgs && typeof auditArgs.env === "object" && auditArgs.env) {
+  if (channel === "faid:configure" && auditArgs && typeof auditArgs.env === "object" && auditArgs.env) {
     auditArgs = {
       ...auditArgs,
       env: Object.fromEntries(Object.keys(auditArgs.env).map((k) => [k, "<value hidden>"])),

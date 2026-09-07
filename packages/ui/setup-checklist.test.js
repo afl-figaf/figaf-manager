@@ -3,7 +3,7 @@
 // The module is a browser-globals script; we fake `window` and load it.
 // Run via `node --test packages/ui/setup-checklist.test.js`.
 //
-// Order under test (docs/l3-console/SPEC.md section 6): 1 Prepare the space,
+// Order under test (docs/faid-apps-console/SPEC.md section 6): 1 Prepare the space,
 // 2 Management user, 3 Base services, 4 Shared backend and first app,
 // 5 Figaf tool connection. Everything is blocked until step 1 is done.
 
@@ -23,16 +23,16 @@ function load() {
 const V3 = (db, xsuaa, cred, boundToManager) => ({
   ok: true,
   services: [
-    { name: "figaf-l3l4-db", status: db },
-    { name: "figaf-l3l4-xsuaa", status: xsuaa },
-    { name: "figaf-l3l4-credstore", status: cred, bindToManager: true, boundToManager },
+    { name: "figaf-faid-db", status: db },
+    { name: "figaf-faid-xsuaa", status: xsuaa },
+    { name: "figaf-faid-credstore", status: cred, bindToManager: true, boundToManager },
   ],
 });
 const ids = (r) => r.steps.map((s) => s.id);
 const byId = (r, id) => r.steps.find((s) => s.id === id);
 
 test("v3, empty space, token mode: Prepare the space is step 1 and current; every other step is blocked 'after step 1'", () => {
-  const r = load()({ services: V3("missing", "missing", "missing", false), stored: { available: false, bindingPresent: false }, l3: { ok: true, platform: { status: "missing" } }, figaf: { configured: false } });
+  const r = load()({ services: V3("missing", "missing", "missing", false), stored: { available: false, bindingPresent: false }, faid: { ok: true, platform: { status: "missing" } }, figaf: { configured: false } });
   assert.deepEqual(ids(r), ["prepare", "mgmt-user", "services", "platform", "figaf-connection"]);
   assert.deepEqual(r.steps.map((s) => s.n), [1, 2, 3, 4, 5]);
   assert.equal(r.done, 0);
@@ -57,14 +57,14 @@ test("v3, token mode, instances already ready and bound: still everything after 
 });
 
 test("step 1 done, binding active, nothing stored, database still creating: management user is current; step 3 says the database is being created", () => {
-  const r = load()({ services: V3("in-progress", "ready", "ready", true), stored: { available: false, bindingPresent: true }, l3: { ok: true, platform: { status: "missing" } }, figaf: { configured: false } }, { ssoDone: true });
+  const r = load()({ services: V3("in-progress", "ready", "ready", true), stored: { available: false, bindingPresent: true }, faid: { ok: true, platform: { status: "missing" } }, figaf: { configured: false } }, { ssoDone: true });
   assert.equal(byId(r, "prepare").done, true);
   assert.equal(byId(r, "mgmt-user").current, true);
   assert.equal(byId(r, "mgmt-user").blocked, "");
   const s3 = byId(r, "services");
   assert.equal(s3.done, false);
   assert.equal(s3.blocked, "");
-  assert.match(s3.when, /Still being created: figaf-l3l4-db/);
+  assert.match(s3.when, /Still being created: figaf-faid-db/);
   assert.match(s3.when, /refreshes by itself/);
   assert.equal(byId(r, "platform").blocked, "after step 3");
   assert.equal(byId(r, "figaf-connection").blocked, "");
@@ -75,10 +75,10 @@ test("step 1 done, an instance missing or failed: step 3 asks to pick the plan a
   const r = load()({ services: V3("missing", "ready", "ready", true), stored: { available: true, bindingPresent: true } }, { ssoDone: true });
   const s3 = byId(r, "services");
   assert.equal(s3.current, true);
-  assert.match(s3.when, /1 of 3 instance missing or failed \(figaf-l3l4-db\)/);
+  assert.match(s3.when, /1 of 3 instance missing or failed \(figaf-faid-db\)/);
   assert.match(s3.when, /Pick the plan and create it below/);
   const r2 = load()({ services: V3("failed", "ready", "in-progress", true), stored: { available: true, bindingPresent: true } }, { ssoDone: true });
-  assert.match(byId(r2, "services").when, /1 of 3 instance missing or failed \(figaf-l3l4-db\)/);
+  assert.match(byId(r2, "services").when, /1 of 3 instance missing or failed \(figaf-faid-db\)/);
 });
 
 test("step 1 done but the Credential Store binding is NOT active (step 1 failed to bind): management user and connection say so; step 3 offers the repair", () => {
@@ -92,18 +92,18 @@ test("step 1 done but the Credential Store binding is NOT active (step 1 failed 
 });
 
 test("step 1 done, user stored, all instances ready and bound: shared backend is current (install does it)", () => {
-  const r = load()({ services: V3("ready", "ready", "ready", true), stored: { available: true, bindingPresent: true }, l3: { ok: true, platform: { status: "missing" } }, figaf: { configured: false } }, { ssoDone: true });
+  const r = load()({ services: V3("ready", "ready", "ready", true), stored: { available: true, bindingPresent: true }, faid: { ok: true, platform: { status: "missing" } }, figaf: { configured: false } }, { ssoDone: true });
   assert.equal(byId(r, "mgmt-user").done, true);
   assert.equal(byId(r, "services").done, true);
   assert.equal(byId(r, "platform").current, true);
-  assert.equal(byId(r, "platform").cta, "Open L3 Applications");
+  assert.equal(byId(r, "platform").cta, "Open FAID Apps");
   assert.equal(byId(r, "figaf-connection").blocked, "");
   assert.equal(byId(r, "figaf-connection").cta, "Open Connections");
   assert.equal(r.done, 3);
 });
 
 test("everything done: 5 of 5, complete, no current step", () => {
-  const r = load()({ services: V3("ready", "ready", "ready", true), stored: { available: true, bindingPresent: true }, l3: { ok: true, platform: { status: "running" } }, figaf: { configured: true } }, { ssoDone: true });
+  const r = load()({ services: V3("ready", "ready", "ready", true), stored: { available: true, bindingPresent: true }, faid: { ok: true, platform: { status: "running" } }, figaf: { configured: true } }, { ssoDone: true });
   assert.equal(r.done, 5);
   assert.equal(r.complete, true);
   assert.equal(r.current, null);

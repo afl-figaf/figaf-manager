@@ -1,7 +1,7 @@
 {
   "xsappname": "figaf-manager-xsuaa",
   "tenant-mode": "dedicated",
-  "description": "LEGACY (decision 0009, 2026-09-03): the manager-only XSUAA instance. Not created any more - new installations use the shared figaf-l3l4-xsuaa (roles of the manager and the L3 apps). Kept so installations bound to figaf-manager-xsuaa keep working.",
+  "description": "LEGACY (decision 0009, 2026-09-03): the manager-only XSUAA instance. Not created any more - new installations use the shared figaf-faid-xsuaa (roles of the manager and the FAID Apps). Kept so installations bound to figaf-manager-xsuaa keep working.",
   "scopes": [
     {
       "name": "$XSAPPNAME.FigafManagerOperator",

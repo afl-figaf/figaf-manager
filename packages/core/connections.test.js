@@ -318,7 +318,7 @@ test("savePipoSystem stores NOTHING when the backend cannot check", async () => 
   const credstore = fakeCredstore();
   const h = createConnectionsHandlers({
     credstore, fetchImpl: fakeFetch({}),
-    probeDestination: async () => ({ ok: false, error: "no route on figaf-l3l4-backend", hint: "Install the platform first" }),
+    probeDestination: async () => ({ ok: false, error: "no route on figaf-faid-backend", hint: "Install the platform first" }),
   });
   const r = await h["connections:savePipoSystem"]({ agentId: "a9", destinationName: "PO_TPM_DEV" });
   assert.equal(r.ok, false);

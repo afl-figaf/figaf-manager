@@ -42,13 +42,13 @@ const fg = () => (typeof window !== "undefined" && window.figaf) || null;
 // IAS); otherwise the operator would re-authenticate, get a JWT without the
 // scope, and the auto-assign would land too late to matter for that session.
 //
-// Decision 0009 (2026-09-03): ONE XSUAA instance (figaf-l3l4-xsuaa) carries the
+// Decision 0009 (2026-09-03): ONE XSUAA instance (figaf-faid-xsuaa) carries the
 // roles of the manager and the apps, and this step runs FIRST in a fresh
 // space. The Credential Store is created and bound here too (no restart yet),
 // so the restage at the end activates it and the management user can be
 // stored right after the IAS sign-in - one token, one passcode, one restart.
 const ALL_PHASES = [
-  { id: "create-xsuaa",     label: "Prepare the XSUAA instance",           sub: "cf create-service / update-service xsuaa application figaf-l3l4-xsuaa — roles of the manager and the apps" },
+  { id: "create-xsuaa",     label: "Prepare the XSUAA instance",           sub: "cf create-service / update-service xsuaa application figaf-faid-xsuaa — roles of the manager and the apps" },
   { id: "assign-role",      label: "Assign role collection",               sub: "btp assign security/role-collection (optional)" },
   { id: "manager-services", label: "Create and bind the Credential Store", sub: "cf create-service credstore + cf bind-service figaf-manager — active after the restage" },
   { id: "push-approuter",   label: "Deploy approuter",                     sub: "cf push figaf-manager-approuter (bundled in zip)" },
@@ -61,11 +61,11 @@ const ALL_PHASES = [
 // assignment covers both. The server reports the collection of the bound
 // instance in xsuaa:upgradeStatus (legacy installations differ); this constant
 // is the display default.
-const ASSIGN_ROLE = "FigafL3L4-Manager-Admin";
+const ASSIGN_ROLE = "FAID-Manager-Admin";
 
 function ScreenXsuaaUpgrade({ ctx, setCtx, onNext, onBack, setStep, STEPS }) {
   // The automatic role assignment is decided BEFORE "Start upgrade" (run #4
-  // finding 2, docs/l3-console/SPEC.md "Role assignment in the SSO upgrade"): the
+  // finding 2, docs/faid-apps-console/SPEC.md "Role assignment in the SSO upgrade"): the
   // server says whether a BTP login exists in THIS session and who the cf user
   // is; the pure plan (sso-role-assign.js) turns that into the panel below.
   // Local state, not threaded through global ctx; frozen once the run starts.
@@ -242,7 +242,7 @@ function ScreenXsuaaUpgrade({ ctx, setCtx, onNext, onBack, setStep, STEPS }) {
         markPhase("create-xsuaa", { status: "error", sub: r1 && r1.error });
         return;
       }
-      const instName = r1.instance || "figaf-l3l4-xsuaa";
+      const instName = r1.instance || "figaf-faid-xsuaa";
       markPhase("create-xsuaa", {
         status: "done",
         sub: r1.legacy ? "legacy instance already bound — nothing to create"
@@ -294,7 +294,7 @@ function ScreenXsuaaUpgrade({ ctx, setCtx, onNext, onBack, setStep, STEPS }) {
       markPhase("manager-services", { status: "running" });
       let ms = null;
       try {
-        ms = api.l3 && api.l3.prepareManagerServices ? await api.l3.prepareManagerServices() : { ok: true, note: "not available in this build" };
+        ms = api.faid && api.faid.prepareManagerServices ? await api.faid.prepareManagerServices() : { ok: true, note: "not available in this build" };
       } catch (e) {
         ms = { ok: false, error: e && e.message ? e.message : "prepareManagerServices failed" };
       }
@@ -551,10 +551,10 @@ function ScreenXsuaaUpgrade({ ctx, setCtx, onNext, onBack, setStep, STEPS }) {
           <div className="pane-eyebrow">XSUAA upgrade</div>
           <h1 className="pane-title">Enable persistent SSO login</h1>
           <p className="pane-desc">
-            Step 1 of a fresh installation. Replaces the cockpit-log setup token with SAP IAS authentication: afterwards anyone in the <strong>{ASSIGN_ROLE}</strong> role collection (or <strong>FigafL3L4-Manager-Operator</strong>) reaches the manager with SAP IAS, and the token is never needed again.
+            Step 1 of a fresh installation. Replaces the cockpit-log setup token with SAP IAS authentication: afterwards anyone in the <strong>{ASSIGN_ROLE}</strong> role collection (or <strong>FAID-Manager-Operator</strong>) reaches the manager with SAP IAS, and the token is never needed again.
           </p>
           <p className="pane-desc" style={{ fontSize: 12, color: "var(--ink-3)" }}>
-            What runs: the shared XSUAA instance <code>figaf-l3l4-xsuaa</code> is created or updated with the roles of the manager and the apps, the role collection is optionally assigned to you, the Credential Store is created and bound to the manager, an approuter app is pushed and takes over the public route, and figaf-manager is restaged once. Expect 3-4 minutes total, with 30-90 seconds of downtime at the end. After the IAS sign-in the gate offers <strong>Set up management user</strong> — no second passcode.
+            What runs: the shared XSUAA instance <code>figaf-faid-xsuaa</code> is created or updated with the roles of the manager and the apps, the role collection is optionally assigned to you, the Credential Store is created and bound to the manager, an approuter app is pushed and takes over the public route, and figaf-manager is restaged once. Expect 3-4 minutes total, with 30-90 seconds of downtime at the end. After the IAS sign-in the gate offers <strong>Set up management user</strong> — no second passcode.
           </p>
         </div>
 
@@ -825,14 +825,14 @@ function ScreenXsuaaAssignRole({ ctx, setCtx, onNext, onBack }) {
           <div className="pane-eyebrow">XSUAA upgrade · manual role assignment</div>
           <h1 className="pane-title">Assign yourself a role collection</h1>
           <p className="pane-desc">
-            The auto-assignment didn't complete (or you opted out). Open BTP cockpit, find your user under your subaccount's Users tab, and assign <code>FigafL3L4-Manager-Admin</code> (or <code>FigafL3L4-Manager-Operator</code> if you prefer non-destructive scope only). Takes about 30 seconds.
+            The auto-assignment didn't complete (or you opted out). Open BTP cockpit, find your user under your subaccount's Users tab, and assign <code>FAID-Manager-Admin</code> (or <code>FAID-Manager-Operator</code> if you prefer non-destructive scope only). Takes about 30 seconds.
           </p>
         </div>
 
         <ol style={{ margin: "0 0 18px", paddingLeft: 18, color: "var(--ink-1)", fontSize: 14, lineHeight: 1.6 }}>
           <li>Click "Open cockpit" below — it deep-links to your subaccount's user-management page.</li>
           <li>Find yourself in the user list and open your row.</li>
-          <li>In the "Role Collections" tab, assign <code>FigafL3L4-Manager-Admin</code>.</li>
+          <li>In the "Role Collections" tab, assign <code>FAID-Manager-Admin</code>.</li>
           <li>Return here and click "Continue to wizard" — you'll be redirected through SAP IAS for a fresh sign-in.</li>
         </ol>
 

@@ -1,6 +1,6 @@
 /* global React, Ico,
    WinFrame, FigafMark, TerminalDrawer, SelfUpdateBanner, UpdatePreflightModal,
-   ScreenLogin, ScreenL3Apps, ScreenConnections, ScreenSetupPage,
+   ScreenLogin, ScreenFaidApps, ScreenConnections, ScreenSetupPage,
    ScreenSession, ScreenAbout, ScreenFigafToolHub */
 // Console frame (hosted mode): a persistent left-rail navigation instead of
 // the one-time wizard. Pages are the existing screens; the three Figaf Tool
@@ -8,7 +8,7 @@
 // INSIDE the Figaf Tool page as a local stepper.
 // Frame selection happens in app.jsx via features.consoleUI.
 //
-// The Setup page (#/setup, docs/l3-console/SPEC.md section 6) owns the installation
+// The Setup page (#/setup, docs/faid-apps-console/SPEC.md section 6) owns the installation
 // of a fresh space. Until step 1 (Prepare the space) is done - i.e. while the
 // manager runs in token mode - it is the landing page and the pages that
 // need a prepared space are disabled in the rail. A deep link still opens
@@ -16,7 +16,7 @@
 
 const CONSOLE_ROUTES = [
   { id: "setup",       hash: "#/setup",       label: "Setup",            sub: "Prepare · sign-in · services", needsCf: false },
-  { id: "apps",        hash: "#/apps",        label: "L3 Applications",  sub: "Install · update · health",    needsCf: true,  afterPrepare: true },
+  { id: "apps",        hash: "#/apps",        label: "FAID Apps",  sub: "Install · update · health",    needsCf: true,  afterPrepare: true },
   { id: "connections", hash: "#/connections", label: "Connections",      sub: "Figaf tool · SAP systems",     needsCf: true,  afterPrepare: true },
   { id: "figaf-tool",  hash: "#/figaf-tool",  label: "Figaf Tool",       sub: "Deploy · update · connect",    needsCf: true,  afterPrepare: true },
   { id: "session",     hash: "#/session",     label: "Session & access", sub: "Sign-in · management user",    needsCf: false },
@@ -176,7 +176,7 @@ function ConsoleFrame({ app }) {
   const route = loc.id;
   const sub = loc.sub;
   // The four states the Setup model needs. `stored` and `figaf` need no cf
-  // login (Credential Store reads); `l3` and `services` do.
+  // login (Credential Store reads); `faid` and `services` do.
   const [data, setData] = React.useState({});
   const [releaseVersion, setReleaseVersion] = React.useState(null);
 
@@ -225,19 +225,19 @@ function ConsoleFrame({ app }) {
   // The cf-backed states: apps and service instances.
   const readCf = React.useCallback(async () => {
     const api = window.figaf;
-    if (!api || !api.l3) return;
-    const [l3, services] = await Promise.all([
-      api.l3.status().catch((e) => ({ ok: false, error: e.message })),
-      (api.l3.services ? api.l3.services() : Promise.resolve(null)).catch(() => null),
+    if (!api || !api.faid) return;
+    const [faid, services] = await Promise.all([
+      api.faid.status().catch((e) => ({ ok: false, error: e.message })),
+      (api.faid.services ? api.faid.services() : Promise.resolve(null)).catch(() => null),
     ]);
-    setData((d) => ({ ...d, l3, services }));
+    setData((d) => ({ ...d, faid, services }));
   }, []);
 
   React.useEffect(() => {
     if (route === "setup" || route === "apps" || route === "connections") readExternal();
   }, [route, readExternal]);
   // The dashboard (#/apps) fetches status and services itself and reports
-  // them through onL3Status / onL3Services - no second call from the frame
+  // them through onFaidStatus / onFaidServices - no second call from the frame
   // (the failure-visibility spec intercepts exactly one status answer).
   React.useEffect(() => {
     if (!signedIn) return;
@@ -246,14 +246,14 @@ function ConsoleFrame({ app }) {
   }, [signedIn, route]);
   React.useEffect(() => {
     const api = window.figaf;
-    if (!api || !api.l3 || releaseVersion !== null) return;
-    api.l3.catalog().then((c) => setReleaseVersion(c && c.ok ? c.releaseVersion || "" : "")).catch(() => setReleaseVersion(""));
+    if (!api || !api.faid || releaseVersion !== null) return;
+    api.faid.catalog().then((c) => setReleaseVersion(c && c.ok ? c.releaseVersion || "" : "")).catch(() => setReleaseVersion(""));
   }, [releaseVersion]);
 
-  // The dashboard reports every fresh l3:status / l3:services (after
+  // The dashboard reports every fresh faid:status / faid:services (after
   // install / remove / refresh); keep the model in step without re-fetching.
-  const onL3Status = React.useCallback((s) => { setData((d) => ({ ...d, l3: s })); }, []);
-  const onL3Services = React.useCallback((s) => { setData((d) => ({ ...d, services: s })); }, []);
+  const onFaidStatus = React.useCallback((s) => { setData((d) => ({ ...d, faid: s })); }, []);
+  const onFaidServices = React.useCallback((s) => { setData((d) => ({ ...d, services: s })); }, []);
 
   const setup = buildSetupChecklist(data, { navigate });
   const dataLoaded = data.stored !== undefined;
@@ -340,13 +340,13 @@ function ConsoleFrame({ app }) {
     page = (
       <>
         {dataLoaded && <SetupNotice setup={setup} onOpen={() => navigate("setup")} />}
-        <ScreenL3Apps
+        <ScreenFaidApps
           ctx={ctx}
           setCtx={setCtx}
           onConnections={() => navigate("connections")}
           onOpenSetup={() => navigate("setup")}
-          onStatus={onL3Status}
-          onServices={onL3Services}
+          onStatus={onFaidStatus}
+          onServices={onFaidServices}
           onOpenTerminal={() => setTerminalOpen(true)}
         />
       </>

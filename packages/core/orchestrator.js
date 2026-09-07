@@ -35,10 +35,10 @@ const {
 } = require("./cf-target");
 const { patchManifestName } = require("./manifest-patch");
 const releaseConfig = require("./release-config");
-const { createL3Handlers } = require("./l3-apps");
+const { createFaidHandlers } = require("./faid-apps");
 const { createConnectionsHandlers } = require("./connections");
 const credstoreClient = require("./credstore-client");
-// One XSUAA instance for the manager and the apps (figaf-l3-l4 decision 0009).
+// One XSUAA instance for the manager and the apps (figaf-platform decision 0009).
 const managerXsuaa = require("./manager-xsuaa");
 
 const DEPLOYMENT_ZIP_URL =
@@ -119,10 +119,10 @@ const DEPLOYMENT_ZIP_URL =
  *   page for a manual portable download, rather than redeploying).
  *
  * @property {() => boolean} [isConsoleUI]
- *   Is this host running the L3 console frame (not Alex's classic wizard)?
+ *   Is this host running the FAID Apps console frame (not Alex's classic wizard)?
  *   Cloud: FIGAF_CONSOLE_UI !== "0". Desktop: false. It decides whether the
  *   CF sign-in may pin itself to the manager's own org/space: the console
- *   installs the L3 apps into its OWN space, while the wizard deploys the
+ *   installs the FAID Apps into its OWN space, while the wizard deploys the
  *   Figaf tool into a space the operator picks. A host without the method
  *   counts as "not the console", so the picker stays.
  */
@@ -204,7 +204,7 @@ function createOrchestrator({ host, send, audit }) {
   }
 
   // One XSUAA instance (decision 0009). New installations bind the manager to
-  // the shared `figaf-l3l4-xsuaa` (roles of the manager AND the apps). Alex's
+  // the shared `figaf-faid-xsuaa` (roles of the manager AND the apps). Alex's
   // shipped installations are bound to the legacy `figaf-manager-xsuaa` and
   // keep working: when THIS process is bound to the legacy instance, every
   // xsuaa:* handler keeps talking to it. Nothing creates the legacy instance
@@ -580,7 +580,7 @@ function createOrchestrator({ host, send, audit }) {
   }
 
   // The manager's own CF coordinates, but ONLY where pinning the sign-in to
-  // them is right: the L3 console installs into its own space, while Alex's
+  // them is right: the FAID Apps console installs into its own space, while Alex's
   // classic wizard (FIGAF_CONSOLE_UI=0) deploys the Figaf tool into a space
   // the operator picks. Everything else (desktop, another landscape) is
   // handled by resolveSelfPin. Returning null keeps the org/space picker.
@@ -633,7 +633,7 @@ function createOrchestrator({ host, send, audit }) {
     return { loggedIn: true };
   }
 
-  // Subaccount GUID without the BTP subaccount pick (docs/l3-console/SPEC.md "Role
+  // Subaccount GUID without the BTP subaccount pick (docs/faid-apps-console/SPEC.md "Role
   // assignment in the SSO upgrade", run #4 finding 2): every XSUAA binding
   // or service key carries `subaccountid`. A throw-away service key on the
   // manager's own instance (created by cf:createXsuaa) is read quietly and
@@ -732,10 +732,10 @@ function createOrchestrator({ host, send, audit }) {
 
   const handlers = {
 
-    // L3 App Manager (PoC) — catalog-driven install/manage of L3 apps.
-    // Implemented in l3-apps.js; spread here so both hosts wire the channels
+    // FAID Apps manager — catalog-driven install/manage of FAID Apps.
+    // Implemented in faid-apps.js; spread here so both hosts wire the channels
     // automatically (ipc-bridge iterates the map; server.js looks up per RPC).
-    ...createL3Handlers({
+    ...createFaidHandlers({
       host,
       run: (...a) => run(...a),
       log,
@@ -763,7 +763,7 @@ function createOrchestrator({ host, send, audit }) {
 
     // System connections (decision 0006 slice): the manager verifies and
     // writes Figaf-tool / SAP-system connection entries to the Credential
-    // Store; L3 app backends read them at runtime. Implemented in
+    // Store; FAID Apps backends read them at runtime. Implemented in
     // connections.js; requires the manager to be BOUND to the credstore
     // instance (same precondition as the stored management user).
     // probeDestination: a PI/PO entry (decision 0011) is verified by the
@@ -771,10 +771,10 @@ function createOrchestrator({ host, send, audit }) {
     // arrow resolves `handlers` lazily - it is called long after this literal.
     ...createConnectionsHandlers({
       log,
-      probeDestination: (name) => handlers["l3:destinationCheck"]({ destinationName: name }),
+      probeDestination: (name) => handlers["faid:destinationCheck"]({ destinationName: name }),
     }),
 
-    // stored management user + session resume (L3 App Manager PoC) ───────────
+    // stored management user + session resume (FAID Apps manager) ───────────
     // "Option B" (Aug 31 decision): the manager's cf login can come from a
     // technical user stored in SAP Credential Store, instead of a per-session
     // SSO passcode. Requires the manager app to be BOUND to the credstore
@@ -1542,7 +1542,7 @@ function createOrchestrator({ host, send, audit }) {
         try { state.cfLoginProc.kill(); } catch {}
       }
       const cfBin = resolveCf();
-      // In the L3 console the manager's own space is the only correct install
+      // In the FAID Apps console the manager's own space is the only correct install
       // target, and the hosted manager knows it from VCAP_APPLICATION - so
       // `-o`/`-s` answer the CLI's org/space prompts for us (cf-target.js
       // resolveSelfPin). A null pin means the interactive picker below still
@@ -2409,10 +2409,10 @@ function createOrchestrator({ host, send, audit }) {
 
     /**
      * Phase 1 — prepare the SHARED XSUAA instance (decision 0009): create
-     * `figaf-l3l4-xsuaa` when missing, update it when present, always from the
+     * `figaf-faid-xsuaa` when missing, update it when present, always from the
      * composed document (manager part + release part). Runs on every upgrade,
      * so an instance that came from the release or a script gets the manager
-     * roles too. Delegates to l3:ensureXsuaa (packages/core/l3-apps.js).
+     * roles too. Delegates to faid:ensureXsuaa (packages/core/faid-apps.js).
      * A manager already bound to the legacy instance has nothing to create.
      */
     async "cf:createXsuaa"() {
@@ -2424,7 +2424,7 @@ function createOrchestrator({ host, send, audit }) {
       }
       send("xsuaa:upgradePhase", { phase: "create-xsuaa", state: "running" });
       send("cf:serviceStatus", { name: inst, status: "preparing" });
-      const r = await handlers["l3:ensureXsuaa"]({});
+      const r = await handlers["faid:ensureXsuaa"]({});
       if (!r || !r.ok) {
         const error = (r && r.error) || "prepare XSUAA failed";
         send("xsuaa:upgradePhase", { phase: "create-xsuaa", state: "failed", error });
@@ -2707,7 +2707,7 @@ function createOrchestrator({ host, send, audit }) {
      * user is the e-mail named on the panel (default: the cf identity).
      *
      * Default role is the Admin collection of the bound instance
-     * (FigafL3L4-Manager-Admin on the shared instance, FigafManagerAdmin on a
+     * (FAID-Manager-Admin on the shared instance, FigafManagerAdmin on a
      * legacy one - decision 0009) because the Admin role-template's
      * scope-references include the Operator scope, so a single assignment
      * covers both. The role parameter is plumbed through so a caller can
