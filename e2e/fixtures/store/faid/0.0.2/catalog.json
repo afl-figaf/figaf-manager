@@ -1,5 +1,11 @@
 {
   "releaseVersion": "0.0.2",
+  "figafScopes": [
+    "agent:read",
+    "b2b.partner-profile:read",
+    "download",
+    "ctt:sync"
+  ],
   "services": [
     {
       "name": "figaf-faid-e2e-missing",
@@ -49,6 +55,28 @@
         }
       ],
       "healthPath": "/health"
+    },
+    {
+      "id": "functional-profiles-maintain-e2e-store",
+      "name": "Functional Profiles Maintain (e2e store fixture)",
+      "version": "0.0.2",
+      "description": "Second app of fixture release 0.0.2: new in this version, so an update brings a new row. Install is always refused (required service missing).",
+      "cfApps": [
+        {
+          "name": "figaf-faid-apps-e2e-store-second",
+          "artifact": "functional-profiles-maintain-e2e-store.zip",
+          "sha256": "3c2e571f33b6ab6ded74efcfd4e10229b6e7f0ccb4cea7b1d4c678f7392da815",
+          "buildpack": "nodejs_buildpack",
+          "memory": "64M",
+          "services": [
+            "figaf-faid-e2e-missing"
+          ]
+        }
+      ],
+      "healthPath": "/health",
+      "roleCollections": [
+        "FAID-E2E-Second-Viewer"
+      ]
     }
   ]
 }

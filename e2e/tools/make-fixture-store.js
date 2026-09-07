@@ -9,7 +9,9 @@
 // The catalogs name CF apps that never exist in the dev space and a service
 // instance that never exists, so the page shows "Not installed" and every
 // Install is refused before any cf change (same safety as
-// release-missing-service). Run once; the output is committed:
+// release-missing-service). Version 0.0.1 has one app; 0.0.2 adds a second
+// one (figaf-faid decision 0016: a release carries several apps, and an
+// update can bring a new app). Run once; the output is committed:
 //
 //     node e2e/tools/make-fixture-store.js
 
@@ -21,9 +23,31 @@ const OUT = path.join(__dirname, "..", "fixtures", "store", "faid");
 const VERSIONS = ["0.0.1", "0.0.2"];
 const sha = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
 
-function catalogFor(version, backendZip, frontendZip) {
+const SECOND_APP_FROM = "0.0.2";
+
+function catalogFor(version, backendZip, frontendZip, secondZip) {
+  const apps = [{
+    id: "b2b-archiving-setup-e2e-store",
+    name: "B2B Archiving Setup (e2e store fixture)",
+    version,
+    description: `Fixture release ${version} served from a local release store for release-store.spec.js. Install is always refused (required service missing).`,
+    cfApps: [{ name: "figaf-faid-apps-e2e-store-frontend", artifact: "b2b-archiving-setup-e2e-store.zip", sha256: sha(frontendZip), buildpack: "nodejs_buildpack", memory: "64M", services: ["figaf-faid-e2e-missing"] }],
+    healthPath: "/health",
+  }];
+  if (secondZip) {
+    apps.push({
+      id: "functional-profiles-maintain-e2e-store",
+      name: "Functional Profiles Maintain (e2e store fixture)",
+      version,
+      description: `Second app of fixture release ${version}: new in this version, so an update brings a new row. Install is always refused (required service missing).`,
+      cfApps: [{ name: "figaf-faid-apps-e2e-store-second", artifact: "functional-profiles-maintain-e2e-store.zip", sha256: sha(secondZip), buildpack: "nodejs_buildpack", memory: "64M", services: ["figaf-faid-e2e-missing"] }],
+      healthPath: "/health",
+      roleCollections: ["FAID-E2E-Second-Viewer"],
+    });
+  }
   return {
     releaseVersion: version,
+    figafScopes: secondZip ? ["agent:read", "b2b.partner-profile:read", "download", "ctt:sync"] : ["agent:read"],
     services: [
       { name: "figaf-faid-e2e-missing", offering: "postgresql-db", plan: "free",
         purpose: "E2E FIXTURE - this instance must never exist; its absence makes every Install fail early, before any cf change" },
@@ -34,14 +58,7 @@ function catalogFor(version, backendZip, frontendZip) {
       name: "Platform base (e2e store fixture)",
       cfApps: [{ name: "figaf-faid-e2e-store-backend", artifact: "backend.zip", sha256: sha(backendZip), buildpack: "nodejs_buildpack", memory: "64M", services: ["figaf-faid-e2e-missing"] }],
     },
-    apps: [{
-      id: "b2b-archiving-setup-e2e-store",
-      name: "B2B Archiving Setup (e2e store fixture)",
-      version,
-      description: `Fixture release ${version} served from a local release store for release-store.spec.js. Install is always refused (required service missing).`,
-      cfApps: [{ name: "figaf-faid-apps-e2e-store-frontend", artifact: "b2b-archiving-setup-e2e-store.zip", sha256: sha(frontendZip), buildpack: "nodejs_buildpack", memory: "64M", services: ["figaf-faid-e2e-missing"] }],
-      healthPath: "/health",
-    }],
+    apps,
   };
 }
 
@@ -53,10 +70,13 @@ for (const v of VERSIONS) {
   // Not real zips: nothing here is ever extracted (Install is refused first).
   const backendZip = Buffer.from(`e2e fixture backend ${v}\n`);
   const frontendZip = Buffer.from(`e2e fixture frontend ${v}\n`);
+  const secondZip = v >= SECOND_APP_FROM ? Buffer.from(`e2e fixture second frontend ${v}\n`) : null;
   const xs = Buffer.from(JSON.stringify({ xsappname: "figaf-faid", "oauth2-configuration": { "redirect-uris": ["https://*.__CF_APPS_DOMAIN__/**"] } }, null, 2) + "\n");
-  const catalog = Buffer.from(JSON.stringify(catalogFor(v, backendZip, frontendZip), null, 2) + "\n");
+  const catalog = Buffer.from(JSON.stringify(catalogFor(v, backendZip, frontendZip, secondZip), null, 2) + "\n");
   const files = [
-    ["backend.zip", backendZip], ["b2b-archiving-setup-e2e-store.zip", frontendZip], ["xs-security.json", xs], ["catalog.json", catalog],
+    ["backend.zip", backendZip], ["b2b-archiving-setup-e2e-store.zip", frontendZip],
+    ...(secondZip ? [["functional-profiles-maintain-e2e-store.zip", secondZip]] : []),
+    ["xs-security.json", xs], ["catalog.json", catalog],
   ];
   for (const [name, buf] of files) fs.writeFileSync(path.join(dir, name), buf);
   const release = {

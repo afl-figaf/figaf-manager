@@ -26,8 +26,12 @@ function ConnFigafForm({ status, figafSystems, busy, onSave, onCancel }) {
       <div style={{ fontWeight: 600, marginBottom: 4 }}>Connect the Figaf tool</div>
       <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 10 }}>
         The API client is created in the Figaf tool's admin UI (public API client).
-        The connection is verified against <span className="kbd">/api/v1/agent/search</span> before
-        anything is stored. Nothing is saved when verification fails.
+        {status && Array.isArray(status.requiredScopes) && status.requiredScopes.length > 0 && (
+          <> It must carry these authorities, the union every FAID app of this release
+          needs: <span className="kbd">{status.requiredScopes.join(" ")}</span>.</>
+        )}
+        {" "}The connection is verified against <span className="kbd">/api/v1/agent/search</span> and the
+        client's authorities before anything is stored. Nothing is saved when verification fails.
       </div>
       <div className="field">
         <div className="field-label">Figaf tool URL</div>
@@ -408,6 +412,25 @@ function ScreenConnections({ ctx, onBack }) {
           )}
           {figaf && figaf.error && (
             <div style={{ fontSize: 12, color: "var(--fg-red, #c0392b)", marginTop: 6 }}>{figaf.error}</div>
+          )}
+          {/* Decision 0016: the one API client must carry every authority the release needs. */}
+          {figafConfigured && figaf.scopesChecked === false && (
+            <div data-figaf-scopes="unchecked" style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>
+              The API client's authorities could not be checked right now: {figaf.scopesError}
+            </div>
+          )}
+          {figafConfigured && Array.isArray(figaf.missingScopes) && figaf.missingScopes.length > 0 && (
+            <div data-figaf-scopes="missing" style={{ fontSize: 12, color: "var(--fg-red, #c0392b)", marginTop: 6 }}>
+              The API client lacks the authorities <span className="kbd">{figaf.missingScopes.join(", ")}</span> that
+              this release needs. Add them to the client in the Figaf tool (Settings &gt; API clients), then press
+              Replace connection. Install and Update installation are refused until then.
+            </div>
+          )}
+          {figafConfigured && Array.isArray(figaf.missingScopes) && figaf.missingScopes.length === 0
+            && Array.isArray(figaf.requiredScopes) && figaf.requiredScopes.length > 0 && (
+            <div data-figaf-scopes="ok" style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>
+              API client authorities checked: <span className="kbd">{figaf.requiredScopes.join(" ")}</span>
+            </div>
           )}
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <button className="btn" disabled={busy === "figaf" || (figaf && figaf.bindingPresent === false)}

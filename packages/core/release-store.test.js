@@ -22,6 +22,7 @@ const crypto = require("crypto");
 
 const {
   loadCatalog,
+  requiredFigafScopes,
   parseIndex,
   chooseVersion,
   describeSource,
@@ -131,6 +132,16 @@ test("loadCatalog: missing file, bad JSON, missing fields, v3 services are valid
   const badSvc = tmp("rs-svc-");
   fs.writeFileSync(path.join(badSvc, "catalog.json"), JSON.stringify({ ...catalogFor("1.0.0"), services: [{ name: "db", offering: "postgresql-db", plan: "free", plans: ["standard"] }] }));
   assert.match(loadCatalog(badSvc).error, /containing the default plan/);
+  // catalog v5 (decision 0016): figafScopes is optional, and an array of authority names when present
+  const badScopes = tmp("rs-scopes-");
+  fs.writeFileSync(path.join(badScopes, "catalog.json"), JSON.stringify({ ...catalogFor("1.0.0"), figafScopes: ["agent:read", 3] }));
+  assert.match(loadCatalog(badScopes).error, /figafScopes/);
+  const okScopes = tmp("rs-scopes-ok-");
+  fs.writeFileSync(path.join(okScopes, "catalog.json"), JSON.stringify({ ...catalogFor("1.0.0"), figafScopes: ["agent:read", " ctt:sync "] }));
+  const loaded = loadCatalog(okScopes);
+  assert.equal(loaded.ok, true);
+  assert.deepEqual(requiredFigafScopes(loaded.catalog), ["agent:read", "ctt:sync"]);
+  assert.deepEqual(requiredFigafScopes(catalogFor("1.0.0")), [], "older catalogs require nothing");
 });
 
 // ─── C. remote store ─────────────────────────────────────────────────────────

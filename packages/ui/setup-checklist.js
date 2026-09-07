@@ -38,7 +38,10 @@
     var stored = data.stored || null;
     var bindingActive = !!(stored && stored.bindingPresent);
     var storedDone = !!(stored && stored.available);
-    var figafDone = !!(data.figaf && data.figaf.configured);
+    // Decision 0016: a stored client that lacks an authority the release needs
+    // is not done - Install and Update would refuse it.
+    var figafMissing = (data.figaf && data.figaf.missingScopes) || [];
+    var figafDone = !!(data.figaf && data.figaf.configured) && figafMissing.length === 0;
     var platform = data.faid && data.faid.ok ? data.faid.platform : null;
     var platformDone = !!(platform && platform.status === "running");
 
@@ -130,7 +133,10 @@
       title: "Figaf tool connection",
       why: "URL and API client of your Figaf tool, stored in the Credential Store. Apps read the system " +
         "list through the shared backend; no secret is typed into an app.",
-      when: "",
+      when: figafMissing.length
+        ? "The stored API client lacks the authorities " + figafMissing.join(", ") + " that this release needs. " +
+          "Add them in the Figaf tool (Settings > API clients), then Replace connection."
+        : "",
       done: figafDone,
       blocked: figafDone ? "" : (!ssoDone ? afterPrepare : (bindingActive ? "" : "Credential Store binding not active")),
       cta: "Open Connections",

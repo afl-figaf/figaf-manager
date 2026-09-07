@@ -1,5 +1,8 @@
 {
   "releaseVersion": "0.0.1",
+  "figafScopes": [
+    "agent:read"
+  ],
   "services": [
     {
       "name": "figaf-faid-e2e-missing",

@@ -7,7 +7,7 @@ was `spikes/app-manager-poc/FINDINGS.md` in the figaf-faid repo). Behavior
 is in `SPEC.md`, reasons are in figaf-faid `decisions/`, run records in
 figaf-faid `docs/d1/RUNBOOK-VIRGIN.md`. Platform-level notes (release model,
 Figaf API client scopes) live in figaf-faid `docs/SOLUTION.md`.
-Last edited 2026-09-06.
+Last edited 2026-09-07.
 
 ## Open items
 
@@ -38,6 +38,17 @@ Last edited 2026-09-06.
    auto-selects it` — fails on master too; fix or quarantine. The cloud tests
    (`apps/figaf-manager/cloud/*.test.js`) are not part of `npm test` and so
    not part of CI.
+7. **Two-app releases** (figaf-faid decision 0016, 2026-09-07): the fixture
+   store now has two apps in 0.0.2 (one in 0.0.1) and `release-store.spec.js`
+   proves both rows, both Install buttons, the union `figafScopes`, and that a
+   refused install of the second app leaves the first row alone (read-only;
+   written 2026-09-07, not yet run green: the dev machine's cf login had
+   expired). Still owed, in the dev space through the install smoke: install
+   of app B leaves app A running, remove of A leaves B and the backend, Update
+   installation moves both. Also owed: a `failure-visibility` spec for the
+   preflight refusal `figafScopes`; it is unreachable with the missing-service
+   fixture (the service check comes first) and needs a fixture whose services
+   exist plus a stored Figaf connection, so it stays unit-tested only.
 7. **Pinning** (CLIs 2026-09-04; Node and stack 2026-09-07, figaf-faid
    decision 0015): `btpCliVersion` and `cfCliVersion` in
    `apps/figaf-manager/package.json` fix the bundled CLIs; `build-zip.js`

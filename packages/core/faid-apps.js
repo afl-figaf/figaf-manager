@@ -36,7 +36,7 @@
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
-const { loadCatalog, chooseVersion, createReleaseStore } = require("./release-store");
+const { loadCatalog, chooseVersion, createReleaseStore, requiredFigafScopes } = require("./release-store");
 const { stackArgs, parseStackNames, wantedStacks, missingStacks, missingStackError } = require("./cf-stack");
 
 const VERSION_ENV = "FIGAF_APP_VERSION";
@@ -746,6 +746,27 @@ function createFaidHandlers(ctx) {
       if (names.size) {
         return { ok: false, error: `required service instance(s) missing: ${[...names].join(", ")} — create them first (Setup, step 3)` };
       }
+    }
+    // Catalog v5 (figaf-faid decision 0016): the installation's ONE Figaf API
+    // client must carry every authority this release needs. Checked before the
+    // role refresh, so a refusal changes nothing. No stored connection is not a
+    // blocker (it can be connected later); a client that lacks an authority is.
+    // A probe that fails (Figaf unreachable) is logged, and the health check
+    // reports it later - an install does not need the Figaf tool itself.
+    const scopesNeeded = requiredFigafScopes(rel.catalog);
+    if (scopesNeeded.length && typeof ctx.checkFigafScopes === "function") {
+      const check = await ctx.checkFigafScopes(scopesNeeded);
+      if (check && check.ok === false) {
+        log("faid", "warn", `the Figaf API client could not be checked (${check.error || "no answer"}) — the action goes on; /health/connections reports the client's authorities`);
+      } else if (check && check.configured && Array.isArray(check.missing) && check.missing.length) {
+        return {
+          ok: false,
+          step: "figafScopes",
+          error: `the Figaf API client lacks the authorities ${check.missing.join(", ")} that release ${rel.version} needs — add them to the client in the Figaf tool (Settings > API clients), then Connections > Replace connection, then try again. Nothing was deployed.`,
+        };
+      }
+    }
+    if (Array.isArray(rel.catalog.services)) {
       if (rel.catalog.services.some((s) => s.offering === "xsuaa")) {
         const x = await ensureXsuaa({ updateOnly: true, version: rel.version });
         if (!x.ok) {
@@ -1242,6 +1263,17 @@ function createFaidHandlers(ctx) {
      */
     async "faid:ensureXsuaa"(args) {
       return ensureXsuaa(args || {});
+    },
+
+    /**
+     * Decision 0016 (catalog v5): the Figaf API client authorities the
+     * installation's release requires (installed version, else latest). The
+     * Connections page verifies a new client against this list.
+     */
+    async "faid:requiredFigafScopes"() {
+      const rel = await currentRelease({ purpose: "read" });
+      if (!rel.ok) return { ok: false, error: rel.error, scopes: [] };
+      return { ok: true, version: rel.version, scopes: requiredFigafScopes(rel.catalog) };
     },
 
     /**

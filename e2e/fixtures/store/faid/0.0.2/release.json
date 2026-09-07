@@ -13,14 +13,19 @@
       "sha256": "304e801818f6b138202580d5b95bd959dab08964421cdcacd644c25ba6dfcb25"
     },
     {
+      "name": "functional-profiles-maintain-e2e-store.zip",
+      "size": 34,
+      "sha256": "3c2e571f33b6ab6ded74efcfd4e10229b6e7f0ccb4cea7b1d4c678f7392da815"
+    },
+    {
       "name": "xs-security.json",
       "size": 134,
-      "sha256": "329dd5222cfa3f886e041084f56db1115887c0d5f6e228d26bfe38bd7ba88b1c"
+      "sha256": "d5f662f986a695bc2bb37c342c36f65d117e581b11fbea8be768ab4f7b7f96a5"
     },
     {
       "name": "catalog.json",
-      "size": 1670,
-      "sha256": "848b5f1189268e6d53672f87ebb2ffe56f89b2e96251e81a76ee7f3391d77147"
+      "size": 2607,
+      "sha256": "cc634c3d011000104f621ca3f5cc2ddca0bf8082ad3e3d3914a3d524062dd668"
     }
   ],
   "source": {

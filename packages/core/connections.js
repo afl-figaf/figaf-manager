@@ -37,8 +37,14 @@ const credstoreClientDefault = require("./credstore-client");
 
 const CONNECTIONS_NAMESPACE = "figaf-connections";
 const FIGAF_TOOL_CREDENTIAL = "figaf-tool";
-// Same scope set the shared backend connector uses for its Figaf public-API login.
-const DEFAULT_FIGAF_SCOPE = "agent:read ctt:sync";
+// Decision 0016 (figaf-faid, 2026-09-07): the ONE Figaf API client of an
+// installation carries the union of the authorities every app of the release
+// needs (catalog v5 `figafScopes`). The Figaf token endpoint ignores a requested
+// scope and answers with `scope` = the client's authorities; that field is the
+// whole check. ctx.requiredFigafScopes() supplies the required list (from the
+// release store); saveFigaf refuses a client that lacks one, figafStatus shows
+// the state, figafScopesCheck answers the install/update preflight.
+const SCOPE_PROBE_CACHE_MS = 60 * 1000;
 const STATUS_CACHE_MS = 60 * 1000; // credstore reads are rate-limited
 const MAX_STATUS_READS = 20;
 
@@ -218,9 +224,9 @@ function createConnectionsHandlers(ctx = {}) {
   }
 
   /** OAuth client-credentials token. Error messages carry status only, never the secret. */
-  async function _fetchToken(tokenUrl, clientId, clientSecret, { scope, extraHeaders } = {}) {
+  /** Client-credentials token. Returns { token, scope }: `scope` = the authorities the server says the client has. */
+  async function _fetchToken(tokenUrl, clientId, clientSecret, { extraHeaders } = {}) {
     const params = { grant_type: "client_credentials" };
-    if (scope) params.scope = scope;
     const response = await fetchImpl(tokenUrl, {
       method: "POST",
       headers: {
@@ -238,13 +244,59 @@ function createConnectionsHandlers(ctx = {}) {
     try { payload = JSON.parse(await response.text()); }
     catch { throw new Error("token endpoint returned invalid JSON"); }
     if (!payload.access_token) throw new Error("token response did not contain access_token");
-    return payload.access_token;
+    return { token: payload.access_token, scope: String(payload.scope || "") };
   }
 
-  /** Verify a Figaf-tool entry live; returns the agent array (throws on failure). */
+  function _splitScopes(text) {
+    return String(text || "").split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  }
+
+  /** The authorities the installation's release requires of the API client; [] when unknown. */
+  async function _requiredScopes() {
+    if (typeof ctx.requiredFigafScopes !== "function") return [];
+    try {
+      const r = await ctx.requiredFigafScopes();
+      return Array.isArray(r) ? r.map((s) => String(s).trim()).filter(Boolean) : [];
+    } catch (e) {
+      log("connections", "warn", `the required Figaf API client authorities could not be read: ${e.message}`);
+      return [];
+    }
+  }
+
+  function _missingScopes(required, granted) {
+    const have = new Set(granted);
+    return required.filter((s) => !have.has(s));
+  }
+
+  // The live probe of the stored client's authorities, for the status card.
+  // Cached per client for SCOPE_PROBE_CACHE_MS; forgotten on save and delete.
+  let _scopeProbe = null; // { key, at, result }
+  async function _probeScopes(entry) {
+    const required = await _requiredScopes();
+    const key = `${entry.tokenUrl}|${entry.clientId}`;
+    if (_scopeProbe && _scopeProbe.key === key && Date.now() - _scopeProbe.at <= SCOPE_PROBE_CACHE_MS) {
+      return { ..._scopeProbe.result, requiredScopes: required, missingScopes: _scopeProbe.result.scopesChecked ? _missingScopes(required, _scopeProbe.result.grantedScopes) : undefined };
+    }
+    let result;
+    try {
+      const { scope } = await _fetchToken(entry.tokenUrl, entry.clientId, entry.clientSecret, { extraHeaders: accessHeaders(entry) });
+      const granted = _splitScopes(scope);
+      result = { scopesChecked: true, grantedScopes: granted };
+    } catch (e) {
+      result = { scopesChecked: false, scopesError: e.message };
+    }
+    _scopeProbe = { key, at: Date.now(), result };
+    return { ...result, requiredScopes: required, ...(result.scopesChecked ? { missingScopes: _missingScopes(required, result.grantedScopes) } : {}) };
+  }
+
+  /**
+   * Verify a Figaf-tool entry live: token, agent search, and the client's
+   * authorities against the release's list. Returns
+   * { agents, granted, required, missing }; throws when the tool is unreachable.
+   */
   async function _verifyFigaf(entry) {
-    const token = await _fetchToken(entry.tokenUrl, entry.clientId, entry.clientSecret, {
-      scope: DEFAULT_FIGAF_SCOPE, extraHeaders: accessHeaders(entry),
+    const { token, scope } = await _fetchToken(entry.tokenUrl, entry.clientId, entry.clientSecret, {
+      extraHeaders: accessHeaders(entry),
     });
     const response = await fetchImpl(`${entry.baseUrl}/api/v1/agent/search`, {
       method: "POST",
@@ -261,12 +313,14 @@ function createConnectionsHandlers(ctx = {}) {
     }
     let payload;
     try { payload = JSON.parse(await response.text()); } catch { payload = []; }
-    return extractAgents(payload);
+    const granted = _splitScopes(scope);
+    const required = await _requiredScopes();
+    return { agents: extractAgents(payload), granted, required, missing: _missingScopes(required, granted) };
   }
 
   /** Verify one system's `api` entry live: token + OData $metadata (throws on failure). */
   async function _verifySystem(entry) {
-    const token = await _fetchToken(entry.tokenUrl, entry.clientId, entry.clientSecret);
+    const { token } = await _fetchToken(entry.tokenUrl, entry.clientId, entry.clientSecret);
     const response = await fetchImpl(`${entry.baseUrl}/api/v1/$metadata`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/xml" },
     });
@@ -292,15 +346,42 @@ function createConnectionsHandlers(ctx = {}) {
       if (!binding) return { ok: true, configured: false, bindingPresent: false, reason: "no credential-store binding" };
       try {
         const entry = await _readEntry(binding, FIGAF_TOOL_CREDENTIAL);
-        if (!entry) return { ok: true, configured: false, bindingPresent: true };
+        if (!entry) return { ok: true, configured: false, bindingPresent: true, requiredScopes: await _requiredScopes() };
+        // Decision 0016: the client's authorities, probed live (cached 60 s), so
+        // a client that was narrowed in the Figaf tool after it was stored is
+        // seen here and not first at the next install.
+        const scopes = await _probeScopes(entry);
         return {
           ok: true, configured: true, bindingPresent: true,
           baseUrl: entry.baseUrl || "", clientId: entry.clientId || "",
           hasAccessPair: Boolean(entry.accessClientId),
           verifiedAt: entry.verifiedAt || null, agentCount: entry.agentCount ?? null,
+          ...scopes,
         };
       } catch (e) {
         return { ok: false, error: e.message };
+      }
+    },
+
+    /**
+     * Decision 0016: does the stored API client carry the authorities `required`?
+     * Asked by faid:install / faid:update before anything is pushed. Not
+     * configured = nothing to check (the connection may come later). A probe
+     * that fails is reported as ok:false, never hidden.
+     */
+    async "connections:figafScopesCheck"({ required } = {}) {
+      const binding = _binding();
+      if (!binding) return { ok: true, configured: false };
+      let entry;
+      try { entry = await _readEntry(binding, FIGAF_TOOL_CREDENTIAL); } catch (e) { return { ok: false, error: e.message }; }
+      if (!entry) return { ok: true, configured: false };
+      const wanted = Array.isArray(required) ? required.map((s) => String(s).trim()).filter(Boolean) : [];
+      try {
+        const { scope } = await _fetchToken(entry.tokenUrl, entry.clientId, entry.clientSecret, { extraHeaders: accessHeaders(entry) });
+        const granted = _splitScopes(scope);
+        return { ok: true, configured: true, granted, missing: _missingScopes(wanted, granted) };
+      } catch (e) {
+        return { ok: false, configured: true, error: e.message };
       }
     },
 
@@ -320,12 +401,22 @@ function createConnectionsHandlers(ctx = {}) {
       }
       if (!isHttpsUrl(entry.baseUrl)) return { ok: false, error: "the Figaf URL must be an https:// URL" };
       entry.tokenUrl = cleanUrl(tokenUrl) || `${entry.baseUrl}/oauth/token`;
-      let agents;
+      let verified;
       try {
-        agents = await _verifyFigaf(entry);
+        verified = await _verifyFigaf(entry);
       } catch (e) {
         return { ok: false, error: `verification failed — nothing was stored: ${e.message}` };
       }
+      // Decision 0016: one client, every authority of the release. Refused
+      // here, so no app ever meets a 403 for a missing authority at runtime.
+      if (verified.missing.length) {
+        return {
+          ok: false,
+          error: `verification failed — nothing was stored: the API client lacks the authorities ${verified.missing.join(", ")} that this release needs (it has: ${verified.granted.join(", ") || "none"}). Add them to the client in the Figaf tool (Settings > API clients) and save again.`,
+          missingScopes: verified.missing, grantedScopes: verified.granted, requiredScopes: verified.required,
+        };
+      }
+      const agents = verified.agents;
       entry.verifiedAt = new Date().toISOString();
       entry.agentCount = agents.length;
       try {
@@ -333,8 +424,9 @@ function createConnectionsHandlers(ctx = {}) {
       } catch (e) {
         return { ok: false, error: e.message };
       }
-      log("connections", "ok", `Figaf tool connection verified and stored (${entry.baseUrl}, ${agents.length} agents visible)`);
-      return { ok: true, agentCount: agents.length };
+      _scopeProbe = null;
+      log("connections", "ok", `Figaf tool connection verified and stored (${entry.baseUrl}, ${agents.length} agents visible, authorities: ${verified.granted.join(" ") || "none reported"})`);
+      return { ok: true, agentCount: agents.length, grantedScopes: verified.granted, requiredScopes: verified.required };
     },
 
     async "connections:deleteFigaf"() {
@@ -345,6 +437,7 @@ function createConnectionsHandlers(ctx = {}) {
       } catch (e) {
         return { ok: false, error: e.message };
       }
+      _scopeProbe = null;
       log("connections", "line", "Figaf tool connection removed from the Credential Store");
       return { ok: true };
     },
@@ -365,7 +458,7 @@ function createConnectionsHandlers(ctx = {}) {
       if (!figaf) return { ok: false, needsFigaf: true, error: "connect the Figaf tool first" };
       let rawAgents;
       try {
-        rawAgents = await _verifyFigaf(figaf);
+        rawAgents = (await _verifyFigaf(figaf)).agents;
       } catch (e) {
         return { ok: false, error: `could not list agents from the Figaf tool: ${e.message}` };
       }

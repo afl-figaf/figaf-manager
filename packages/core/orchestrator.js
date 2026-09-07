@@ -760,6 +760,10 @@ function createOrchestrator({ host, send, audit }) {
           res.on("end", () => resolve({ status: res.statusCode, body: data }));
         }).on("error", reject);
       }),
+      // Decision 0016: before an install or update, the stored Figaf API client
+      // is checked against the release's figafScopes (connections.js). Lazy:
+      // `handlers` is filled long after this literal.
+      checkFigafScopes: (required) => handlers["connections:figafScopesCheck"]({ required }),
     }),
 
     // System connections (decision 0006 slice): the manager verifies and
@@ -773,6 +777,12 @@ function createOrchestrator({ host, send, audit }) {
     ...createConnectionsHandlers({
       log,
       probeDestination: (name) => handlers["faid:destinationCheck"]({ destinationName: name }),
+      // Decision 0016: the authorities the release requires of the ONE Figaf
+      // API client (catalog v5 figafScopes; installed version, else latest).
+      requiredFigafScopes: async () => {
+        const r = await handlers["faid:requiredFigafScopes"]();
+        return r && r.ok ? r.scopes : [];
+      },
     }),
 
     // stored management user + session resume (FAID Apps manager) ───────────

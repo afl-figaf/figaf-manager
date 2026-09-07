@@ -93,7 +93,20 @@ function validateCatalog(parsed) {
       }
     }
   }
+  // Catalog v5 (figaf-faid decision 0016): the authorities the installation's
+  // ONE Figaf API client must have - the union over every app of the release.
+  // Optional (older releases carry none = nothing to verify).
+  if (parsed.figafScopes != null) {
+    if (!Array.isArray(parsed.figafScopes) || parsed.figafScopes.some((s) => typeof s !== "string" || !s.trim())) {
+      return { ok: false, error: "catalog 'figafScopes' must be an array of authority names" };
+    }
+  }
   return { ok: true, catalog: parsed };
+}
+
+/** The Figaf API client authorities a catalog requires (v5); [] for older catalogs. */
+function requiredFigafScopes(catalog) {
+  return Array.isArray(catalog && catalog.figafScopes) ? catalog.figafScopes.map((s) => String(s).trim()).filter(Boolean) : [];
 }
 
 /** The version a catalog carries (releaseVersion; channelVersion is the legacy alias). */
@@ -375,6 +388,7 @@ module.exports = {
   MAX_CACHED_VERSIONS,
   loadCatalog,
   validateCatalog,
+  requiredFigafScopes,
   catalogVersion,
   parseIndex,
   chooseVersion,

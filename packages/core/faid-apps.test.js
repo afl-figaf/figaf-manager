@@ -1728,3 +1728,65 @@ test("faid:bindPlatformService: a failed restart is reported, and says the bindi
   assert.match(r.error, /is bound, but cf restart/);
   assert.equal(r.step, "restart");
 });
+
+// ─── decision 0016 (catalog v5): the Figaf API client must carry the release's authorities ─
+
+const CATALOG_V5 = { ...CATALOG_V3, releaseVersion: "0.6.0", figafScopes: ["agent:read", "ctt:sync"] };
+function makeV5Dir() {
+  const dir = makeChannelDir(CATALOG_V5);
+  fs.writeFileSync(path.join(dir, "xs-security.json"), "{\"xsappname\":\"figaf-faid\"}");
+  return dir;
+}
+const V3_READY = { db: "create succeeded", xsuaa: "create succeeded", credstore: "create succeeded" };
+function v3InstallResponder(args) {
+  if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "" }; // fresh space
+  if (args[0] === "app") return { code: 0, stdout: "routes: arch-backend.cfapps.example\n" };
+  return domainsResponder(args);
+}
+
+test("faid:install refuses when the stored Figaf API client lacks an authority the release needs (v5): step figafScopes, before any push or role refresh", async () => {
+  const { ctx, calls } = makeCtx(makeV5Dir(), cfServiceResponder(V3_READY, v3InstallResponder));
+  const asked = [];
+  ctx.checkFigafScopes = async (required) => { asked.push(required); return { ok: true, configured: true, granted: ["agent:read"], missing: ["ctt:sync"] }; };
+  const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
+  assert.equal(r.ok, false);
+  assert.equal(r.step, "figafScopes");
+  assert.match(r.error, /lacks the authorities ctt:sync that release 0\.6\.0 needs/);
+  assert.match(r.error, /Replace connection/);
+  assert.deepEqual(asked, [["agent:read", "ctt:sync"]]);
+  assert.ok(!calls.some((c) => c.args[0] === "push"), "nothing must be deployed");
+  assert.ok(!calls.some((c) => c.args[0] === "update-service" || c.args[0] === "create-service"), "the role refresh must not run");
+});
+
+test("faid:install goes on when no Figaf connection is stored, when the client has every authority, or when the probe itself fails (logged); a v3 catalog asks nothing", async () => {
+  for (const check of [
+    { ok: true, configured: false },
+    { ok: true, configured: true, granted: ["agent:read", "ctt:sync", "download"], missing: [] },
+    { ok: false, configured: true, error: "HTTP 503" },
+  ]) {
+    const { ctx, calls, logLines } = makeCtx(makeV5Dir(), cfServiceResponder(V3_READY, v3InstallResponder));
+    ctx.checkFigafScopes = async () => check;
+    const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.ok(calls.some((c) => c.args[0] === "push"), "the install ran");
+    if (check.ok === false) assert.ok(logLines.some((l) => /could not be checked/.test(l)), "the failed probe is logged");
+  }
+  const { ctx: ctx3 } = makeCtx(makeV3Dir(), cfServiceResponder(V3_READY, v3InstallResponder));
+  let askedV3 = 0;
+  ctx3.checkFigafScopes = async () => { askedV3 += 1; return { ok: true, configured: true, granted: [], missing: [] }; };
+  const r3 = await createFaidHandlers(ctx3)["faid:install"]({ appId: "arch" });
+  assert.equal(r3.ok, true, JSON.stringify(r3));
+  assert.equal(askedV3, 0, "a catalog without figafScopes triggers no check");
+});
+
+test("faid:requiredFigafScopes: the release's figafScopes (v5); [] for an older catalog", async () => {
+  const { ctx } = makeCtx(makeV5Dir(), cfServiceResponder(V3_READY, v3InstallResponder));
+  const r = await createFaidHandlers(ctx)["faid:requiredFigafScopes"]();
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.version, "0.6.0");
+  assert.deepEqual(r.scopes, ["agent:read", "ctt:sync"]);
+  const { ctx: ctx3 } = makeCtx(makeV3Dir(), cfServiceResponder(V3_READY, v3InstallResponder));
+  const r3 = await createFaidHandlers(ctx3)["faid:requiredFigafScopes"]();
+  assert.equal(r3.ok, true, JSON.stringify(r3));
+  assert.deepEqual(r3.scopes, []);
+});

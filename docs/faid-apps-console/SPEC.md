@@ -25,7 +25,7 @@ command and every download visible, and without stored personal credentials.
 It also creates the service instances the platform needs, sets up its own
 persistent sign-in, and holds the system connections the apps use.
 
-## 2. Release, catalog (v3) and the release store
+## 2. Release, catalog (v5) and the release store
 
 A RELEASE is a versioned set: `catalog.json`, `release.json` (checksums and
 the source commit), `xs-security.json` and one zip per CF app. Releases live
@@ -33,6 +33,13 @@ in the RELEASE STORE (figaf-faid decision 0010): the Cloudflare R2 bucket
 behind a public URL, written only by figaf-faid `release/publish.js`. The
 word "channel" is retired. figaf-faid `release/build.js` builds
 a release; the developer procedure is figaf-faid `release/README.md`.
+
+Catalog v5 (2026-09-07, figaf-faid decision 0016) adds `figafScopes`: the
+authorities the installation's ONE Figaf API client must carry, the union over
+every app of the release (written by the build from the connector's list).
+The manager verifies them when the Figaf connection is stored and before
+every install and update (section 3, step 2; section 7). Older catalogs
+without the field verify nothing.
 
 ### 2.1 The release source
 
@@ -197,7 +204,11 @@ Install / update algorithm:
 2. Refuse when the landscape lacks a stack the catalog names (`cf stacks`
    once per action; step `stack`, nothing pushed; a failing `cf stacks` only
    skips the check), or when a REQUIRED instance (any name in a cfApp's
-   `services`) is missing: "create them first (Setup, step 3)".
+   `services`) is missing: "create them first (Setup, step 3)", or when the
+   stored Figaf API client lacks an authority of the release's `figafScopes`
+   (step `figafScopes`, `connections:figafScopesCheck`: one token request,
+   the answer's `scope` field is compared). No stored Figaf connection is not
+   a blocker; a probe that fails is logged and the action goes on.
 3. Role refresh: `faid:ensureXsuaa({ updateOnly: true, version })` — the shared
    XSUAA instance gets the roles of the release being deployed and of the
    manager. A failure stops the install (step `roles`).
@@ -431,7 +442,14 @@ them. Credential Store namespace `figaf-connections`:
 - `figaf-tool` — the one Figaf tool of the installation: `{ baseUrl, tokenUrl,
   clientId, clientSecret, accessClientId?, accessClientSecret?, verifiedAt,
   agentCount }`. Verified before storing: OAuth token + `POST
-  /api/v1/agent/search`. Needs API client scope `agent:read` today.
+  /api/v1/agent/search` + the client's authorities against the release's
+  `figafScopes` (decision 0016: ONE client with the union every app needs;
+  the Figaf token endpoint ignores a requested scope and answers with
+  `scope` = the client's authorities, which is the check). A client that
+  lacks one is refused with the names of what is missing and what it has.
+  `figafStatus` probes the authorities live (cached 60 s) and reports
+  `requiredScopes`, `grantedScopes`, `missingScopes`; the Connections card and
+  the Setup checklist show a missing authority and the fix.
 - `<agentId>/api` — one per connected Integration Suite system: `{ kind:
   "api", agentId, agentSystemId, agentName, baseUrl, tokenUrl, clientId,
   clientSecret, verifiedAt }`, from a pasted `it-rt` `api` service key
@@ -491,9 +509,9 @@ The `api` and `pipo` kinds are manager-managed; DMS / Service Manager /
 Destination keys stay in the app (next 0006 phase). The reader side of `pipo`
 is `platformConn.pipoConnection(agentId)`, and `/health/connections` reports a
 `pipo` section: one destination lookup per stored entry, neutral when the
-installation has none. API client scopes stay
-installation-level: the catalog will declare per app the Figaf scopes it
-needs; never per-app credentials (design note in figaf-faid `docs/SOLUTION.md` 2.5).
+installation has none. API client scopes are installation-level and ONE
+list per release (`figafScopes`, catalog v5): never per-app credentials, no
+per-app override (figaf-faid decision 0016 and `docs/SOLUTION.md` 2.4).
 
 ## 8. Console frame (hosted only)
 

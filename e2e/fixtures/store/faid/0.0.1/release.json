@@ -15,12 +15,12 @@
     {
       "name": "xs-security.json",
       "size": 134,
-      "sha256": "329dd5222cfa3f886e041084f56db1115887c0d5f6e228d26bfe38bd7ba88b1c"
+      "sha256": "d5f662f986a695bc2bb37c342c36f65d117e581b11fbea8be768ab4f7b7f96a5"
     },
     {
       "name": "catalog.json",
-      "size": 1670,
-      "sha256": "eadd81416b6a3faa92cfdc180100fb515c2beef244039967a7174176a7cbf554"
+      "size": 1718,
+      "sha256": "00ee7d6d765ed3e5dd164ac458a43a2e0ba0b04692ff2c3b94dab1fd24b47d67"
     }
   ],
   "source": {

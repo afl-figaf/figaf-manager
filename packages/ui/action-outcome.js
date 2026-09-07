@@ -29,6 +29,9 @@
   };
 
   var STEP_LABEL = {
+    stack: "check the Cloud Foundry stacks of the landscape",
+    figafScopes: "check the authorities of the Figaf API client",
+    roles: "refresh the XSUAA roles",
     extract: "unpack the release artifact",
     push: "upload the app to Cloud Foundry (cf push)",
     bind: "bind a service instance",
@@ -100,6 +103,11 @@
       id: "no-route",
       re: /no route|could not resolve the route/i,
       hint: "The shared backend is not deployed or not started. Install it first (Install deploys the shared backend before the app).",
+    },
+    {
+      id: "figaf-scopes",
+      re: /Figaf API client lacks the authorities/i,
+      hint: "The installation's one Figaf API client must carry every authority the release needs (figaf-faid decision 0016). In the Figaf tool, Settings > API clients, add the named authorities to the client. Then Connections > Replace connection (the save verifies them), then try again. Nothing was deployed.",
     },
   ];
 

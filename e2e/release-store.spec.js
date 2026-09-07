@@ -116,3 +116,39 @@ test("Update refuses when nothing is installed and for unknown versions; Install
   expect(releases.versions.every((v) => v.selectable === false)).toBe(true);
   await expect(page.locator(`.faid-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
 });
+
+// Two apps in one release (figaf-faid decision 0016): 0.0.1 carries one app,
+// 0.0.2 adds a second one. The page lists both from the latest catalog, each
+// with its own Install; an install of the second app is refused early exactly
+// like the first (the store worked, cf was not changed); refusing one app
+// leaves the other row as it was. The real two-app install and update run in
+// the dev space through the install smoke, not here.
+const SECOND_APP_ID = "functional-profiles-maintain-e2e-store";
+
+test("a release with two apps lists both, each installable on its own; a refused install of the second app leaves the first alone", async ({ page }) => {
+  await page.goto("/#/apps");
+  const first = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
+  const second = page.locator(`.faid-app-row[data-app="${SECOND_APP_ID}"]`);
+  await expect(first).toContainText("Not installed");
+  await expect(second).toContainText("Not installed");
+  await expect(second).toContainText("Functional Profiles Maintain (e2e store fixture)");
+  await expect(second).toContainText("release: 0.0.2");
+  await expect(second.getByRole("button", { name: "Install 0.0.2" })).toBeVisible();
+  await expect(first.getByRole("button", { name: "Install 0.0.2" })).toBeVisible();
+
+  const catalog = await rpc(page, "faid:catalog", {});
+  expect(catalog.ok).toBe(true);
+  expect(catalog.apps.map((a) => a.id)).toEqual([APP_ID, SECOND_APP_ID]);
+  expect(catalog.apps[1].roleCollections).toEqual(["FAID-E2E-Second-Viewer"]);
+
+  const scopes = await rpc(page, "faid:requiredFigafScopes", {});
+  expect(scopes.ok).toBe(true);
+  expect(scopes.scopes).toEqual(["agent:read", "b2b.partner-profile:read", "download", "ctt:sync"]);
+
+  const install = await rpc(page, "faid:install", { appId: SECOND_APP_ID });
+  expect(install.ok).toBe(false);
+  expect(install.error).toMatch(/required service instance\(s\) missing: figaf-faid-e2e-missing/);
+
+  await expect(first).toContainText("Not installed");
+  await expect(second).toContainText("Not installed");
+});

@@ -14,7 +14,7 @@
 //                   before any cf change. failure-visibility.spec.js runs here.
 //   remote   :8089  a REMOTE release source: FIGAF_FAID_RELEASE_URL points at a
 //                   static file server on :8090 that serves the fixture store
-//                   e2e/fixtures/store (bucket layout, two versions; built by
+//                   e2e/fixtures/store (bucket layout, two versions, the second with two apps; built by
 //                   e2e/tools/make-fixture-store.js). release-store.spec.js
 //                   runs here: the same code path as Cloudflare R2, no
 //                   internet, no cf change (the fixture's service is missing).

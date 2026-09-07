@@ -414,3 +414,89 @@ test("listAgents reads /pipo for a PRO agent and /api for the others", async () 
   assert.equal(a3.kind, "pipo");
   assert.equal(a3.connected, false);
 });
+
+// ─── decision 0016: the one API client must carry the release's authorities ──
+
+const TOKEN_WITH_SCOPES = (scope) => ({ status: 200, body: JSON.stringify({ access_token: "tok", token_type: "bearer", scope }) });
+
+test("saveFigaf refuses a client that lacks a required authority: nothing stored, the error names what is missing and what it has", async () => {
+  const credstore = fakeCredstore();
+  const fetchImpl = fakeFetch({ "/oauth/token": TOKEN_WITH_SCOPES("agent:read"), "/api/v1/agent/search": AGENTS_OK });
+  const h = createConnectionsHandlers({ credstore, fetchImpl, requiredFigafScopes: async () => ["agent:read", "ctt:sync"] });
+  const r = await h["connections:saveFigaf"]({ baseUrl: "https://figaf.example", clientId: "c", clientSecret: "figaf-secret" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /lacks the authorities ctt:sync/);
+  assert.match(r.error, /it has: agent:read/);
+  assert.match(r.error, /Settings > API clients/);
+  assert.deepEqual(r.missingScopes, ["ctt:sync"]);
+  assert.ok(!JSON.stringify(r).includes("figaf-secret"));
+  assert.equal(credstore.calls.writes.length, 0);
+  // no scope is requested: the Figaf endpoint answers with the client's authorities anyway
+  const tokenCall = fetchImpl.seen.find((c) => c.url.includes("/oauth/token"));
+  assert.equal(tokenCall.options.body, "grant_type=client_credentials");
+});
+
+test("saveFigaf stores a client that carries every required authority and reports them", async () => {
+  const credstore = fakeCredstore();
+  const fetchImpl = fakeFetch({ "/oauth/token": TOKEN_WITH_SCOPES("agent:read ctt:sync download"), "/api/v1/agent/search": AGENTS_OK });
+  const h = createConnectionsHandlers({ credstore, fetchImpl, requiredFigafScopes: async () => ["agent:read", "ctt:sync"] });
+  const r = await h["connections:saveFigaf"]({ baseUrl: "https://figaf.example", clientId: "c", clientSecret: "s" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.grantedScopes, ["agent:read", "ctt:sync", "download"]);
+  assert.deepEqual(r.requiredScopes, ["agent:read", "ctt:sync"]);
+  assert.equal(credstore.calls.writes.length, 1);
+});
+
+test("saveFigaf without a required list (older release, or no store) verifies the endpoint only", async () => {
+  const credstore = fakeCredstore();
+  const fetchImpl = fakeFetch({ "/oauth/token": TOKEN_WITH_SCOPES(""), "/api/v1/agent/search": AGENTS_OK });
+  const h = createConnectionsHandlers({ credstore, fetchImpl, requiredFigafScopes: async () => { throw new Error("store down"); } });
+  const r = await h["connections:saveFigaf"]({ baseUrl: "https://figaf.example", clientId: "c", clientSecret: "s" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(credstore.calls.writes.length, 1);
+});
+
+test("figafStatus reports required, granted and missing authorities from a live probe, without any secret", async () => {
+  const credstore = fakeCredstore({ [FIGAF_TOOL_CREDENTIAL]: FIGAF_ENTRY });
+  const fetchImpl = fakeFetch({ "/oauth/token": TOKEN_WITH_SCOPES("agent:read") });
+  const h = createConnectionsHandlers({ credstore, fetchImpl, requiredFigafScopes: async () => ["agent:read", "ctt:sync"] });
+  const r = await h["connections:figafStatus"]();
+  assert.equal(r.configured, true);
+  assert.equal(r.scopesChecked, true);
+  assert.deepEqual(r.requiredScopes, ["agent:read", "ctt:sync"]);
+  assert.deepEqual(r.grantedScopes, ["agent:read"]);
+  assert.deepEqual(r.missingScopes, ["ctt:sync"]);
+  assert.ok(!JSON.stringify(r).includes("figaf-secret"));
+  // the probe is cached: a second status makes no second token call
+  await h["connections:figafStatus"]();
+  assert.equal(fetchImpl.seen.filter((c) => c.url.includes("/oauth/token")).length, 1);
+  // not configured: the required list is still reported, so the form can show it
+  const empty = createConnectionsHandlers({ credstore: fakeCredstore(), fetchImpl: fakeFetch({}), requiredFigafScopes: async () => ["agent:read"] });
+  const r2 = await empty["connections:figafStatus"]();
+  assert.deepEqual({ configured: r2.configured, requiredScopes: r2.requiredScopes }, { configured: false, requiredScopes: ["agent:read"] });
+});
+
+test("figafStatus: a failing token probe is 'not checked', not an error, and the entry stays configured", async () => {
+  const credstore = fakeCredstore({ [FIGAF_TOOL_CREDENTIAL]: FIGAF_ENTRY });
+  const fetchImpl = fakeFetch({ "/oauth/token": { status: 503, body: "" } });
+  const h = createConnectionsHandlers({ credstore, fetchImpl, requiredFigafScopes: async () => ["agent:read"] });
+  const r = await h["connections:figafStatus"]();
+  assert.equal(r.ok, true);
+  assert.equal(r.configured, true);
+  assert.equal(r.scopesChecked, false);
+  assert.match(r.scopesError, /HTTP 503/);
+  assert.equal("missingScopes" in r, false);
+});
+
+test("figafScopesCheck: not configured = nothing to check; configured = granted and missing against the given list; probe failure = ok:false", async () => {
+  const none = createConnectionsHandlers({ credstore: fakeCredstore(), fetchImpl: fakeFetch({}) });
+  assert.deepEqual(await none["connections:figafScopesCheck"]({ required: ["agent:read"] }), { ok: true, configured: false });
+  const credstore = fakeCredstore({ [FIGAF_TOOL_CREDENTIAL]: FIGAF_ENTRY });
+  const h = createConnectionsHandlers({ credstore, fetchImpl: fakeFetch({ "/oauth/token": TOKEN_WITH_SCOPES("agent:read") }) });
+  assert.deepEqual(await h["connections:figafScopesCheck"]({ required: ["agent:read", "download"] }), { ok: true, configured: true, granted: ["agent:read"], missing: ["download"] });
+  const down = createConnectionsHandlers({ credstore: fakeCredstore({ [FIGAF_TOOL_CREDENTIAL]: FIGAF_ENTRY }), fetchImpl: fakeFetch({ "/oauth/token": { status: 500, body: "" } }) });
+  const r = await down["connections:figafScopesCheck"]({ required: ["agent:read"] });
+  assert.equal(r.ok, false);
+  assert.equal(r.configured, true);
+  assert.match(r.error, /HTTP 500/);
+});
