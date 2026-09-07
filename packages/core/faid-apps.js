@@ -288,6 +288,13 @@ function createFaidHandlers(ctx) {
     let value = null;
     const g = await run(resolveCf(), ["app", name, "--guid"], { source: "cf", quiet: true, silent: true });
     const guid = g.code === 0 ? (g.stdout || "").trim().split(/\r?\n/).filter(Boolean).pop() : null;
+    // "not found" is the normal empty-space answer. Anything else (an expired
+    // login, a timeout) leaves the installed version UNKNOWN: the page then
+    // shows the latest release instead of the installed one. Say so in the
+    // drawer, once per memo window, instead of silently showing the wrong catalog.
+    if (g.code !== 0 && !/not found/i.test(`${g.stdout || ""}\n${g.stderr || ""}`)) {
+      log("cf", "warn", `cf app ${name} --guid failed (${cfTail(g)}) — the installed version is unknown for the next ${Math.round(INSTALLED_MEMO_MS / 1000)} s, so the page shows the latest release`);
+    }
     if (guid) {
       const e = await run(resolveCf(), ["curl", `/v3/apps/${guid}/environment_variables`], { source: "cf", quiet: true, silent: true });
       if (e.code === 0) { try { value = (JSON.parse(e.stdout).var || {})[VERSION_ENV] || null; } catch { value = null; } }
@@ -325,7 +332,17 @@ function createFaidHandlers(ctx) {
     if (pick.note) log("faid", "warn", pick.note);
     const rel = pick.version === idx.latest ? latestRel : await s.resolve(pick.version, { verbose: !!refresh });
     if (!rel.ok) return rel;
-    return { ...rel, installed, latest: idx.latest, versions: idx.versions, source: s.describe(), note: pick.note };
+    // latestCatalog: what a NEWER release would bring (apps that are not in
+    // the installed version yet); the page names them, Install refuses them
+    // with the reason (see requireApp).
+    return { ...rel, installed, latest: idx.latest, latestCatalog: latestRel.catalog, versions: idx.versions, source: s.describe(), note: pick.note };
+  }
+
+  /** The apps of the latest release that `catalog` (an older, installed version) does not have. */
+  function appsNewInLatest(rel) {
+    if (!rel || !rel.latestCatalog || rel.latest === rel.version) return [];
+    const have = new Set((rel.catalog.apps || []).map((a) => a.id));
+    return (rel.latestCatalog.apps || []).filter((a) => !have.has(a.id));
   }
   // Polling knobs (tests inject a no-op sleep and a short deadline).
   const sleep = ctx.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -476,7 +493,19 @@ function createFaidHandlers(ctx) {
     const rel = await currentRelease(opts);
     if (!rel.ok) return { error: rel.error };
     const app = rel.catalog.apps.find((a) => a.id === appId);
-    if (!app) return { error: `unknown app id '${appId}' in release ${rel.version}` };
+    if (!app) {
+      // One version per installation (decision 0010): an app that only a newer
+      // release has cannot be installed at the installed version. Say so, and
+      // say what to do - the generic "unknown app id" hid this on 2026-09-07.
+      if (appsNewInLatest(rel).some((a) => a.id === appId)) {
+        return {
+          error: `'${appId}' is new in release ${rel.latest}; this installation runs ${rel.version}, whose catalog does not have it. ` +
+            `Update the installation to ${rel.latest} first (Release panel), then Install. Nothing was deployed.`,
+          step: "version",
+        };
+      }
+      return { error: `unknown app id '${appId}' in release ${rel.version}` };
+    }
     return { rel, dir: rel.dir, app, catalog: rel.catalog };
   }
 
@@ -807,7 +836,7 @@ function createFaidHandlers(ctx) {
    */
   async function deployAll(appId, { version } = {}) {
     const req = await requireApp(appId, { version, purpose: "install" });
-    if (req.error) return { ok: false, error: req.error };
+    if (req.error) return { ok: false, error: req.error, ...(req.step ? { step: req.step } : {}) };
     log("faid", "dim", `release ${req.rel.version} from ${req.rel.source.label}`);
     const pre = await preflight(req.rel, [req.app]);
     if (pre) return pre;
@@ -1094,6 +1123,11 @@ function createFaidHandlers(ctx) {
           configForm: a.configForm || [],
           healthPath: a.healthPath || null,
           roleCollections: a.roleCollections || [],
+        })),
+        // Apps a newer release brings that this installation's version does
+        // not have: shown as rows without Install, with the Update hint.
+        pendingApps: appsNewInLatest(rel).map((a) => ({
+          id: a.id, name: a.name || a.id, description: a.description || "", version: rel.latest,
         })),
       };
     },

@@ -30,6 +30,7 @@
 
   var STEP_LABEL = {
     stack: "check the Cloud Foundry stacks of the landscape",
+    version: "check the release version of the installation",
     figafScopes: "check the authorities of the Figaf API client",
     roles: "refresh the XSUAA roles",
     extract: "unpack the release artifact",
@@ -103,6 +104,11 @@
       id: "no-route",
       re: /no route|could not resolve the route/i,
       hint: "The shared backend is not deployed or not started. Install it first (Install deploys the shared backend before the app).",
+    },
+    {
+      id: "new-in-later-release",
+      re: /is new in release/i,
+      hint: "This app is in a newer release than the one the installation runs (one version per installation). Release panel: Update installation to the newer version - it moves the shared backend and every installed app - then Install this app. Nothing was deployed.",
     },
     {
       id: "figaf-scopes",

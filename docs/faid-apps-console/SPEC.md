@@ -97,6 +97,17 @@ immutable.
   at X** (same call, `V = installed`). Both ask for a confirmation.
 - **Re-deploy** (`faid:update { appId }`): one app again, at the installed
   version (shared backend pushed first, as with Install).
+- **An app that only a newer release has** (2026-09-07: release 0.6.1 added
+  Functional Profiles Maintain while 0.6.0 was installed): the page lists it
+  as a dashed row "new in V" without an Install button (`faid:catalog`
+  `pendingApps`, from the latest catalog). Install of such an app is refused
+  with "'X' is new in release V; this installation runs W ... Update the
+  installation to V first", never with a bare "unknown app id". The way in
+  is Update installation to V, then Install.
+- If the probe of the installed version fails for a reason other than "App
+  not found" (an expired login, a timeout), the installed version is unknown
+  for 5 s and the page shows the latest release; the drawer says so
+  (`cf app <backend> --guid failed ...`).
 - Before an installation exists, `latest` is used for the service instances
   and the roles (Setup step 1).
 - `faid:releases` returns the source, installed, latest, `updateAvailable`, and

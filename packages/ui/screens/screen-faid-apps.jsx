@@ -873,6 +873,31 @@ function ScreenFaidApps({ ctx, setCtx, onBack, onConnections, onOpenSetup, onSta
           );
         })}
 
+        {catalog && catalog.pendingApps && catalog.pendingApps.map((app) => (
+          // An app that only a NEWER release has (one version per installation,
+          // decision 0010): no Install button; the way there is Update installation.
+          <div key={app.id} className="faid-app-row" data-app={app.id} data-pending="1"
+            style={{ border: "1px dashed var(--line)", borderRadius: 10, padding: 14, marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 700 }}>{app.name}</div>
+              <span className="pill blue">new in {app.version}</span>
+              <div className="spacer" style={{ flex: 1 }} />
+              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                installed: <span className="kbd">—</span>
+                {" · "}release: <span className="kbd">{app.version}</span>
+              </div>
+            </div>
+            {app.description && (
+              <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>{app.description}</div>
+            )}
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>
+              Not in release <span className="kbd">{catalog.releaseVersion}</span>, the one this installation runs.
+              Update the installation to <span className="kbd">{app.version}</span> first (Release panel above);
+              this row then gets its Install button.
+            </div>
+          </div>
+        ))}
+
         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
           <button className="btn" onClick={refresh} disabled={refreshing || !!busyApp}>
             {refreshing ? "Refreshing…" : "Refresh status"}

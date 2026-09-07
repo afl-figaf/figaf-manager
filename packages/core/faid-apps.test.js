@@ -1790,3 +1790,104 @@ test("faid:requiredFigafScopes: the release's figafScopes (v5); [] for an older 
   assert.equal(r3.ok, true, JSON.stringify(r3));
   assert.deepEqual(r3.scopes, []);
 });
+
+// ─── one version per installation: an app that only a NEWER release has ──────
+// 2026-09-07: release 0.6.1 added a second app while 0.6.0 was installed. The
+// page (reading the latest catalog after a failed version probe) offered
+// Install, and Install answered "unknown app id ... in release 0.6.0". Now the
+// page lists such an app as pending, and Install says what to do.
+
+function remoteTwoVersionCtx() {
+  const oneApp = JSON.parse(JSON.stringify(CATALOG));
+  oneApp.releaseVersion = "0.6.0";
+  oneApp.apps[0].version = "0.6.0";
+  const twoApps = JSON.parse(JSON.stringify(oneApp));
+  twoApps.releaseVersion = "0.6.1";
+  twoApps.apps[0].version = "0.6.1";
+  twoApps.apps.push({
+    id: "fp", name: "Functional Profiles Maintain", version: "0.6.1", description: "second app",
+    cfApps: [{ name: "fp-frontend", artifact: "fp.zip", buildpack: "nodejs_buildpack", memory: "128M", services: ["xsuaa"] }],
+    healthPath: "/health/connections",
+  });
+  const base = "https://store.example/faid";
+  const bucket = {
+    [`${base}/index.json`]: JSON.stringify({ latest: "0.6.1", versions: [
+      { version: "0.6.1", publishedAt: "2026-09-07T20:21:00Z", catalog: "faid/0.6.1/catalog.json" },
+      { version: "0.6.0", publishedAt: "2026-09-07T16:56:00Z", catalog: "faid/0.6.0/catalog.json" },
+    ] }),
+    [`${base}/0.6.0/catalog.json`]: JSON.stringify(oneApp),
+    [`${base}/0.6.1/catalog.json`]: JSON.stringify(twoApps),
+  };
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "faid-remote-cache-"));
+  const { ctx, calls, logLines } = makeCtx(null, (args) => {
+    if (args[0] === "app" && args[2] === "--guid") return { code: 0, stdout: "g-backend\n" };
+    if (args[0] === "curl" && /\/v3\/apps\/g-backend\/environment_variables$/.test(args[1])) {
+      return { code: 0, stdout: JSON.stringify({ var: { [VERSION_ENV]: "0.6.0" } }) };
+    }
+    return { code: 0, stdout: "" };
+  });
+  ctx.host.resolveFaidReleaseSource = () => ({ kind: "remote", url: base, cacheDir });
+  ctx.httpsJson = async (url) => { if (!bucket[url]) throw new Error(`HTTP 404 ${url}`); return JSON.parse(bucket[url]); };
+  ctx.httpsDownload = async (url, dest) => { if (!bucket[url]) throw new Error(`HTTP 404 ${url}`); fs.writeFileSync(dest, bucket[url]); return dest; };
+  return { ctx, calls, logLines };
+}
+
+test("faid:catalog: with 0.6.0 installed and 0.6.1 latest, the rows are 0.6.0's apps and the new app of 0.6.1 is listed as pending", async () => {
+  const { ctx } = remoteTwoVersionCtx();
+  const c = await createFaidHandlers(ctx)["faid:catalog"]({});
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(c.releaseVersion, "0.6.0");
+  assert.equal(c.installed, "0.6.0");
+  assert.equal(c.latest, "0.6.1");
+  assert.deepEqual(c.apps.map((a) => a.id), ["arch"]);
+  assert.deepEqual(c.pendingApps, [{ id: "fp", name: "Functional Profiles Maintain", description: "second app", version: "0.6.1" }]);
+});
+
+test("faid:install of an app that only the newer release has is refused with the Update hint, before any cf change; a really unknown id keeps the plain error", async () => {
+  const { ctx, calls } = remoteTwoVersionCtx();
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:install"]({ appId: "fp" });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /'fp' is new in release 0\.6\.1; this installation runs 0\.6\.0/);
+  assert.match(r.error, /Update the installation to 0\.6\.1 first \(Release panel\), then Install/);
+  assert.equal(r.step, "version");
+  assert.ok(!calls.some((c) => ["push", "create-service", "bind-service", "set-env", "start", "stop", "update-service"].includes(c.args[0])), "nothing was changed in the space");
+  const unknown = await handlers["faid:install"]({ appId: "nope" });
+  assert.equal(unknown.ok, false);
+  assert.match(unknown.error, /unknown app id 'nope' in release 0\.6\.0/);
+});
+
+test("faid:catalog: nothing pending when the installation is at the latest release", async () => {
+  const { ctx } = remoteTwoVersionCtx();
+  ctx.run = async (cmd, args) => {
+    if (args[0] === "app" && args[2] === "--guid") return { code: 0, stdout: "g-backend\n" };
+    if (args[0] === "curl" && /environment_variables$/.test(args[1])) return { code: 0, stdout: JSON.stringify({ var: { [VERSION_ENV]: "0.6.1" } }) };
+    return { code: 0, stdout: "" };
+  };
+  const c = await createFaidHandlers(ctx)["faid:catalog"]({});
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(c.releaseVersion, "0.6.1");
+  assert.deepEqual(c.apps.map((a) => a.id), ["arch", "fp"]);
+  assert.deepEqual(c.pendingApps, []);
+});
+
+test("installed-version probe: a cf failure other than 'not found' is said in the drawer; 'not found' stays silent", async () => {
+  const { ctx, logLines } = remoteTwoVersionCtx();
+  ctx.run = async (cmd, args) => {
+    if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "", stderr: "The token expired, was revoked, or the token ID is incorrect. Please log back in to re-authenticate." };
+    return { code: 0, stdout: "" };
+  };
+  const c = await createFaidHandlers(ctx)["faid:catalog"]({});
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(c.installed, null);
+  assert.equal(c.releaseVersion, "0.6.1", "unknown installed version: the page falls back to the latest release");
+  assert.ok(logLines.some((l) => /cf app arch-backend --guid failed .*installed version is unknown/.test(l)), logLines.join("\n"));
+
+  const quiet = remoteTwoVersionCtx();
+  quiet.ctx.run = async (cmd, args) => {
+    if (args[0] === "app" && args[2] === "--guid") return { code: 1, stdout: "App 'arch-backend' not found\nFAILED\n" };
+    return { code: 0, stdout: "" };
+  };
+  await createFaidHandlers(quiet.ctx)["faid:catalog"]({});
+  assert.ok(!quiet.logLines.some((l) => /installed version is unknown/.test(l)), "an empty space is not a warning");
+});
