@@ -31,6 +31,7 @@ logs/
 
 # Playwright e2e harness state and reports
 e2e/.auth/
+e2e/.tmp/
 test-results/
 test-results-mutating/
 playwright-report/

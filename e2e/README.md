@@ -35,7 +35,9 @@ Servers started by global-setup (choose with `E2E_SERVERS=main,failure,remote`):
   here: a real failure, zero side effects.
 - `remote` on :8089 — a REMOTE release source: `FIGAF_FAID_RELEASE_URL` points
   at a static file server on :8090 that serves `e2e/fixtures/store` (the
-  bucket layout, versions 0.0.1 with one app and 0.0.2 with two; regenerate with
+  bucket layout, versions 0.0.1 with one app and 0.0.2 with two; the server
+  gets its own temp directory `e2e/.tmp/remote`, emptied at every boot, so a
+  release cache from an earlier run never outlives a regenerated fixture; regenerate with
   `node e2e/tools/make-fixture-store.js`). Project `release-store` runs here:
   the same code path as Cloudflare R2, no internet, no cf change.
 

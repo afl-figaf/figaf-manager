@@ -41,9 +41,8 @@ Last edited 2026-09-07.
 7. **Two-app releases** (figaf-faid decision 0016, 2026-09-07): the fixture
    store now has two apps in 0.0.2 (one in 0.0.1) and `release-store.spec.js`
    proves both rows, both Install buttons, the union `figafScopes`, and that a
-   refused install of the second app leaves the first row alone (read-only;
-   written 2026-09-07, not yet run green: the dev machine's cf login had
-   expired). Still owed, in the dev space through the install smoke: install
+   refused install of the second app leaves the first row alone (read-only,
+   green on 2026-09-07). Still owed, in the dev space through the install smoke: install
    of app B leaves app A running, remove of A leaves B and the backend, Update
    installation moves both. Also owed: a `failure-visibility` spec for the
    preflight refusal `figafScopes`; it is unreachable with the missing-service

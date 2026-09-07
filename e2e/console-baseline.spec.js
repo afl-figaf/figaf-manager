@@ -33,7 +33,7 @@ test("signed-in reload lands on the Setup page (#/setup) while the space is not 
   await expect(page.locator(".rail-foot")).toContainText("/");
 });
 
-test("setup page: five steps in the install order, step 1 current, the rest 'after step 1'; the progress pill and the rail agree", async ({ page }) => {
+test("setup page: five steps in the install order, step 1 current, the rest done or 'after step 1'; the progress pill and the rail agree", async ({ page }) => {
   await page.goto("/#/setup");
   const list = page.locator('[data-setup-page=""]');
   await expect(list).toContainText("Installation progress");
@@ -47,10 +47,17 @@ test("setup page: five steps in the install order, step 1 current, the rest 'aft
   await expect(steps.nth(4)).toContainText("5. Figaf tool connection");
   await expect(list.locator(".setup-step.is-current")).toHaveCount(1);
   await expect(list.locator('.setup-step[data-step="prepare"]')).toHaveClass(/is-current/);
+  // The local server runs in token mode, so step 1 is never done here and every
+  // later step is blocked "after step 1" - unless the dev space already holds the
+  // thing the step checks (a running shared backend, a stored user): a done step
+  // is done whatever the mode, and shows neither the block nor a body.
   for (const id of ["mgmt-user", "services", "platform", "figaf-connection"]) {
-    await expect(list.locator(`.setup-step[data-step="${id}"]`)).toContainText("after step 1");
-    // Blocked steps show no body: no buttons, no forms.
-    await expect(list.locator(`.setup-step[data-step="${id}"] .setup-step-body`)).toHaveCount(0);
+    const step = list.locator(`.setup-step[data-step="${id}"]`);
+    const done = /\bis-done\b/.test((await step.getAttribute("class")) || "");
+    if (done) await expect(step).toContainText("done");
+    else await expect(step).toContainText("after step 1");
+    // Blocked and done steps show no body: no buttons, no forms.
+    await expect(step.locator(".setup-step-body")).toHaveCount(0);
   }
   // Every open step explains itself (why-line); step 1 names the passcode and the restart.
   const openSteps = list.locator(".setup-step:not(.is-done)");
@@ -73,8 +80,14 @@ test("setup step 1 (signed in): asks for the plans and the role assignment BEFOR
   // a missing one with a single plan (xsuaa) shows the plan only.
   const plans = body.locator('[data-panel="service-plans"]');
   await expect(plans).toContainText("Service plans");
-  const rows = plans.locator(".setup-plan-row");
-  await expect(rows).toHaveCount(3);
+  // Three required instances, one row each; the optional PI/PO pair (catalog v4,
+  // decision 0011) is ONE group row with a checkbox that is off by default.
+  await expect(plans.locator(".setup-plan-row[data-service]")).toHaveCount(3);
+  const pipo = plans.locator('.setup-plan-row[data-service-group="pipo"]');
+  await expect(pipo).toHaveCount(1);
+  await expect(pipo.locator('input[type="checkbox"]')).not.toBeChecked();
+  await expect(pipo).toContainText("figaf-connectivity");
+  await expect(pipo).toContainText("figaf-destination");
   for (const name of ["figaf-faid-db", "figaf-faid-xsuaa", "figaf-faid-credstore"]) {
     const row = plans.locator(`.setup-plan-row[data-service="${name}"]`);
     await expect(row).toContainText(name);

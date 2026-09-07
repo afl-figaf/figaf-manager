@@ -33,6 +33,13 @@ const path = require("path");
 
 const STORE_PORT = 8090;
 const STORE_DIR = path.join(__dirname, "fixtures", "store");
+// The remote server caches downloaded releases under os.tmpdir()/figaf-faid-releases
+// and trusts a cached release.json forever (versions are immutable in a real
+// store). The fixture store is NOT immutable - it is regenerated whenever
+// make-fixture-store.js changes - so a stale cache from an earlier run makes
+// every release "corrupt or changed". The remote server therefore gets its own
+// temp directory, emptied at every boot (git-ignored).
+const REMOTE_TMP = path.join(__dirname, ".tmp", "remote");
 
 const SERVERS = {
   main: {
@@ -50,7 +57,8 @@ const SERVERS = {
     state: "state-remote.json",
     // An empty FIGAF_FAID_ARTIFACTS_DIR counts as unset (host.cloud.js), so the
     // developer's own environment cannot turn this server into a local source.
-    env: { FIGAF_FAID_ARTIFACTS_DIR: "", FIGAF_FAID_RELEASE_URL: `http://127.0.0.1:${STORE_PORT}/faid` },
+    env: { FIGAF_FAID_ARTIFACTS_DIR: "", FIGAF_FAID_RELEASE_URL: `http://127.0.0.1:${STORE_PORT}/faid`, TEMP: REMOTE_TMP, TMP: REMOTE_TMP, TMPDIR: REMOTE_TMP },
+    freshTmp: REMOTE_TMP,
   },
 };
 
@@ -79,6 +87,10 @@ async function bootServer(name, def) {
   const tag = `[e2e:${name}]`;
   const appDir = path.join(__dirname, "..", "apps", "figaf-manager");
   const base = `http://127.0.0.1:${def.port}`;
+  if (def.freshTmp) {
+    fs.rmSync(def.freshTmp, { recursive: true, force: true });
+    fs.mkdirSync(def.freshTmp, { recursive: true });
+  }
   const child = spawn(process.execPath, ["cloud/server.js"], {
     cwd: appDir,
     env: { ...process.env, ...def.env, PORT: String(def.port) },
