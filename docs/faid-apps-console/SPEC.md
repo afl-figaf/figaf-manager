@@ -473,7 +473,7 @@ Figaf card + one row per agent with Connect / Replace key or Change
 destination / Disconnect, and — only when a `PRO` agent is listed and the
 `pipo` instances are not ready — a hint pointing at Setup > Base services.
 
-App side (playground backend `srv/lib/platform-connections.js`): reads the
+App side (shared backend, figaf-faid `connector/srv/lib/platform-connections.js`): reads the
 entries with a 60 s cache; credential source is an explicit SELECTOR in the
 wizard ("App Manager connection" default when stored, "Enter key manually"
 as a deliberate override); the backend enforces the source and never mixes

@@ -30,7 +30,7 @@
 // renderer, logged, or echoed in an error message.
 //
 // KEEP IN SYNC: the reader side lives in the figaf-faid repo,
-// spikes/archiving-setup-playground/backend/srv/lib/platform-connections.js —
+// connector/srv/lib/platform-connections.js (figaf-faid repo) —
 // namespace, credential names, and the JSON value shape must match.
 
 const credstoreClientDefault = require("./credstore-client");
