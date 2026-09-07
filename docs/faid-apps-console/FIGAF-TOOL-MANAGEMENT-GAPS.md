@@ -49,7 +49,7 @@ person leaves the flow and comes back.
 Why it matters: the console is what customers will see; the wizard frame is
 going away.
 Decision: run Deploy and Update once in the dev space through the console and
-record it like the virgin runs (figaf-platform `docs/d1/RUNBOOK-VIRGIN.md`);
+record it like the virgin runs (figaf-faid `docs/d1/RUNBOOK-VIRGIN.md`);
 then decide whether the Figaf-tool pages are **in** release 1 or **hidden**
 behind a flag until they pass.
 
@@ -79,7 +79,7 @@ in the Figaf-tool spaces (`OPEN-ITEMS.md` item 5); the BTP login does not
 survive a restart, so `btp assign` steps fail after one.
 Decision: is the technical user also allowed to deploy and update the Figaf
 tool? If yes: its roles per space become part of the customer prerequisites
-(figaf-platform `docs/d1/MANUAL-RUNBOOK.md`, top section). If no: the console
+(figaf-faid `docs/d1/MANUAL-RUNBOOK.md`, top section). If no: the console
 must ask for a passcode before these flows and say why.
 
 ### 2.4 Templates are unversioned and fetched from GitHub at run time
@@ -93,7 +93,7 @@ Why it matters: "one build, one version, one delivery" (governance decision
 restricted egress cannot reach GitHub; `FIGAF_DEPLOYMENT_ZIP_URL` and
 `FIGAF_DISABLE_SELF_UPDATE` are the only knobs today.
 Decision: ship the templates versioned inside the manager release (the same
-shape as the platform release catalog), or version them in the source repository
+shape as the FAID release catalog), or version them in the source repository
 by tag and pin the tag in the manager. Either way the Docker Hub and GitHub
 calls need a documented offline story.
 
@@ -110,7 +110,7 @@ Fact: existing Figaf Manager installations are bound to `figaf-manager-xsuaa`
 (legacy mode, decision 0009). New installations use `figaf-faid-xsuaa`. The
 approuter accepts both scopes; no migration exists.
 Decision: when and how legacy installations move (rebind, restage, reassign
-the collection), and whether Alex or the Figaf Platform stream owns it.
+the collection), and whether Alex or the FAID stream owns it.
 
 ### 2.7 Manual
 
@@ -120,7 +120,7 @@ Decision: one manual for the console (Figaf tool and FAID Apps), or two.
 
 ## 3. Gaps on the Figaf tool side (L2 API)
 
-Recorded in figaf-platform `docs/SOLUTION.md` 5.1: there is no published
+Recorded in figaf-faid `docs/SOLUTION.md` 5.1: there is no published
 `/api/v1` endpoint to create or list API clients, and none that reports a
 client's scopes. Until they exist, connecting the manager to a Figaf tool
 means typing a client id and secret created by hand in the Figaf tool's admin

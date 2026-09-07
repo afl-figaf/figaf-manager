@@ -1,6 +1,6 @@
 "use strict";
-// The release store (figaf-platform decision 0010), end to end on the REMOTE
-// code path: the manager on :8089 has FIGAF_PLATFORM_RELEASE_URL pointing at a
+// The release store (figaf-faid decision 0010), end to end on the REMOTE
+// code path: the manager on :8089 has FIGAF_FAID_RELEASE_URL pointing at a
 // static server (:8090) that serves e2e/fixtures/store in the bucket layout,
 // two versions (0.0.1, 0.0.2). No internet, and no cf change: the fixture's
 // required service instance does not exist, so any Install is refused early.
@@ -16,7 +16,7 @@
 const { test, expect } = require("@playwright/test");
 
 const APP_ID = "b2b-archiving-setup-e2e-store";
-const STORE = "http://127.0.0.1:8090/platform";
+const STORE = "http://127.0.0.1:8090/faid";
 
 async function rpc(page, channel, body) {
   return page.evaluate(async ({ channel, body }) => {

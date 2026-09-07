@@ -1,12 +1,12 @@
 "use strict";
-// One XSUAA instance for the Figaf Manager and the FAID Apps (figaf-platform
+// One XSUAA instance for the Figaf Manager and the FAID Apps (figaf-faid
 // decision 0009). The manager's roles live in the same instance as the apps'
 // roles: xsappname `figaf-faid`, instance `figaf-faid-xsuaa` (frozen names,
 // decision 0008).
 //
 // Two parts, two owners:
 //   - manager part: ./manager-xsuaa-part.json (ships with the manager)
-//   - release part: xs-security.json in the platform release (ships with the apps)
+//   - release part: xs-security.json in the FAID release (ships with the apps)
 // composeXsSecurity() builds the full document whenever the manager creates or
 // updates the instance (Setup step 1 "Prepare the space", Setup step 3, before every
 // install/update). Union by name, the release entry wins on a name clash,

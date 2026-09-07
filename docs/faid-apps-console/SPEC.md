@@ -4,21 +4,21 @@ Status: current state of the FAID Apps console in `figaf/FigafManager`, branch
 `poc/faid-apps-manager` (pushed 2026-09-03, not merged into master). This file
 describes how the manager behaves TODAY, by topic. It is edited in place when
 behavior changes; superseded text is removed, not kept. Reasons for the design
-are in the figaf-platform repo (`decisions/`); the human install procedure is
-figaf-platform `docs/d1/MANUAL-RUNBOOK.md`; run records are figaf-platform
+are in the figaf-faid repo (`decisions/`); the human install procedure is
+figaf-faid `docs/d1/MANUAL-RUNBOOK.md`; run records are figaf-faid
 `docs/d1/RUNBOOK-VIRGIN.md`; what to do when an action fails is
 `TROUBLESHOOTING.md` and what is still open is `OPEN-ITEMS.md` (this folder).
 Last edited 2026-09-04 (the release store and one version per installation,
-figaf-platform decision 0010; the CF sign-in targets the manager's own space by
+figaf-faid decision 0010; the CF sign-in targets the manager's own space by
 itself, section 5.3).
 
-Delivery unit: the versioned platform release installed by the manager, not
-an MTAR (figaf-platform `decisions/0007-delivery-unit-platform-release.md`,
+Delivery unit: the versioned FAID release installed by the manager, not
+an MTAR (figaf-faid `decisions/0007-delivery-unit-platform-release.md`,
 accepted 2026-09-06; the governance text follows).
 
 ## 1. Purpose
 
-A BTP-hosted manager app lists the releases of the Figaf Platform in the Figaf
+A BTP-hosted manager app lists the FAID releases in the Figaf
 release store, installs, updates, disables, enables, removes and checks the FAID Apps
 in its own Cloud Foundry space from a browser, with every CLI
 command and every download visible, and without stored personal credentials.
@@ -29,10 +29,10 @@ persistent sign-in, and holds the system connections the apps use.
 
 A RELEASE is a versioned set: `catalog.json`, `release.json` (checksums and
 the source commit), `xs-security.json` and one zip per CF app. Releases live
-in the RELEASE STORE (figaf-platform decision 0010): the Cloudflare R2 bucket
-behind a public URL, written only by figaf-platform `release/publish.js`. The
-word "channel" is retired. figaf-platform `release/build.js` builds
-a release; the developer procedure is figaf-platform `release/README.md`.
+in the RELEASE STORE (figaf-faid decision 0010): the Cloudflare R2 bucket
+behind a public URL, written only by figaf-faid `release/publish.js`. The
+word "channel" is retired. figaf-faid `release/build.js` builds
+a release; the developer procedure is figaf-faid `release/README.md`.
 
 ### 2.1 The release source
 
@@ -40,14 +40,14 @@ Exactly one source per manager process, named on the FAID Apps page:
 
 | Setting | Kind | Used for |
 |---|---|---|
-| `FIGAF_PLATFORM_RELEASE_URL` (manifest.yml, e.g. `https://pub-<id>.r2.dev/platform`) | remote | every shipped manager; a custom domain or a mirror is a change of this value |
-| `FIGAF_PLATFORM_ARTIFACTS_DIR` (a directory with ONE release in the flat build shape) | local | development, the e2e fixtures, the install smoke; wins over the URL when set |
-| `platform-artifacts/` next to `host.cloud.js`, nothing set | local | a developer's `npm start` after a local build |
+| `FIGAF_FAID_RELEASE_URL` (manifest.yml, e.g. `https://pub-<id>.r2.dev/faid`) | remote | every shipped manager; a custom domain or a mirror is a change of this value |
+| `FIGAF_FAID_ARTIFACTS_DIR` (a directory with ONE release in the flat build shape) | local | development, the e2e fixtures, the install smoke; wins over the URL when set |
+| `faid-artifacts/` next to `host.cloud.js`, nothing set | local | a developer's `npm start` after a local build |
 
 The manager zip bundles NO release any more (`build-zip.js` refuses to build
 without the URL in `manifest.yml`). No fallback from one source to another.
 
-Store layout (the contract with figaf-platform): `<url>/index.json` =
+Store layout (the contract with figaf-faid): `<url>/index.json` =
 `{ latest, versions: [{ version, publishedAt }] }`; `<url>/<version>/` holds
 `catalog.json`, `release.json`, `xs-security.json`, the zips. Versions are
 immutable.
@@ -57,7 +57,7 @@ immutable.
 - `index.json` is read on every page load (remembered 30 s; **Refresh
   releases** reads it now). It is the only object that changes.
 - A version's small files (`catalog.json`, the `configFile`s) are downloaded
-  once into `<tmp>/figaf-platform-releases/<version>/` and checked against the
+  once into `<tmp>/figaf-faid-releases/<version>/` and checked against the
   sha256 in `release.json` every time they are used. Zips are downloaded when
   an install or update needs them and checked against the sha256 in the
   catalog before extraction. A mismatch deletes the file and fails the
@@ -484,7 +484,7 @@ is `platformConn.pipoConnection(agentId)`, and `/health/connections` reports a
 `pipo` section: one destination lookup per stored entry, neutral when the
 installation has none. API client scopes stay
 installation-level: the catalog will declare per app the Figaf scopes it
-needs; never per-app credentials (design note in figaf-platform `docs/SOLUTION.md` 2.5).
+needs; never per-app credentials (design note in figaf-faid `docs/SOLUTION.md` 2.5).
 
 ## 8. Console frame (hosted only)
 
@@ -550,7 +550,7 @@ a row in `TROUBLESHOOTING.md`. Known: one pre-existing cloud test
 - Release store hardening: a signature on `release.json` checked with a
   public key inside the manager; a download token header if the bucket
   stops being public; a custom domain instead of `r2.dev` (a change of
-  `FIGAF_PLATFORM_RELEASE_URL`). The manager's own release publishing.
+  `FIGAF_FAID_RELEASE_URL`). The manager's own release publishing.
 - Apps installed in the space but absent from the target catalog are not
   reported by Update installation (the new catalog does not know them).
 - Migration of legacy installations from `figaf-manager-xsuaa` to the shared

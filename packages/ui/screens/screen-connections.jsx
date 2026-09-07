@@ -1,7 +1,7 @@
 /* global React, Ico */
 
 // ═══════════════════════════════════════════════════════════
-// System connections (decision 0006, figaf-platform repo)
+// System connections (decision 0006, figaf-faid repo)
 // Level 1: the ONE Figaf tool of this installation.
 // Level 2: SAP Integration Suite systems — the list comes live
 // from the Figaf tool (/api/v1/agent/search); per system the

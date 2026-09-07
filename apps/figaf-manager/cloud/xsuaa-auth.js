@@ -25,7 +25,7 @@
 // isXsuaaActive() so the tests can drive both branches deterministically.
 
 const crypto = require("crypto");
-// One XSUAA instance for the manager and the apps (figaf-platform decision 0009):
+// One XSUAA instance for the manager and the apps (figaf-faid decision 0009):
 // the shared instance (xsappname figaf-faid, scope FAIDManagerOperator)
 // is the rule for new installations; the legacy instance (xsappname
 // figaf-manager-xsuaa, scope FigafManagerOperator) keeps working for Alex's

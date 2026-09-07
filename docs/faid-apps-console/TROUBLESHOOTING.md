@@ -7,7 +7,7 @@ and the person saw "no logs, nothing". This file says where the evidence is,
 who does what, and how a failure becomes a fix and a test.
 
 Companion pieces: `e2e/tools/manager-log-failures.ps1` (reads the manager
-log for you), figaf-platform `docs/d1/MANUAL-RUNBOOK.md` (the install procedure),
+log for you), figaf-faid `docs/d1/MANUAL-RUNBOOK.md` (the install procedure),
 `SPEC.md` "Failed actions explain themselves" (the contract the console
 follows), FigafManager `e2e/README.md` (the test tiers).
 
@@ -96,7 +96,7 @@ known and the installing person agrees.
    `packages/ui/action-outcome.js` (with a unit test) and to the table below.
 5. Hand the new build to the installing person with the exact step to
    repeat. Record the case: `SPEC.md` (the new behavior), `OPEN-ITEMS.md` only if something stays open, and the run
-   record in figaf-platform `docs/d1/RUNBOOK-VIRGIN.md` if it happened during a run.
+   record in figaf-faid `docs/d1/RUNBOOK-VIRGIN.md` if it happened during a run.
 
 ## Known failures
 
@@ -110,9 +110,9 @@ known and the installing person agrees.
 | `cf start figaf-faid-backend failed …` and `cf logs figaf-faid-backend --recent` shows `schema migrations FAILED: relation "b2b_archiving_configs" already exists` | The database still holds the table that release 0.4.1 created at runtime. From release 0.4.4 migration 0001 creates it and refuses to run over the old one (figaf-faid decision 0013, item 6: fail closed; nobody but Figaf has a 0.4.1 database). | Delete the database instance and let Setup step 3 create it again (`cf unbind-service figaf-faid-backend figaf-faid-db`, `cf delete-service figaf-faid-db -f`, ~8 + ~7 minutes), or a full wipe. Then Install again. |
 | `... memory limit ...` / `insufficient resources` | The space's memory quota is full. | Remove unused apps or raise the quota (BTP cockpit -> space -> quota). |
 | `checksum mismatch for <file>: release.json says … the download is …` / `checksum mismatch for <artifact> — the release is corrupt` | A file in the release store does not match the checksum published with it (damaged upload, or changed after publishing). The manager deleted the download; nothing was deployed. | Press **Refresh releases** and try again. If it repeats, Figaf publishes the release again as a NEW version (`release/publish.js` refuses to overwrite). With a local release directory: build the release again. |
-| `cannot read <url>/index.json: …` (panel: "The release store cannot be read") | The space cannot reach the release store URL (`FIGAF_PLATFORM_RELEASE_URL` in the manager's `manifest.yml`), or the store has no `index.json` under that prefix. | Open the URL in a browser; check egress from the space; compare the URL with the one figaf-platform `release/README.md` names. Nothing was changed. |
-| `download of <file> failed: HTTP 404` | The version's catalog names a file the store does not hold (an unfinished publish, or a store that was edited by hand). | `node release/publish.js --verify <version>` in figaf-platform shows which file is missing; publish the release again as a new version. |
-| `No release source configured: set FIGAF_PLATFORM_RELEASE_URL …` | The manager runs without `FIGAF_PLATFORM_RELEASE_URL` (a `manifest.yml` older than 2026-09-04) and without a local release directory. | Deploy the current manager build; its `manifest.yml` carries the store URL. |
+| `cannot read <url>/index.json: …` (panel: "The release store cannot be read") | The space cannot reach the release store URL (`FIGAF_FAID_RELEASE_URL` in the manager's `manifest.yml`), or the store has no `index.json` under that prefix. | Open the URL in a browser; check egress from the space; compare the URL with the one figaf-faid `release/README.md` names. Nothing was changed. |
+| `download of <file> failed: HTTP 404` | The version's catalog names a file the store does not hold (an unfinished publish, or a store that was edited by hand). | `node release/publish.js --verify <version>` in figaf-faid shows which file is missing; publish the release again as a new version. |
+| `No release source configured: set FIGAF_FAID_RELEASE_URL …` | The manager runs without `FIGAF_FAID_RELEASE_URL` (a `manifest.yml` older than 2026-09-04) and without a local release directory. | Deploy the current manager build; its `manifest.yml` carries the store URL. |
 | `version X is not in the release store (available: …)` / `… lower than the installed … rollback is not supported` / `Install uses the installed version …` / `nothing is installed yet — install an app first` | The version rule of decision 0010: one version per installation. Install adds an app at the installed version (latest on an empty space); Update installation moves everything upwards. | Press **Refresh releases**; choose a version the Release panel offers. |
 | `<action> of <app> is already running (started <time> ago)` | A second action was started while one was running (a page reload, a second tab, or a second sign-in). The manager runs one lifecycle action at a time. | Wait until the running action ends - the app row shows `Installing…` and the parts show `staging`. Nothing was changed by the refused call. |
 | The row says `Installing…` and every button is off, but you started nothing | Cloud Foundry is staging a build of this app (a fresh install keeps the CF app STOPPED until staging and start are through), or another page started the action. | Wait. The page refreshes itself every 10 s while an action runs. `cf logs <app> --recent` shows the staging output. |

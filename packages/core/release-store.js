@@ -1,13 +1,13 @@
 "use strict";
-// release-store.js — where the Figaf Platform releases come from
-// (figaf-platform decision 0010).
+// release-store.js — where the FAID releases come from
+// (figaf-faid decision 0010).
 //
 // A RELEASE is a versioned set: catalog.json, release.json (checksums and the
 // source commit), xs-security.json and one zip per CF app. Releases live in a
 // STORE. Two kinds, one code path:
 //
 //   remote  the artifact store (Cloudflare R2 behind a public URL). Layout,
-//           the contract with the figaf-platform repo (release/publish.js):
+//           the contract with the figaf-faid repo (release/publish.js):
 //             <url>/index.json              { latest, versions: [{ version, publishedAt }] }
 //             <url>/<version>/catalog.json   the release catalog
 //             <url>/<version>/release.json   { files: [{ name, size, sha256 }], source, ... }
@@ -193,7 +193,7 @@ function createReleaseStore({ source, fetchJson, download, log, now }) {
   const say = (type, text) => { if (log) log("faid", type, text); };
   const remote = source.kind === "remote";
   const baseUrl = remote ? String(source.url).replace(/\/+$/, "") : null;
-  const cacheDir = remote ? (source.cacheDir || path.join(os.tmpdir(), "figaf-platform-releases")) : null;
+  const cacheDir = remote ? (source.cacheDir || path.join(os.tmpdir(), "figaf-faid-releases")) : null;
   let indexMemo = null; // { at, value }
 
   // GET a small JSON object; one visible line.

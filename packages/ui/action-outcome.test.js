@@ -16,7 +16,7 @@ function load() {
   return w.figafActionOutcome;
 }
 
-const BASE = { managerVersion: "26.5.0", releaseVersion: "0.4.0", org: "Figaf ApS_figafpartner-1", space: "figaf-platform", at: "2026-09-03T10:49:33.000Z" };
+const BASE = { managerVersion: "26.5.0", releaseVersion: "0.4.0", org: "Figaf ApS_figafpartner-1", space: "figaf-faid", at: "2026-09-03T10:49:33.000Z" };
 
 test("the live 2026-09-03 failure: action, where, cf's words, the manifest hint, and a complete report", () => {
   const o = load()({
@@ -45,7 +45,7 @@ test("the live 2026-09-03 failure: action, where, cf's words, the manifest hint,
     "Figaf App Manager - action report",
     "time: 2026-09-03T10:49:33.000Z",
     "manager: 26.5.0  release: 0.4.0",
-    "target: Figaf ApS_figafpartner-1 / figaf-platform",
+    "target: Figaf ApS_figafpartner-1 / figaf-faid",
     "action: Install of B2B Archiving Setup",
     "where: step: upload the app to Cloud Foundry (cf push) - CF app: figaf-faid-backend",
     "error: cf push figaf-faid-backend failed: For application",
@@ -81,9 +81,9 @@ test("hints: session lost, quota, bind, start, checksum, no route; unknown text 
   assert.equal(hintFor("cf start x failed — see the staging log in the terminal: Start unsuccessful"), "start");
   assert.equal(hintFor("checksum mismatch for backend.zip — the release is corrupt"), "checksum");
   // The release store (decision 0010): unreachable store, failed download, version rules.
-  assert.equal(hintFor("cannot read https://store.example/platform/index.json: getaddrinfo ENOTFOUND store.example"), "store-unreachable");
+  assert.equal(hintFor("cannot read https://store.example/faid/index.json: getaddrinfo ENOTFOUND store.example"), "store-unreachable");
   assert.equal(hintFor("download of backend.zip failed: HTTP 404"), "store-unreachable");
-  assert.equal(hintFor("No release source configured: set FIGAF_PLATFORM_RELEASE_URL (the release store) or FIGAF_PLATFORM_ARTIFACTS_DIR (a local release directory)"), "store-unreachable");
+  assert.equal(hintFor("No release source configured: set FIGAF_FAID_RELEASE_URL (the release store) or FIGAF_FAID_ARTIFACTS_DIR (a local release directory)"), "store-unreachable");
   assert.equal(hintFor("version 0.4.0 is lower than the installed 0.4.1 — rollback is not supported (forward-only migrations); choose 0.4.1 or higher"), "version-rule");
   assert.equal(hintFor("version 9.9.9 is not in the release store (available: 0.4.1)"), "version-rule");
   assert.equal(hintFor("nothing is installed yet — install an app first; Install uses the latest release"), "version-rule");

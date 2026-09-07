@@ -2,7 +2,7 @@
 // Minimal READ-ONLY client for SAP Credential Store — used by the manager to
 // fetch the technical CF management user ("option B": no passcode).
 //
-// Facts (proven live in the figaf-platform playground, 2026-08-31):
+// Facts (proven live in the figaf-faid playground, 2026-08-31):
 //   - Binding (VCAP_SERVICES.credstore[0].credentials): url, username, password,
 //     encryption.client_private_key (PKCS8), encryption.server_public_key (SPKI),
 //     both base64-DER (PEM tolerated).

@@ -3,9 +3,9 @@
 // remove / configure / health for FAID Apps.
 //
 // Architecture:
-//   - Releases come from a RELEASE STORE (release-store.js; figaf-platform
-//     decision 0010): the artifact store behind FIGAF_PLATFORM_RELEASE_URL, or a
-//     local directory for development. host.resolvePlatformReleaseSource() names
+//   - Releases come from a RELEASE STORE (release-store.js; figaf-faid
+//     decision 0010): the artifact store behind FIGAF_FAID_RELEASE_URL, or a
+//     local directory for development. host.resolveFaidReleaseSource() names
 //     the one source. A RELEASE is catalog.json plus one zip per CF app,
 //     downloaded on demand and verified against its checksums.
 //   - ONE VERSION PER INSTALLATION: the installed version is what the shared
@@ -39,11 +39,11 @@ const crypto = require("crypto");
 const { loadCatalog, chooseVersion, createReleaseStore } = require("./release-store");
 
 const VERSION_ENV = "FIGAF_APP_VERSION";
-const NO_SOURCE_ERROR = "No release source configured: set FIGAF_PLATFORM_RELEASE_URL (the release store) or FIGAF_PLATFORM_ARTIFACTS_DIR (a local release directory)";
+const NO_SOURCE_ERROR = "No release source configured: set FIGAF_FAID_RELEASE_URL (the release store) or FIGAF_FAID_ARTIFACTS_DIR (a local release directory)";
 // How long the installed platform version is remembered between the cf calls
 // of one page load (catalog, status and services are asked together).
 const INSTALLED_MEMO_MS = 5_000;
-// Landscape-independent releases (decision 0008, figaf-platform repo): a service
+// Landscape-independent releases (decision 0008, figaf-faid repo): a service
 // config file in the release (xs-security.json) may carry this placeholder in
 // its redirect URI; provisionServices fills it with the cfapps domain of the
 // landscape we are logged into. No landscape is ever hard-coded in a release.
@@ -226,7 +226,7 @@ function validateConfigEnv(app, env) {
 
 /**
  * @param {object} ctx
- * @param {object} ctx.host        HostAdapter (needs resolvePlatformReleaseSource + getUserDataDir)
+ * @param {object} ctx.host        HostAdapter (needs resolveFaidReleaseSource + getUserDataDir)
  * @param {Function} ctx.run       orchestrator subprocess helper
  * @param {Function} ctx.log       cli:line logger (source, type, text)
  * @param {Function} ctx.send      event emitter to the renderer
@@ -243,10 +243,10 @@ function createFaidHandlers(ctx) {
   let storeInst = null;
   let storeKey = null;
   function releaseSource() {
-    if (typeof host.resolvePlatformReleaseSource === "function") return host.resolvePlatformReleaseSource();
+    if (typeof host.resolveFaidReleaseSource === "function") return host.resolveFaidReleaseSource();
     // Older host adapters: a directory is a local source.
-    if (typeof host.resolvePlatformArtifactsDir === "function") {
-      const dir = host.resolvePlatformArtifactsDir();
+    if (typeof host.resolveFaidArtifactsDir === "function") {
+      const dir = host.resolveFaidArtifactsDir();
       return dir ? { kind: "local", dir } : null;
     }
     return null;

@@ -38,7 +38,7 @@ const releaseConfig = require("./release-config");
 const { createFaidHandlers } = require("./faid-apps");
 const { createConnectionsHandlers } = require("./connections");
 const credstoreClient = require("./credstore-client");
-// One XSUAA instance for the manager and the apps (figaf-platform decision 0009).
+// One XSUAA instance for the manager and the apps (figaf-faid decision 0009).
 const managerXsuaa = require("./manager-xsuaa");
 
 const DEPLOYMENT_ZIP_URL =

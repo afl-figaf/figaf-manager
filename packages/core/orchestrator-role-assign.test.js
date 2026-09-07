@@ -100,7 +100,7 @@ function makeHost(userDir) {
     getDeployTargetForSelf: () => ({
       apiUrl: "https://api.cf.eu10-004.hana.ondemand.com",
       orgName: "figafpartner-1",
-      spaceName: "figaf-platform",
+      spaceName: "figaf-faid",
       appName: "figaf-manager",
       uris: ["figaf-manager-x.cfapps.eu10-004.hana.ondemand.com"],
     }),
@@ -125,7 +125,7 @@ const CF_TARGET_OK = [
   "API version:    3.220.0",
   "user:           ais@figaf.com",
   "org:            figafpartner-1",
-  "space:          figaf-platform",
+  "space:          figaf-faid",
 ].join("\n");
 
 const isBtpGet = (a) => a.includes("get") && a.includes("accounts/global-account");

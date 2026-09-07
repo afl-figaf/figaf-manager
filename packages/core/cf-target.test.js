@@ -95,20 +95,20 @@ test("normalizeApiUrl strips trailing slash and lowercases scheme+host", () => {
 const SELF = {
   apiUrl: "https://api.cf.eu10-004.hana.ondemand.com",
   orgName: "Figaf ApS_figafpartner-1",
-  spaceName: "figaf-platform",
+  spaceName: "figaf-faid",
 };
 
 test("resolveSelfPin: hosted manager, login to its own endpoint -> pin its org/space", () => {
   assert.deepEqual(resolveSelfPin(SELF, SELF.apiUrl), {
     org: "Figaf ApS_figafpartner-1",
-    space: "figaf-platform",
+    space: "figaf-faid",
   });
 });
 
 test("resolveSelfPin: a trailing slash or upper case on the endpoint still pins", () => {
   assert.deepEqual(resolveSelfPin(SELF, "https://API.cf.eu10-004.hana.ondemand.com/"), {
     org: "Figaf ApS_figafpartner-1",
-    space: "figaf-platform",
+    space: "figaf-faid",
   });
 });
 
@@ -132,11 +132,11 @@ test("resolveSelfPin: no requested endpoint -> no pin", () => {
 
 // ── explainPinnedLoginFailure ───────────────────────────────────────────────
 
-const PIN = { org: "Figaf ApS_figafpartner-1", space: "figaf-platform" };
+const PIN = { org: "Figaf ApS_figafpartner-1", space: "figaf-faid" };
 
 test("explainPinnedLoginFailure: space not found -> names the space and the fix", () => {
-  const msg = explainPinnedLoginFailure("FAILED\nSpace 'figaf-platform' not found\n", PIN);
-  assert.match(msg, /figaf-platform/);
+  const msg = explainPinnedLoginFailure("FAILED\nSpace 'figaf-faid' not found\n", PIN);
+  assert.match(msg, /figaf-faid/);
   assert.match(msg, /Space Developer/);
 });
 

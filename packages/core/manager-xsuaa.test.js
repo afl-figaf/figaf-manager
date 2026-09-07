@@ -1,5 +1,5 @@
 "use strict";
-// Tests for manager-xsuaa.js (figaf-platform decision 0009: one XSUAA instance
+// Tests for manager-xsuaa.js (figaf-faid decision 0009: one XSUAA instance
 // for the manager and the apps).
 
 const { test } = require("node:test");

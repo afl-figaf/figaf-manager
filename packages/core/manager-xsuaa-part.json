@@ -1,7 +1,7 @@
 {
   "xsappname": "figaf-faid",
   "tenant-mode": "dedicated",
-  "description": "Figaf Platform: roles of the Figaf Manager and of all FAID Apps in this installation. Identifiers frozen by decisions 0008, 0009 and 0014 - add, never rename.",
+  "description": "FAID (Figaf AI-Driven): roles of the Figaf Manager and of all FAID Apps in this installation. Identifiers frozen by decisions 0008, 0009 and 0014 - add, never rename.",
   "scopes": [
     {
       "name": "$XSAPPNAME.FAIDManagerOperator",

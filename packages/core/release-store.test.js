@@ -1,5 +1,5 @@
 "use strict";
-// Tests for release-store.js (figaf-platform decision 0010).
+// Tests for release-store.js (figaf-faid decision 0010).
 //
 // Coverage:
 //   A. Pure helpers: parseIndex validation and ordering; chooseVersion — the
@@ -95,7 +95,7 @@ test("chooseVersion: read uses installed, else latest; an installed version miss
 });
 
 test("describeSource: one label per kind", () => {
-  assert.equal(describeSource({ kind: "remote", url: "https://s/platform" }).label, "https://s/platform (release store)");
+  assert.equal(describeSource({ kind: "remote", url: "https://s/faid" }).label, "https://s/faid (release store)");
   assert.equal(describeSource({ kind: "local", dir: "/x" }).kind, "local");
   assert.equal(describeSource(null), null);
 });
@@ -139,7 +139,7 @@ test("loadCatalog: missing file, bad JSON, missing fields, v3 services are valid
 // and record every URL they were asked for.
 function fakeBucket(objects) {
   const gets = [];
-  const base = "https://store.example/platform";
+  const base = "https://store.example/faid";
   const body = (url) => {
     gets.push(url);
     if (!url.startsWith(base + "/")) throw new Error("HTTP 404");
@@ -201,15 +201,15 @@ test("remote store: index.json is read once per TTL, again on refresh; the trail
   assert.equal(bucket.gets.filter((u) => u.endsWith("index.json")).length, 2, "read again after the TTL");
   await store.index({ refresh: true });
   assert.equal(bucket.gets.filter((u) => u.endsWith("index.json")).length, 3, "refresh bypasses the memo");
-  assert.ok(lines.some((l) => l.text === ">> GET https://store.example/platform/index.json"), "every network read is a visible line");
-  assert.equal(store.describe().label, "https://store.example/platform (release store)");
+  assert.ok(lines.some((l) => l.text === ">> GET https://store.example/faid/index.json"), "every network read is a visible line");
+  assert.equal(store.describe().label, "https://store.example/faid (release store)");
 });
 
 test("remote store: an unreachable index is a clear error naming the URL", async () => {
   const { store } = remoteStore(fakeBucket({}));
   const r = await store.index();
   assert.equal(r.ok, false);
-  assert.match(r.error, /cannot read https:\/\/store\.example\/platform\/index\.json: HTTP 404/);
+  assert.match(r.error, /cannot read https:\/\/store\.example\/faid\/index\.json: HTTP 404/);
   const bad = remoteStore(fakeBucket({ "index.json": JSON.stringify({ versions: [] }) })).store;
   assert.match((await bad.index()).error, /lists no versions/);
 });
@@ -278,7 +278,7 @@ test("remote store: ensureArtifact downloads a zip once, verifies it against the
   const a = await store.ensureArtifact(rel, "backend.zip");
   assert.equal(a.ok, true, JSON.stringify(a));
   assert.equal(fs.readFileSync(a.path, "utf8"), "backend-0.4.1");
-  assert.ok(lines.some((l) => l.text === ">> GET https://store.example/platform/0.4.1/backend.zip"));
+  assert.ok(lines.some((l) => l.text === ">> GET https://store.example/faid/0.4.1/backend.zip"));
   const before = bucket.gets.length;
   const b = await store.ensureArtifact(rel, "backend.zip");
   assert.equal(b.ok, true);

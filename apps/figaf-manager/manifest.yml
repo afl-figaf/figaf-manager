@@ -12,12 +12,12 @@ applications:
     env:
       NODE_ENV: production
       FIGAF_LOG_LEVEL: cli
-      # The Figaf Platform release store (figaf-platform decision 0010): the manager
+      # The FAID release store (figaf-faid decision 0010): the manager
       # lists, downloads and verifies releases from here. Public read URL of the
-      # Cloudflare R2 bucket (figaf-platform release/publish.js writes it). A
+      # Cloudflare R2 bucket (figaf-faid release/publish.js writes it). A
       # custom domain or a mirror is a change of this value only. For a local
-      # release directory (development, e2e) set FIGAF_PLATFORM_ARTIFACTS_DIR instead.
-      FIGAF_PLATFORM_RELEASE_URL: https://pub-086a7914662e477595f40f58270518b9.r2.dev/platform
+      # release directory (development, e2e) set FIGAF_FAID_ARTIFACTS_DIR instead.
+      FIGAF_FAID_RELEASE_URL: https://pub-086a7914662e477595f40f58270518b9.r2.dev/faid
       # FIGAF_LOG_LEVEL controls the verbosity of logs emitted by the wizard.
       #│ off   │ nothing (no-op fast path)                                     │
       #├───────┼───────────────────────────────────────────────────────────────┤

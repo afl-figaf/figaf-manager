@@ -1,5 +1,5 @@
 "use strict";
-// System connections (decision 0006 vertical slice, figaf-platform repo).
+// System connections (decision 0006 vertical slice, figaf-faid repo).
 //
 // The manager is the ONLY WRITER of connection entries; FAID Apps backends READ
 // them at runtime straight from the SAP Credential Store. That store is the
@@ -29,7 +29,7 @@
 // and only stores what worked. No secret value is ever returned to the
 // renderer, logged, or echoed in an error message.
 //
-// KEEP IN SYNC: the reader side lives in the figaf-platform repo,
+// KEEP IN SYNC: the reader side lives in the figaf-faid repo,
 // spikes/archiving-setup-playground/backend/srv/lib/platform-connections.js —
 // namespace, credential names, and the JSON value shape must match.
 

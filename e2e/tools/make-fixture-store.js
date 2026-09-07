@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 "use strict";
 // Builds e2e/fixtures/store/: a release STORE in the bucket layout of
-// figaf-platform release/publish.js, with two versions, for release-store.spec.js.
+// figaf-faid release/publish.js, with two versions, for release-store.spec.js.
 //
-//   platform/index.json
-//   platform/<version>/catalog.json, release.json, xs-security.json, *.zip
+//   faid/index.json
+//   faid/<version>/catalog.json, release.json, xs-security.json, *.zip
 //
 // The catalogs name CF apps that never exist in the dev space and a service
 // instance that never exists, so the page shows "Not installed" and every
@@ -17,7 +17,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const OUT = path.join(__dirname, "..", "fixtures", "store", "platform");
+const OUT = path.join(__dirname, "..", "fixtures", "store", "faid");
 const VERSIONS = ["0.0.1", "0.0.2"];
 const sha = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
 
@@ -66,7 +66,7 @@ for (const v of VERSIONS) {
     source: { repository: "FigafManager e2e fixture", commit: "0000000000000000000000000000000000000000", branch: "fixture" },
   };
   fs.writeFileSync(path.join(dir, "release.json"), JSON.stringify(release, null, 2) + "\n");
-  index.versions.push({ version: v, publishedAt: release.publishedAt, catalog: `platform/${v}/catalog.json` });
+  index.versions.push({ version: v, publishedAt: release.publishedAt, catalog: `faid/${v}/catalog.json` });
 }
 index.versions.reverse();
 fs.writeFileSync(path.join(OUT, "index.json"), JSON.stringify(index, null, 2) + "\n");

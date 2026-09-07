@@ -25,7 +25,7 @@ const fs = require("fs");
 const path = require("path");
 
 const APP_ID = process.env.E2E_APP_ID || "b2b-archiving-setup";
-const RELEASE_DIR = process.env.FIGAF_PLATFORM_ARTIFACTS_DIR || path.join(__dirname, "..", "apps", "figaf-manager", "platform-artifacts");
+const RELEASE_DIR = process.env.FIGAF_FAID_ARTIFACTS_DIR || path.join(__dirname, "..", "apps", "figaf-manager", "faid-artifacts");
 const catalog = JSON.parse(fs.readFileSync(path.join(RELEASE_DIR, "catalog.json"), "utf8").replace(/^﻿/, ""));
 const app = catalog.apps.find((a) => a.id === APP_ID);
 if (!app) throw new Error(`app '${APP_ID}' is not in ${RELEASE_DIR}/catalog.json`);

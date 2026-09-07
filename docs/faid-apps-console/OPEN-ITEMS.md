@@ -3,10 +3,10 @@
 This file holds only what is still OPEN for the Figaf Manager's FAID Apps console,
 plus the design notes that are still in force. It is not a log. History is in
 git (`git log -p docs/faid-apps-console/OPEN-ITEMS.md`; before 2026-09-03 the file
-was `spikes/app-manager-poc/FINDINGS.md` in the figaf-platform repo). Behavior
-is in `SPEC.md`, reasons are in figaf-platform `decisions/`, run records in
-figaf-platform `docs/d1/RUNBOOK-VIRGIN.md`. Platform-level notes (release model,
-Figaf API client scopes) live in figaf-platform `docs/SOLUTION.md`.
+was `spikes/app-manager-poc/FINDINGS.md` in the figaf-faid repo). Behavior
+is in `SPEC.md`, reasons are in figaf-faid `decisions/`, run records in
+figaf-faid `docs/d1/RUNBOOK-VIRGIN.md`. Platform-level notes (release model,
+Figaf API client scopes) live in figaf-faid `docs/SOLUTION.md`.
 Last edited 2026-09-06.
 
 ## Open items
@@ -22,13 +22,13 @@ Last edited 2026-09-06.
 3. **Remove + reinstall repeatability** check (remove exists; reinstall after
    remove not yet done by hand).
 4. **Release store, what is left** (the store itself is in use since
-   2026-09-04, figaf-platform decision 0010): Daniel's confirmation that public
+   2026-09-04, figaf-faid decision 0010): Daniel's confirmation that public
    downloads of platform builds are acceptable; a custom domain instead of
    `r2.dev` (Cloudflare: rate-limited, not for production; a change of
-   `FIGAF_PLATFORM_RELEASE_URL`); signed `release.json` later; the manager's own
+   `FIGAF_FAID_RELEASE_URL`); signed `release.json` later; the manager's own
    release publishing. Owed run: the install smoke against a manager whose
    source is the R2 URL (the smoke runs from the local build today), and one
-   **Update installation** in the dev space (figaf-platform `docs/SOLUTION.md`
+   **Update installation** in the dev space (figaf-faid `docs/SOLUTION.md`
    3.4).
 5. **Space Auditor** for the management user in the Figaf-tool spaces, so
    cross-space discovery of Figaf-tool deployments works under the technical
@@ -67,7 +67,7 @@ Last edited 2026-09-06.
     Figaf-tool wizard and does not list the console files. The garbage
     removal itself is done (`docs/CLEANUP-2026-09-03.md`).
 11. **Customer manual for the FAID Apps console**: Alex's manual covers the
-    Figaf-tool flow only. The customer prerequisites are in figaf-platform
+    Figaf-tool flow only. The customer prerequisites are in figaf-faid
     `docs/d1/MANUAL-RUNBOOK.md`.
 12. **E2E seeding and the refresh token** (2026-09-04): `e2e/global-setup.js`
     copies the developer's `~/.cf/config.json` into each seeded server
@@ -154,7 +154,7 @@ impossible: the first cf login is also the authorization moment.
 
 Release / release store (not "channel"); `figaf-faid-` = shared by FAID Apps and FAID Agents; `figaf-faid-apps-<app-id>` = one FAID Apps frontend; the shared backend connector is
 "Shared backend" in the UI, CF app `figaf-faid-backend`; "approuter", not
-"authentication proxy". Frozen identifiers: figaf-platform decisions 0008, 0009 and 0014 (product names).
+"authentication proxy". Frozen identifiers: figaf-faid decisions 0008, 0009 and 0014 (product names).
 
 ### Environment facts
 
@@ -163,7 +163,7 @@ Release / release store (not "channel"); `figaf-faid-` = shared by FAID Apps and
 - PostgreSQL: ~8 min to delete, ~7 min to create.
 - The `it-rt/api` broker returned 500s on 2026-09-02; it is not part of the
   FAID Apps install.
-- Windows build machine: release zips must be made with figaf-platform
+- Windows build machine: release zips must be made with figaf-faid
   `release/zip-dir.js` (Unix permission bits), `build-zip.js` uses
   `System32\tar.exe`, JSON written without a BOM.
 - The cockpit upload keeps `manifest.yml` inside the container; `cf push -p`

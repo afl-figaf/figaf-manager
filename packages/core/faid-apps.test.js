@@ -106,7 +106,7 @@ function makeCtx(channelDir, respond) {
         isHosted: true,
         getUserDataDir: () => userDir,
         // A local release directory is the development source (decision 0010).
-        resolvePlatformReleaseSource: () => (channelDir ? { kind: "local", dir: channelDir } : null),
+        resolveFaidReleaseSource: () => (channelDir ? { kind: "local", dir: channelDir } : null),
       },
       run: async (cmd, args, opts = {}) => {
         calls.push({ cmd, args, opts });
@@ -642,13 +642,13 @@ test("handlers report a friendly error when the host has no release source", asy
   for (const ch of ["faid:catalog", "faid:status", "faid:releases"]) {
     const r = await handlers[ch]({});
     assert.equal(r.ok, false);
-    assert.match(r.error, /No release source configured.*FIGAF_PLATFORM_RELEASE_URL/);
+    assert.match(r.error, /No release source configured.*FIGAF_FAID_RELEASE_URL/);
   }
   // An older host adapter that only knows the directory seam still works.
   const dir = makeChannelDir();
   const { ctx: legacy } = makeCtx(null, () => ({ code: 0, stdout: "" }));
-  delete legacy.host.resolvePlatformReleaseSource;
-  legacy.host.resolvePlatformArtifactsDir = () => dir;
+  delete legacy.host.resolveFaidReleaseSource;
+  legacy.host.resolveFaidArtifactsDir = () => dir;
   const c = await createFaidHandlers(legacy)["faid:catalog"]({});
   assert.equal(c.ok, true);
   assert.equal(c.source.kind, "local");
@@ -821,7 +821,7 @@ test("faid:ensureXsuaa: without a release on the host the manager part alone is 
     if (args[0] === "service") return calls.some((c) => c.args[0] === "create-service") ? { code: 0, stdout: "status:    create succeeded\n" } : { code: 1, stdout: "" };
     return null;
   });
-  ctx.host.resolvePlatformArtifactsDir = () => null;
+  ctx.host.resolveFaidArtifactsDir = () => null;
   ctx.sleep = async () => {};
   ctx.pollIntervalMs = 0;
   const handlers = createFaidHandlers(ctx);
@@ -1153,7 +1153,7 @@ test("faid:prepareSpaceServices: instances that exist are left alone; an already
   assert.ok(!calls.some((c) => c.args[0] === "create-service"));
 
   const { ctx: ctx2 } = makeCtx(dir, () => null);
-  ctx2.host.resolvePlatformReleaseSource = () => null;
+  ctx2.host.resolveFaidReleaseSource = () => null;
   const r2 = await createFaidHandlers(ctx2)["faid:prepareSpaceServices"]({});
   assert.equal(r2.ok, true);
   assert.match(r2.note, /nothing to prepare/);

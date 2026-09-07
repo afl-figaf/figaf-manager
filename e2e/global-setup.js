@@ -5,14 +5,14 @@
 // Returns a teardown function that stops the servers.
 //
 // Servers (pick with E2E_SERVERS=main,failure,remote; default: all three):
-//   main     :8087  the locally built release (apps/figaf-manager/platform-artifacts,
+//   main     :8087  the locally built release (apps/figaf-manager/faid-artifacts,
 //                   a LOCAL release source). The read-only console specs and
 //                   the deliberate install smoke (*.mutating.spec.js) run here.
 //   failure  :8088  the fixture release e2e/fixtures/release-missing-service
 //                   (local source): its platform base needs a service instance
 //                   that does not exist, so every Install is refused EARLY,
 //                   before any cf change. failure-visibility.spec.js runs here.
-//   remote   :8089  a REMOTE release source: FIGAF_PLATFORM_RELEASE_URL points at a
+//   remote   :8089  a REMOTE release source: FIGAF_FAID_RELEASE_URL points at a
 //                   static file server on :8090 that serves the fixture store
 //                   e2e/fixtures/store (bucket layout, two versions; built by
 //                   e2e/tools/make-fixture-store.js). release-store.spec.js
@@ -38,24 +38,24 @@ const SERVERS = {
   main: {
     port: 8087,
     state: "state.json",
-    env: { FIGAF_PLATFORM_ARTIFACTS_DIR: path.join(__dirname, "..", "apps", "figaf-manager", "platform-artifacts") },
+    env: { FIGAF_FAID_ARTIFACTS_DIR: path.join(__dirname, "..", "apps", "figaf-manager", "faid-artifacts") },
   },
   failure: {
     port: 8088,
     state: "state-failure.json",
-    env: { FIGAF_PLATFORM_ARTIFACTS_DIR: path.join(__dirname, "fixtures", "release-missing-service") },
+    env: { FIGAF_FAID_ARTIFACTS_DIR: path.join(__dirname, "fixtures", "release-missing-service") },
   },
   remote: {
     port: 8089,
     state: "state-remote.json",
-    // An empty FIGAF_PLATFORM_ARTIFACTS_DIR counts as unset (host.cloud.js), so the
+    // An empty FIGAF_FAID_ARTIFACTS_DIR counts as unset (host.cloud.js), so the
     // developer's own environment cannot turn this server into a local source.
-    env: { FIGAF_PLATFORM_ARTIFACTS_DIR: "", FIGAF_PLATFORM_RELEASE_URL: `http://127.0.0.1:${STORE_PORT}/platform` },
+    env: { FIGAF_FAID_ARTIFACTS_DIR: "", FIGAF_FAID_RELEASE_URL: `http://127.0.0.1:${STORE_PORT}/faid` },
   },
 };
 
 // The fixture release store: plain files under e2e/fixtures/store, served as
-// a bucket would serve them (GET <url>/platform/index.json, <url>/platform/<v>/<file>).
+// a bucket would serve them (GET <url>/faid/index.json, <url>/faid/<v>/<file>).
 function startStoreServer() {
   const types = { ".json": "application/json", ".zip": "application/zip" };
   const server = http.createServer((req, res) => {
@@ -160,7 +160,7 @@ module.exports = async () => {
   };
   try {
     if (wanted.includes("remote")) {
-      if (!fs.existsSync(path.join(STORE_DIR, "platform", "index.json"))) throw new Error(`fixture store missing: run node e2e/tools/make-fixture-store.js`);
+      if (!fs.existsSync(path.join(STORE_DIR, "faid", "index.json"))) throw new Error(`fixture store missing: run node e2e/tools/make-fixture-store.js`);
       storeServer = await startStoreServer();
     }
     for (const name of wanted) {

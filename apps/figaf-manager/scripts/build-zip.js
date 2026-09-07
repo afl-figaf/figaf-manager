@@ -251,17 +251,17 @@ async function stage() {
   fs.copyFileSync(path.join(APP_DIR, "host.cloud.js"),    path.join(STAGE_DIR, "host.cloud.js"));
   fs.copyFileSync(path.join(APP_DIR, "manifest.yml"),     path.join(STAGE_DIR, "manifest.yml"));
 
-  // platform releases are NOT bundled (figaf-platform decision 0010): the manager reads
-  // them from the release store named by FIGAF_PLATFORM_RELEASE_URL in manifest.yml.
-  // A developer's platform-artifacts/ in the checkout is a local source for
+  // FAID releases are NOT bundled (figaf-faid decision 0010): the manager reads
+  // them from the release store named by FIGAF_FAID_RELEASE_URL in manifest.yml.
+  // A developer's faid-artifacts/ in the checkout is a local source for
   // `npm start` and the e2e install smoke only.
   const manifest = fs.readFileSync(path.join(APP_DIR, "manifest.yml"), "utf8");
-  const releaseUrl = /^\s*FIGAF_PLATFORM_RELEASE_URL:\s*(\S+)/m.exec(manifest);
+  const releaseUrl = /^\s*FIGAF_FAID_RELEASE_URL:\s*(\S+)/m.exec(manifest);
   if (!releaseUrl) {
-    console.error("\nmanifest.yml must set FIGAF_PLATFORM_RELEASE_URL (the platform release store) — the zip ships no bundled release.");
+    console.error("\nmanifest.yml must set FIGAF_FAID_RELEASE_URL (the FAID release store) — the zip ships no bundled release.");
     process.exit(1);
   }
-  log(`[stage] platform releases come from ${releaseUrl[1]} (manifest.yml); nothing bundled.`);
+  log(`[stage] FAID releases come from ${releaseUrl[1]} (manifest.yml); nothing bundled.`);
 
   // Staged package.json strategy for @figaf/* workspace packages:
   //

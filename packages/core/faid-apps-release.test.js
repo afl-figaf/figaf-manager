@@ -1,5 +1,5 @@
 "use strict";
-// Tests for the release-store side of faid-apps.js (figaf-platform decision 0010):
+// Tests for the release-store side of faid-apps.js (figaf-faid decision 0010):
 //   - faid:releases — source, installed vs latest, which versions Update may choose;
 //   - faid:install deploys at the INSTALLED version (latest on an empty space),
 //     downloads only that version's artifacts, refuses another version;
@@ -21,7 +21,7 @@ const crypto = require("crypto");
 const { VERSION_ENV, createFaidHandlers } = require("./faid-apps");
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
-const BASE = "https://store.example/platform";
+const BASE = "https://store.example/faid";
 
 function catalogFor(v) {
   return {
@@ -63,7 +63,7 @@ function makeRemoteCtx({ versions, installed, respond }) {
     host: {
       isHosted: true,
       getUserDataDir: () => fs.mkdtempSync(path.join(os.tmpdir(), "faid-user-")),
-      resolvePlatformReleaseSource: () => ({ kind: "remote", url: BASE, cacheDir: fs.mkdtempSync(path.join(os.tmpdir(), "faid-cache-")) }),
+      resolveFaidReleaseSource: () => ({ kind: "remote", url: BASE, cacheDir: fs.mkdtempSync(path.join(os.tmpdir(), "faid-cache-")) }),
     },
     run: async (cmd, args, opts = {}) => {
       calls.push({ cmd, args, opts });
@@ -127,7 +127,7 @@ test("faid:install deploys at the INSTALLED version even when the store has a ne
   assert.deepEqual(stamps(calls), ["0.4.1", "0.4.1"]);
   assert.ok(logLines.includes(`>> GET ${BASE}/0.4.1/arch.zip`), "every download is a visible line");
   assert.ok(logLines.some((l) => /arch\.zip .* sha256 ok/.test(l)));
-  assert.ok(logLines.some((l) => /release 0\.4\.1 from https:\/\/store\.example\/platform \(release store\)/.test(l)));
+  assert.ok(logLines.some((l) => /release 0\.4\.1 from https:\/\/store\.example\/faid \(release store\)/.test(l)));
 
   // asking Install for another version is refused before any cf change
   const two = makeRemoteCtx({ versions: ["0.4.1", "0.4.2"], installed: "0.4.1" });
@@ -211,7 +211,7 @@ test("an unreachable store is one clear error on every read handler; the catalog
   for (const ch of ["faid:catalog", "faid:status", "faid:services", "faid:releases"]) {
     const r = await handlers[ch]({});
     assert.equal(r.ok, false, ch);
-    assert.match(r.error, /cannot read https:\/\/store\.example\/platform\/index\.json: getaddrinfo ENOTFOUND/);
+    assert.match(r.error, /cannot read https:\/\/store\.example\/faid\/index\.json: getaddrinfo ENOTFOUND/);
   }
   const good = makeRemoteCtx({ versions: ["0.4.1"], installed: null });
   const c = await createFaidHandlers(good.ctx)["faid:catalog"]({});

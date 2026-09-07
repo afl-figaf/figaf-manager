@@ -1,6 +1,6 @@
 "use strict";
 // The passcode CF login targets the manager's OWN org/space automatically
-// (figaf-platform SPEC "its own Cloud Foundry space"): `cf login` is spawned with
+// (figaf-faid SPEC "its own Cloud Foundry space"): `cf login` is spawned with
 // `-o`/`-s`, so the operator is never asked a question with exactly one
 // correct answer. A wrong pick would install the platform into the wrong
 // space, and nothing downstream re-checks the target.
@@ -45,7 +45,7 @@ const { createOrchestrator } = require("./orchestrator");
 const SELF = {
   apiUrl: "https://api.cf.eu10-004.hana.ondemand.com",
   orgName: "Figaf ApS_figafpartner-1",
-  spaceName: "figaf-platform",
+  spaceName: "figaf-faid",
   appName: "figaf-manager",
   uris: [],
 };
@@ -160,11 +160,11 @@ test("pinned login succeeds: cf:loggedIn is sent and org/space are known without
 });
 
 test("pinned login fails on the space: cf:loginFailed carries an explanation, not just a code", async () => {
-  loginExit = { code: 1, stderr: "FAILED\nSpace 'figaf-platform' not found\n" };
+  loginExit = { code: 1, stderr: "FAILED\nSpace 'figaf-faid' not found\n" };
   const { events } = await startLogin({ host: makeHost(), apiUrl: SELF.apiUrl });
   const failed = events.find((e) => e.name === "cf:loginFailed");
   assert.ok(failed, "cf:loginFailed must be sent");
-  assert.match(failed.payload.error, /figaf-platform/);
+  assert.match(failed.payload.error, /figaf-faid/);
   assert.match(failed.payload.error, /Space Developer/);
 });
 

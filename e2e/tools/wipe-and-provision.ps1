@@ -1,10 +1,10 @@
-# wipe-and-provision.ps1 - virgin e2e run for the Figaf Platform (D1 seed).
+# wipe-and-provision.ps1 - virgin e2e run for the FAID release (D1 seed).
 #
 # Transparency contract (same as the release build script):
 #   - Every cf command is printed with ">>" before it runs.
 #   - Ends with "<MODE> PASSED" (exit 0) or "FAILED: <reason>" (exit 1).
 #   - Guardrail: refuses to run unless the cf target is EXACTLY
-#     org "Figaf ApS_figafpartner-1" / space "figaf-platform".
+#     org "Figaf ApS_figafpartner-1" / space "figaf-faid".
 #
 # Modes:
 #   -Mode status              print apps + service instances in the space
@@ -30,7 +30,7 @@
 #                             broker was returning 500s on 2026-09-02.
 #
 # The manager itself is NOT deployed by this script - that follows the
-# runbook (build + cf push): docs/d1/MANUAL-RUNBOOK.md in the figaf-platform repo.
+# runbook (build + cf push): docs/d1/MANUAL-RUNBOOK.md in the figaf-faid repo.
 
 param(
     [Parameter(Mandatory = $true)][ValidateSet('status', 'wipe', 'provision')][string]$Mode,
@@ -47,7 +47,7 @@ if (-not (Get-Command cf -ErrorAction SilentlyContinue)) {
 }
 
 $AllowedOrg = 'Figaf ApS_figafpartner-1'
-$AllowedSpace = 'figaf-platform'
+$AllowedSpace = 'figaf-faid'
 
 function Fail {
     param([string]$Reason)
@@ -177,11 +177,11 @@ if ($Mode -eq 'provision') {
     # xs-security.json is landscape-independent (decision 0008): its redirect
     # URI carries __CF_APPS_DOMAIN__. Fill it with this landscape's shared cfapps
     # domain before create-service - the App Manager does exactly the same.
-    # Default: the release bundled into the manager (built by figaf-platform
+    # Default: the release bundled into the manager (built by figaf-faid
     # release\build-artifacts.ps1). Override with -XsSecurity <path>.
-    if (-not $XsSecurity) { $XsSecurity = Join-Path $PSScriptRoot '..\..\apps\figaf-manager\platform-artifacts\xs-security.json' }
+    if (-not $XsSecurity) { $XsSecurity = Join-Path $PSScriptRoot '..\..\apps\figaf-manager\faid-artifacts\xs-security.json' }
     $xsSecurityTemplate = $XsSecurity
-    if (-not (Test-Path $xsSecurityTemplate)) { Fail "$xsSecurityTemplate not found - build the release first (figaf-platform release\build-artifacts.ps1) or pass -XsSecurity" }
+    if (-not (Test-Path $xsSecurityTemplate)) { Fail "$xsSecurityTemplate not found - build the release first (figaf-faid release\build-artifacts.ps1) or pass -XsSecurity" }
     $domainLine = (& cf domains | Where-Object { $_ -match '^\s*cfapps\.' } | Select-Object -First 1)
     if (-not $domainLine) { Fail 'no cfapps.* shared domain found (cf domains) - cannot fill the XSUAA redirect URI.' }
     $appsDomain = ([string]$domainLine).Trim() -split '\s+' | Select-Object -First 1

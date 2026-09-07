@@ -136,7 +136,7 @@ contextBridge.exposeInMainWorld("figaf", {
 
   // FAID Apps manager — surface parity with the cloud client. On desktop
   // the handlers work too when an artifact channel dir is configured via
-  // host.resolvePlatformArtifactsDir (not implemented yet → friendly error).
+  // host.resolveFaidArtifactsDir (not implemented yet → friendly error).
   faid: {
     catalog:   (a) => ipcRenderer.invoke("faid:catalog", a || {}),
     status:    () => ipcRenderer.invoke("faid:status"),
