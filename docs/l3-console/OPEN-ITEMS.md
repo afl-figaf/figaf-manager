@@ -7,7 +7,7 @@ was `spikes/app-manager-poc/FINDINGS.md` in the figaf-l3-l4 repo). Behavior
 is in `SPEC.md`, reasons are in figaf-l3-l4 `decisions/`, run records in
 figaf-l3-l4 `docs/d1/RUNBOOK-VIRGIN.md`. Platform-level notes (release model,
 Figaf API client scopes) live in figaf-l3-l4 `docs/SOLUTION.md`.
-Last edited 2026-09-04.
+Last edited 2026-09-06.
 
 ## Open items
 
@@ -99,6 +99,17 @@ Last edited 2026-09-04.
     pre-condition in `l3-apps.js` and refuse with a clear message, instead of
     installing somewhere else. Small, and worth doing before a customer runs
     the console.
+15. **The Failed panel can show a cf WARNING instead of the reason**
+    (2026-09-06, install of release 0.4.4): `cliFailureDetail()` in
+    `packages/core/l3-apps.js` takes the last 3 stderr lines, and cf CLI 8.19
+    prints the `cflinuxfs4 is DEPRECATED` warning LAST, after `Start
+    unsuccessful`. The panel said the stack was the problem; the real cause
+    (a failed schema migration) was only in `cf logs <app> --recent`. Fix:
+    drop `WARNING:` lines (and their continuation) before taking the tail,
+    and after a failed `start` step append the app's last `[APP/PROC/WEB]
+    ERR` lines from `cf logs <app> --recent` to the detail. Extend
+    `l3-apps.test.js` ("a failed cf start keeps the pointer") with a stderr
+    that ends in the warning.
 
 ## Design notes still in force
 
