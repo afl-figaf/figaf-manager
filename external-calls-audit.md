@@ -95,7 +95,8 @@ Binary resolved via `host.resolveBinary("cf")`.
 | 19 | `cf delete <appName> -f` | `cf:deleteApp`, `update:deleteApps` | both/cloud | `cf:deleteApp` is both; `update:deleteApps` is cloud |
 | 20 | `cf delete <name> -r -f` | `cf:uninstallManager` | cloud | Delete with routes (`-r`) |
 | 21 | `cf app <name>` | `update:detectDeployment`, `update:verify`, `xsuaa:upgradeStatus` | cloud | |
-| 22 | `cf app --guid <name>` | `update:detectDeployment`, `update:verify` | cloud | |
+| 22 | `cf app --guid <name>` | `update:detectDeployment`, `update:verify`; every `l3:*` handler (as `cf app <backend> --guid` in `installedPlatformState`: installed version and "backend deployed", memoized) | cloud | |
+
 | 23 | `cf start figaf-manager-approuter` | `cf:pushManagerApprouter` | cloud | |
 | 24 | `cf bind-service figaf-manager-approuter figaf-manager-xsuaa` | `cf:pushManagerApprouter` | cloud | |
 | 25 | `cf bind-service <appName> figaf-manager-xsuaa` | `cf:restage` | cloud | |
@@ -123,6 +124,7 @@ Binary resolved via `host.resolveBinary("cf")`.
 | 37 | `cf curl /v3/apps/<guid>/environment_variables` | `update:readCurrentConfig` | cloud | Read live config to pre-fill update form |
 | 38 | `cf curl /v3/apps/<guid>/processes/web` | `update:readCurrentConfig` | cloud | Read memory / instances |
 | 39 | `cf curl /v3/service_credential_bindings?app_guids=<guid>&include=service_instance` | `update:readCurrentConfig` | cloud | Read service bindings |
+| 39a | `cf curl /v3/service_credential_bindings?type=app&service_instance_names=<instance>&app_names=<app>` | `l3:services` | cloud | `boundToManager` (Credential Store ↔ manager) and, catalog v4, `boundToBackend` (optional PI/PO instance ↔ shared backend); one call per instance |
 
 ---
 
@@ -190,7 +192,8 @@ All runtime calls go through `https.get` (Node built-in). No third-party HTTP li
 |----------|-------|-------|
 | BTP CLI commands | 21 | both / cloud |
 | CF CLI commands (direct) | 43 | both / cloud |
-| CF v3 API (`cf curl`) | 7 | cloud only |
+| CF v3 API (`cf curl`) | 8 | cloud only |
+
 | Other process spawns (system) | 8 | desktop / cloud / build |
 | HTTPS fetches (runtime) | 10 | both / cloud / desktop |
 | URLs opened in browser (not fetched) | 7 | both / cloud / desktop |

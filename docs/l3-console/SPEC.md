@@ -157,7 +157,7 @@ the audit log.
 | `l3:catalog({version?})`, `l3:status` | the catalog of the installation's version (installed, else latest; section 2.3) with `source`, `installed`, `latest`; live state per CF app from `cf curl /v3/apps` (scoped to the targeted space), installed version from the env var `FIGAF_APP_VERSION`, the in-flight action (`running`), per part `staging` (a STOPPED part with a build in `STAGING`, one `cf curl /v3/builds`), and `release` (the version the rows were computed against) |
 | `l3:releases({refresh?})` | the release store: `source`, `installed`, `latest`, `current`, `updateAvailable`, `versions[]` with `selectable` / `reason` (section 2.3). `refresh` re-reads `index.json` now. No cf call beyond the installed-version probe |
 | `l3:running` | the lifecycle action running now, or null. No cf call. For a page that did not start it (reload, second tab, second session) |
-| `l3:services`, `l3:provisionServices({plans, only, waitOnly})` | `cf service <name>`; `cf create-service` for missing instances, poll every 10 s until `succeeded` (15 min limit); a `failed` instance is deleted and created again. With `waitOnly`, only those names are awaited; the others are started and reported as `pending` |
+| `l3:services`, `l3:provisionServices({plans, only, waitOnly})` | `cf service <name>`; `cf create-service` for missing instances, poll every 10 s until `succeeded` (15 min limit); a `failed` instance is deleted and created again. With `waitOnly`, only those names are awaited; the others are started and reported as `pending`. Per row `boundToManager` (Credential Store, one `cf curl /v3/service_credential_bindings`); for optional instances (catalog v4) also `backendDeployed` (from the same `cf app <backend> --guid` probe that reads the installed version, no extra call) and `boundToBackend` (the same curl against the shared backend, one per instance), so the panel offers the bind only when it is needed (section 4.1) |
 | `l3:bindManagerService`, `l3:restartSelf` | `cf bind-service <manager> <name>`; `cf restart <manager>` (fire-and-forget) |
 | `l3:ensureXsuaa({updateOnly})` | create or `cf update-service figaf-l3l4-xsuaa` with the composed document (section 5) |
 | `l3:prepareSpaceServices({plans})` | Setup step 1: create every missing catalog instance except XSUAA with the plans the person chose; wait only for the manager-bound ones (Credential Store) and bind them, no restart; the database is started and left creating (`pending`) (section 5.2) |
@@ -258,15 +258,21 @@ Two ways in:
   the backend is ever pushed and no later restart is needed.
 - **Base services (step 3)** — a separate "Optional: on-premise PI/PO systems"
   block with one **Create** button per instance
-  (`l3:provisionServices({ only: [name] })`) and, once the instance is ready,
-  **Bind to backend & restart** (`l3:bindPlatformService`). The second button
-  exists because `optionalServices` are bound while the backend is PUSHED: an
-  instance created later would stay unused, and an Update installation is
-  refused when the store holds nothing newer. It binds the instance to the
-  shared backend and restarts it (a CF binding only reaches an app after a
-  restart), takes the same lock as a deploy, and accepts only names the
-  catalog lists in the platform's `optionalServices`. A fresh install binds
-  them on its own.
+  (`l3:provisionServices({ only: [name] })`). A ready instance then shows ONE
+  of three things, from `l3:services` (`backendDeployed`, `boundToBackend`):
+  - backend not deployed yet (a fresh install, before step 4): the note
+    "bound automatically when the platform is installed" — the push in step 4
+    binds every optional instance that exists, nothing to do here;
+  - backend deployed and bound: the pill "bound to backend";
+  - backend deployed, binding missing (the instance was created AFTER the
+    backend was pushed): **Bind to backend & restart backend**
+    (`l3:bindPlatformService`). This exists because `optionalServices` are
+    bound while the backend is PUSHED, and an Update installation is refused
+    when the store holds nothing newer. It binds the instance to the shared
+    backend and restarts THAT app (a CF binding only reaches an app after a
+    restart; the manager is not restarted), takes the same lock as a deploy,
+    and accepts only names the catalog lists in the platform's
+    `optionalServices`.
 
 ## 5. Sign-in and access
 

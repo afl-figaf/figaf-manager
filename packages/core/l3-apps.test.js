@@ -1453,6 +1453,60 @@ test("l3:services: reports optional, group and sharedWith so the panel can show 
   assert.equal(db.group, "");
 });
 
+test("l3:services: optional instances report backendDeployed and boundToBackend (the panel offers the bind only when needed)", async () => {
+  const dir = makeV4Dir();
+  const { ctx, calls } = makeCtx(dir, (args) => {
+    if (args[0] === "app" && args[1] === "arch-backend" && args[2] === "--guid") return { code: 0, stdout: "guid\n" };
+    if (args[0] === "service") {
+      return /^figaf-(connectivity|destination)$/.test(args[1]) ? { code: 0, stdout: "status:    create succeeded\n" } : { code: 1, stdout: "" };
+    }
+    if (args[0] === "curl" && /app_names=arch-backend$/.test(args[1])) {
+      const bound = /service_instance_names=figaf-destination&/.test(args[1]);
+      return { code: 0, stdout: JSON.stringify({ resources: bound ? [{ guid: "b1" }] : [] }) };
+    }
+    return null;
+  });
+  const r = await createL3Handlers(ctx)["l3:services"]();
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.backend, "arch-backend");
+  assert.equal(r.backendDeployed, true);
+  const by = Object.fromEntries(r.services.map((s) => [s.name, s]));
+  assert.equal(by["figaf-destination"].backendDeployed, true);
+  assert.equal(by["figaf-destination"].boundToBackend, true);
+  assert.equal(by["figaf-connectivity"].backendDeployed, true);
+  assert.equal(by["figaf-connectivity"].boundToBackend, false);
+  assert.equal(by.db.backendDeployed, null, "only optional rows carry the backend fields");
+  assert.equal(by.db.boundToBackend, null);
+  assert.equal(calls.filter((c) => c.args[0] === "app" && c.args[2] === "--guid").length, 1, "one existence probe, shared with the installed-version read");
+  assert.equal(calls.filter((c) => c.args[0] === "curl" && /app_names=arch-backend$/.test(c.args[1])).length, 2, "one binding probe per ready optional instance");
+});
+
+test("l3:services: backend not deployed -> backendDeployed false, boundToBackend null, no binding probe", async () => {
+  const dir = makeV4Dir();
+  const { ctx, calls } = makeCtx(dir, (args) => {
+    if (args[0] === "app" && args[1] === "arch-backend" && args[2] === "--guid") return { code: 1, stdout: "" };
+    if (args[0] === "service") return { code: 0, stdout: "status:    create succeeded\n" };
+    return null;
+  });
+  const r = await createL3Handlers(ctx)["l3:services"]();
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.backendDeployed, false);
+  const dest = r.services.find((s) => s.name === "figaf-destination");
+  assert.equal(dest.backendDeployed, false);
+  assert.equal(dest.boundToBackend, null);
+  assert.ok(!calls.some((c) => c.args[0] === "curl" && /app_names=arch-backend/.test(c.args[1])), "no binding probe without a backend");
+});
+
+test("l3:services: a release without optional instances never probes the backend", async () => {
+  const dir = makeV3Dir();
+  const { ctx, calls } = makeCtx(dir, cfServiceResponder({ db: "create succeeded", credstore: "create succeeded" }));
+  const r = await createL3Handlers(ctx)["l3:services"]();
+  assert.equal(r.ok, true);
+  assert.equal(r.backendDeployed, null);
+  assert.ok(r.services.every((s) => s.backendDeployed === null && s.boundToBackend === null));
+  assert.ok(!calls.some((c) => c.args[0] === "curl" && /service_credential_bindings/.test(c.args[1])), "no binding probe when nothing is optional");
+});
+
 // l3:destinationCheck — the manager asks the shared backend, because only the
 // backend is bound to the destination service (decision 0011).
 

@@ -263,15 +263,20 @@ function createL3Handlers(ctx) {
     return storeInst;
   }
 
-  // The installed platform version: FIGAF_APP_VERSION on the shared backend
-  // CF app named by the catalog. null when the backend is not deployed. Two
-  // cf calls, remembered for INSTALLED_MEMO_MS; forgotten after every action.
-  let installedMemo = null; // { at, name, value }
-  async function installedPlatformVersion(catalog) {
+  // The installed platform: does the shared backend CF app named by the
+  // catalog exist (`exists`), and which FIGAF_APP_VERSION does it carry
+  // (`version`, null when not deployed or not stamped). Two cf calls,
+  // remembered for INSTALLED_MEMO_MS; forgotten after every action. Both
+  // facts come from the same probe, so `l3:services` (backendDeployed) and
+  // the Release panel (installed) never disagree.
+  let installedMemo = null; // { at, name, value, exists }
+  async function installedPlatformState(catalog) {
     const platform = platformPseudoApp(catalog);
-    if (!platform) return null;
+    if (!platform) return { version: null, exists: null };
     const name = platform.cfApps[0].name;
-    if (installedMemo && installedMemo.name === name && Date.now() - installedMemo.at < INSTALLED_MEMO_MS) return installedMemo.value;
+    if (installedMemo && installedMemo.name === name && Date.now() - installedMemo.at < INSTALLED_MEMO_MS) {
+      return { version: installedMemo.value, exists: installedMemo.exists };
+    }
     // `silent`: a backend that is not deployed yet is a normal state, not an
     // error; its "App not found" must not become a red line in the drawer
     // (the Release panel shows the result: installed "—").
@@ -282,8 +287,11 @@ function createL3Handlers(ctx) {
       const e = await run(resolveCf(), ["curl", `/v3/apps/${guid}/environment_variables`], { source: "cf", quiet: true, silent: true });
       if (e.code === 0) { try { value = (JSON.parse(e.stdout).var || {})[VERSION_ENV] || null; } catch { value = null; } }
     }
-    installedMemo = { at: Date.now(), name, value };
-    return value;
+    installedMemo = { at: Date.now(), name, value, exists: !!guid };
+    return { version: value, exists: !!guid };
+  }
+  async function installedPlatformVersion(catalog) {
+    return (await installedPlatformState(catalog)).version;
   }
 
   /**
@@ -486,6 +494,17 @@ function createL3Handlers(ctx) {
   async function cfAppExists(name) {
     const r = await run(resolveCf(), ["app", name, "--guid"], { source: "cf", quiet: true });
     return r.code === 0;
+  }
+
+  /**
+   * Does a CF binding of the service instance to the app exist? One
+   * `cf curl`. null when the probe fails (the caller shows "unknown", never
+   * a wrong "bound" or "missing").
+   */
+  async function bindingExists(instance, app) {
+    const b = await run(resolveCf(), ["curl", `/v3/service_credential_bindings?type=app&service_instance_names=${instance}&app_names=${app}`], { source: "cf", quiet: true });
+    if (b.code !== 0) return null;
+    try { return (JSON.parse(b.stdout).resources || []).length > 0; } catch { return null; }
   }
 
   /** First HTTPS route of a CF app, or null. */
@@ -1141,29 +1160,48 @@ function createL3Handlers(ctx) {
      * state. `boundToManager` is filled for bindToManager entries (a binding
      * exists in CF; it is effective in THIS process only after a restart —
      * the renderer combines it with login:storedUserStatus.bindingPresent).
+     *
+     * Catalog v4: optional instances (the PI/PO pair) also carry
+     * `backendDeployed` (the shared backend's CF app exists; from the same
+     * probe as the installed version, no extra cf call) and `boundToBackend`
+     * (a binding of the instance to that app exists, one `cf curl` each).
+     * Both are null for required rows and when the release declares
+     * no shared backend; `boundToBackend` is also null while the backend is
+     * not deployed or the instance is missing. The Base services panel uses
+     * them to offer "Bind to backend & restart backend" only when it is
+     * needed - an instance created AFTER the backend was pushed. A fresh
+     * install binds the optional instances on its own (SPEC section 4.1).
      */
     async "l3:services"() {
       const rel = await currentRelease();
       if (!rel.ok) return { ok: false, error: rel.error };
       const c = { catalog: rel.catalog };
       const self = selfAppName();
+      const platform = platformPseudoApp(c.catalog);
+      const backend = platform ? platform.cfApps[0].name : null;
+      const hasOptional = (c.catalog.services || []).some((s) => s.optional);
+      const backendDeployed = backend && hasOptional ? (await installedPlatformState(c.catalog)).exists : null;
       const services = [];
       for (const s of c.catalog.services || []) {
         const r = await run(resolveCf(), ["service", s.name], { source: "cf", quiet: true });
         const status = serviceStatusFromCf(r.code, r.stdout);
         let boundToManager = null;
         if (s.bindToManager && self && status !== "missing") {
-          const b = await run(resolveCf(), ["curl", `/v3/service_credential_bindings?type=app&service_instance_names=${s.name}&app_names=${self}`], { source: "cf", quiet: true });
-          if (b.code === 0) { try { boundToManager = (JSON.parse(b.stdout).resources || []).length > 0; } catch {} }
+          boundToManager = await bindingExists(s.name, self);
+        }
+        let boundToBackend = null;
+        if (s.optional && backendDeployed === true && status !== "missing") {
+          boundToBackend = await bindingExists(s.name, backend);
         }
         services.push({
           name: s.name, offering: s.offering, plan: s.plan, plans: s.plans || [s.plan],
           purpose: s.purpose || "", bindToManager: !!s.bindToManager,
           optional: !!s.optional, group: s.group || "", sharedWith: s.sharedWith || "",
           exists: status !== "missing", status, boundToManager,
+          backendDeployed: s.optional ? backendDeployed : null, boundToBackend,
         });
       }
-      return { ok: true, selfApp: self, services };
+      return { ok: true, selfApp: self, backend, backendDeployed, services };
     },
 
     /**

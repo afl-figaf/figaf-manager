@@ -493,9 +493,10 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform,
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
             SAP PI and PO systems are reached through the SAP Cloud Connector. These two free instances make that
             possible, and they are SHARED with the Figaf tool: an instance that already exists is reused, never
-            replaced. An instance created here is not used by the shared backend until it is bound to it - a
-            binding only reaches an app after a restart, so <strong>Bind to backend &amp; restart</strong> does both
-            (about 30-60 s of downtime for the apps). A fresh install binds them on its own.
+            replaced. The shared backend binds them when it is installed, so on a fresh install there is nothing
+            to do here. Only an instance created AFTER the backend was installed needs
+            <strong>Bind to backend &amp; restart backend</strong>: a binding reaches an app only after a restart,
+            so the button does both (about 30-60 s of downtime for the L3 apps; the manager itself is not restarted).
           </div>
           {optional.map((s) => {
             const meta = L3_SERVICE_STATUS_META[s.status] || L3_SERVICE_STATUS_META.unknown;
@@ -517,14 +518,20 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform,
                     {busy === "provision" ? "Creating…" : "Create"}
                   </button>
                 )}
-                {s.status === "ready" && onBindPlatform && (
+                {s.status === "ready" && s.backendDeployed === false && (
+                  <span style={{ fontSize: 12, color: "var(--ink-3)" }} data-gated="bind-platform">bound automatically when the platform is installed</span>
+                )}
+                {s.status === "ready" && s.backendDeployed === true && s.boundToBackend === true && (
+                  <span className="pill green">bound to backend</span>
+                )}
+                {s.status === "ready" && s.backendDeployed === true && s.boundToBackend !== true && onBindPlatform && (
                   <button
                     className="btn"
                     disabled={!!busy}
-                    title={`cf bind-service <shared backend> ${s.name}, then cf restart`}
+                    title={`cf bind-service <shared backend> ${s.name}, then cf restart <shared backend>`}
                     onClick={() => onBindPlatform(s.name)}
                   >
-                    {busy === "bind-platform" ? "Binding…" : "Bind to backend & restart"}
+                    {busy === "bind-platform" ? "Binding…" : "Bind to backend & restart backend"}
                   </button>
                 )}
               </div>

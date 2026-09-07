@@ -4,7 +4,8 @@
 // node:test. No React, no I/O.
 //
 // Input `data` = the four results the console fetches:
-//   services: l3:services            -> { ok, services: [{ name, status, bindToManager, boundToManager }] }
+//   services: l3:services            -> { ok, services: [{ name, status, bindToManager, boundToManager,
+//                                          optional, backendDeployed, boundToBackend }] }
 //   stored:   login:storedUserStatus -> { available, bindingPresent }
 //   l3:       l3:status              -> { ok, platform: { status } }
 //   figaf:    connections:figafStatus-> { configured }
