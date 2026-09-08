@@ -108,6 +108,9 @@ them, the manager consumes them.
 - Dev machine: cf CLI 8.7.11 (winget package `CloudFoundry.CLI.v8`), MultiApps plugin 3.11.1, mbt 1.2.47. The manager bundles btp 2.106.1 and cf 8.19.0 (Linux builds; pinned in `apps/figaf-manager/package.json`, recorded in `bin/VERSIONS.json`). Runtime pins (figaf-faid decision 0015, 2026-09-07): Node `24.x` (`engines.node`, CI, `.nvmrc`), stack `cflinuxfs5` (manager `manifest.yml`; the approuter follows via `CF_STACK`; FAID apps via the catalog's `stack`).
 - Manager version 26.5.0; release 0.4.1 (B2B Archiving Setup + shared backend)
   is in the release store (Cloudflare R2, public read URL) since 2026-09-04.
+  Release 0.7.0 (catalog v6, 2026-09-08: the backend's own database role,
+  `figaf-db` default name editable; SPEC section 4.2) is built locally and
+  not published yet.
   The manager reads releases from there; its zip bundles no release.
   One version per installation: Install adds an app at the installed
   version, Update installation moves everything to a newer release.

@@ -18,7 +18,9 @@
 //   map-route        cf:mapRoute                 approuter takes the public hostname
 //   restage          cf:restage                  bind manager to XSUAA, unmap, restage once
 //
-// Input:  { api, plans, groups, autoAssign, assignTo, onPhase }
+// Input:  { api, plans, names, groups, autoAssign, assignTo, onPhase }
+//         `names` = { catalogName: instanceName } for services with an editable
+//         name (catalog v6: the database); empty = the catalog default.
 // Output: { ok:true, restaging, alreadyBound, roleName, assignFailed, assignSkipped,
 //           assignedTo, servicesWarning, services }        - the manager is restaging
 //         { ok:false, phase, error }                        - stopped at `phase`
@@ -56,6 +58,7 @@
     var api = input.api;
     var onPhase = typeof input.onPhase === "function" ? input.onPhase : function () {};
     var plans = input.plans || {};
+    var names = input.names && typeof input.names === "object" ? input.names : {};
     var groups = Array.isArray(input.groups) ? input.groups : [];
     var autoAssign = !!input.autoAssign;
     var assignTo = String(input.assignTo || "").trim();
@@ -101,7 +104,7 @@
     mark("services", "running");
     try {
       services = api.faid && api.faid.prepareSpaceServices
-        ? await api.faid.prepareSpaceServices({ plans: plans, groups: groups })
+        ? await api.faid.prepareSpaceServices({ plans: plans, names: names, groups: groups })
         : { ok: true, created: [], bound: [], pending: [], note: "not available in this build" };
     } catch (e) {
       services = { ok: false, error: (e && e.message) || "prepareSpaceServices failed" };

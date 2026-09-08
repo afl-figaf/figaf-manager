@@ -319,7 +319,15 @@ function issueCookie(res, { ip, ua }) {
 function redact(line) {
   if (typeof line !== "string") return line;
   if (line.startsWith("[SETUP]")) return line;
-  return line.replace(/\b[A-Za-z0-9_-]{32,44}\b/g, "[redacted]");
+  // A minted token is base64url of random bytes: it has uppercase letters
+  // (the chance of none in 32 characters is below 1e-7). A kebab-case name
+  // such as the CF app `figaf-faid-apps-b2b-archiving-setup` (35 characters)
+  // or a GUID has hyphens and no uppercase letter: not a secret, and hiding
+  // it made the terminal drawer unreadable (found 2026-09-08 by the install
+  // smoke). Everything else in the token shape is still hidden. The
+  // lookarounds replace \b: a token that starts or ends with "-" has no word
+  // boundary there, and the old rule let about 3 % of minted tokens through.
+  return line.replace(/(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{32,44}(?![A-Za-z0-9_-])/g, (m) => (m.includes("-") && !/[A-Z]/.test(m) ? m : "[redacted]"));
 }
 
 // ─── Exports ───────────────────────────────────────────────────────────────

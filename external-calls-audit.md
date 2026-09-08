@@ -84,6 +84,13 @@ Binary resolved via `host.resolveBinary("cf")`.
 | 13 | `cf create-service xsuaa application figaf-manager-xsuaa -c <xs-security.json>` | `cf:createXsuaa` | cloud | XSUAA v2 upgrade; polls every 5s, 10-min timeout |
 | 14 | `cf service figaf-manager-xsuaa` | `cf:createXsuaa`, `xsuaa:upgradeStatus` | cloud | |
 | 15 | `cf delete-service figaf-manager-xsuaa -f` | `cf:uninstallManager` | cloud | |
+| 15a | `cf services` | `faid:services`, `faid:provisionServices`, `faid:prepareSpaceServices` (via `effectiveServiceNames`) | cloud | Catalog v6: which PostgreSQL instance of the space is the backend's database when no Credential Store entry names one yet (prefill of the editable name; `parseCfServices` in `faid-database.js`). Read-only |
+| 15b | `cf service <instance>` | `faid:databaseStatus`, `faid:databasePrepare`, `faid:databaseRotate`, `faid:databaseDrop`, `faid:services` (`describeInstance` in `faid-database.js`) | cloud | GUID, offering, plan, status and bound apps of the database instance; the entry's GUID is compared with it (`stale` when re-created) |
+| 15c | `cf create-service-key <instance> figaf-manager` | `faid:databasePrepare`, `faid:databaseRotate`, `faid:databaseDrop`, the backend deploy in `faid:install` / `faid:update` (`ownerConnection` in `faid-database.js`) | cloud | The manager's ONE standing key on the FAID database instance (default `figaf-db`, editable); created on first use, "already exists" is success |
+| 15d | `cf service-key <instance> figaf-manager` | the same | cloud | `quiet`, `auditStdout: false`, masked `logCmd`: the key JSON is the database owner (`dbo`) credential; read into memory for one action, never logged or stored. At deploy only its public `sslrootcert` is used (row 15g) |
+| 15e | `cf delete-service-key <instance> figaf-manager -f` | `faid:databaseDrop`, `cf:uninstallManager` | cloud | The key goes with the FAID schema and with the manager; a missing key is fine |
+| 15f | `cf restart <shared backend>` | `faid:databaseRotate` | cloud | After a password rotation, when the backend is deployed (it reads the Credential Store entry at start) |
+| 15g | `cf set-env <shared backend> FAID_DATABASE_CA <pem>` | `faid:install`, `faid:update` (`deployPart`, backend only) | cloud | The instance's CA certificate chain (public, about 4.6 KB) for the backend's TLS verification; value masked in the terminal like every set-env |
 
 ### App Lifecycle
 
@@ -127,6 +134,24 @@ Binary resolved via `host.resolveBinary("cf")`.
 | 39a | `cf curl /v3/service_credential_bindings?type=app&service_instance_names=<instance>&app_names=<app>` | `faid:services` | cloud | `boundToManager` (Credential Store ↔ manager) and, catalog v4, `boundToBackend` (optional PI/PO instance ↔ shared backend); one call per instance |
 
 ---
+
+## Database connections (`pg`, TLS)
+
+The only module that opens a PostgreSQL connection is `packages/core/faid-database.js`
+(the `pg` package is required nowhere else). The manager administers the FAID
+backend's database access and never reads or writes application data
+(figaf-faid decision 0012 section 10).
+
+| # | Connection | Handler | Scope | Notes |
+|---|-----------|---------|-------|-------|
+| 1 | PostgreSQL over TLS (`sslrootcert` of the service key, `rejectUnauthorized: true`) to the FAID database instance as the owner of the standing service key `figaf-manager` (rows 15c-15e) | `faid:databasePrepare`, `faid:databaseRotate`, `faid:databaseDrop` | cloud | Statements: create or reconcile role `faid_app` (LOGIN, not a member of `dbo`), `CREATE SCHEMA IF NOT EXISTS faid`, `GRANT USAGE, CREATE ON SCHEMA faid TO faid_app`, `ALTER ROLE faid_app SET search_path TO faid`; rotation: `ALTER ROLE ... PASSWORD`; drop: `DROP SCHEMA faid CASCADE`, `DROP ROLE faid_app` in one transaction with `lock_timeout`/`statement_timeout`. Identifiers are constants validated against `^[a-z][a-z0-9_]{0,62}$`; the password is 32 alphanumeric characters. A pg error is reported as SQLSTATE + message with secrets replaced, never the statement text |
+| 2 | The same, as `faid_app` (the generated password) | `faid:databasePrepare`, `faid:databaseRotate` | cloud | Verification: `current_schema()` must be `faid`; one table of another schema (found as the owner) must answer `permission denied` (42501); a readable table is a refusal and nothing is stored |
+
+The connection details plus the generated password go to the SAP Credential
+Store (namespace `figaf-faid`, name `backend-database`, `credstore-client.js`
+over the manager's binding); the FAID backend reads them at start. The
+database instance is NEVER bound to a FAID app (`faid-apps.js` skips
+`bind-service` for a catalog service with `access: "own-role"`).
 
 ## Other Process Spawns
 
@@ -191,8 +216,9 @@ All runtime calls go through `https.get` (Node built-in). No third-party HTTP li
 | Category | Count | Scope |
 |----------|-------|-------|
 | BTP CLI commands | 21 | both / cloud |
-| CF CLI commands (direct) | 43 | both / cloud |
+| CF CLI commands (direct) | 50 | both / cloud |
 | CF v3 API (`cf curl`) | 8 | cloud only |
+| PostgreSQL connections (`pg`) | 2 | cloud only (`faid-database.js`) |
 
 | Other process spawns (system) | 8 | desktop / cloud / build |
 | HTTPS fetches (runtime) | 10 | both / cloud / desktop |

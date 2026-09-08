@@ -56,7 +56,11 @@ Prerequisites on the dev machine:
 - For the install smoke: the release built into `faid-artifacts/`
   (`node release/build.js --version x.y.z` in the figaf-faid repo) and a space WITHOUT the
   release's CF apps (the smoke refuses to start otherwise) but WITH the base
-  service instances (`figaf-faid-db`, `-xsuaa`, `-credstore`). The smoke
+  service instances (the database, default `figaf-db`; `figaf-faid-xsuaa`,
+  `figaf-faid-credstore`) and, since catalog v6, the database access
+  prepared (the Credential Store entry `backend-database`; the local server
+  needs the Credential Store binding in `VCAP_SERVICES`, for example a service
+  key of `figaf-faid-credstore` wrapped as `{"credstore":[{"credentials":...}]}`). The smoke
   installs from the LOCAL build on purpose: it gates a release before it is
   published to the store (figaf-faid `release/README.md`).
 

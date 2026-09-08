@@ -2,7 +2,7 @@
   "name": "figaf-manager",
   "version": "26.5.0",
   "private": true,
-  "description": "Figaf Manager — BTP-hosted wizard for deploying Figaf to SAP BTP Cloud Foundry",
+  "description": "Figaf Manager \u2014 BTP-hosted wizard for deploying Figaf to SAP BTP Cloud Foundry",
   "main": "cloud/server.js",
   "scripts": {
     "start": "node cloud/server.js",
@@ -22,6 +22,7 @@
     "@sap/xsenv": "^4.2.0",
     "@sap/xssec": "~4.13",
     "express": "^4.21.2",
+    "pg": "^8.23.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

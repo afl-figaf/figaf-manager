@@ -7,7 +7,7 @@ was `spikes/app-manager-poc/FINDINGS.md` in the figaf-faid repo). Behavior
 is in `SPEC.md`, reasons are in figaf-faid `decisions/`, run records in
 figaf-faid `docs/d1/RUNBOOK-VIRGIN.md`. Platform-level notes (release model,
 Figaf API client scopes) live in figaf-faid `docs/SOLUTION.md`.
-Last edited 2026-09-07.
+Last edited 2026-09-08.
 
 ## Open items
 
@@ -124,6 +124,27 @@ Last edited 2026-09-07.
     ERR` lines from `cf logs <app> --recent` to the detail. Extend
     `faid-apps.test.js` ("a failed cf start keeps the pointer") with a stderr
     that ends in the warning.
+
+16. **The backend's database access (catalog v6, 2026-09-08; SPEC 4.2).**
+    Built and tested: unit tests, the read-only e2e suite, the install
+    smoke (backend started from the entry inside CF), a server-side
+    render of the Base services card, and a live run of `faid-database.js`
+    against the dev space through a `cf ssh` tunnel (`docs/shared-database-plan.md`
+    section 6). The manager holds one standing service key `figaf-manager`
+    on the instance (Arsenii, 2026-09-08). Still open: (a) the manager's own screens in XSUAA mode in
+    the dev space (Setup step 3 **Prepare database access**, rotate, drop) -
+    a virgin run with release 0.7.0; (b) decision 0008 amendment for the
+    editable default name `figaf-db`, and decision 0012 section 9 (one
+    procedure, no modes) - done 2026-09-08 (0008 amended, 0012 section 11);
+    (c) the SAP support ticket on the binding user's privileges
+    (BC-CP-BSB-POSTGRES) before go-live; (d) Daniel's sign-off on one
+    backup and restore point when the Figaf Tool's instance is chosen (a
+    BTP restore is per instance and creates a new one: the Tool must be
+    bound again, the manager shows "stale" and needs Prepare again); (e)
+    settled: nobody runs the backend without the manager (Arsenii,
+    2026-09-08), so there is no local override; (f) editable names for the other instances on top of the `names`
+    mechanism (a separate task); (g) release 0.7.0 is built locally, not
+    published.
 
 ## Design notes still in force
 

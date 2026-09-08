@@ -235,7 +235,11 @@
       releases:  function (a) { return rpc("faid:releases", a || {}); },
       figafSystems: function () { return rpc("faid:figafSystems"); },
       // Catalog v3: base service instances created by the manager.
-      services:           function ()  { return rpc("faid:services"); },
+      services:           function (a) { return rpc("faid:services", a || {}); },
+      databaseStatus:     function ()  { return rpc("faid:databaseStatus"); },
+      databasePrepare:    function (a) { return rpc("faid:databasePrepare", a || {}); },
+      databaseRotate:     function ()  { return rpc("faid:databaseRotate"); },
+      databaseDrop:       function (a) { return rpc("faid:databaseDrop", a || {}); },
       provisionServices:  function (a) { return rpc("faid:provisionServices", a || {}); },
       bindManagerService: function (a) { return rpc("faid:bindManagerService", a || {}); },
       // Bind an optional instance (PI/PO) to the shared backend + restart it.

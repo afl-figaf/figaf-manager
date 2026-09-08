@@ -58,6 +58,13 @@
     var missing = notReady.filter(function (s) { return s.status !== "in-progress"; });
     var credstore = hasServices ? svc.filter(function (s) { return s.bindToManager; })[0] || null : null;
     var credBound = !!(credstore && credstore.boundToManager === true);
+    // Catalog v6: the backend's database is reached with its own role; the
+    // Credential Store entry must be prepared (Base services, "Prepare
+    // database access") before the platform can be installed.
+    var dbNotPrepared = hasServices ? svc.filter(function (s) {
+      return s.access === "own-role" && !(s.databaseAccess && s.databaseAccess.prepared);
+    }) : [];
+    var dbReady = dbNotPrepared.length === 0;
     var names = function (list) { return list.map(function (s) { return s.name; }).join(", "); };
 
     var afterPrepare = ssoDone ? "" : "after step 1";
@@ -91,7 +98,7 @@
     var servicesStepN = 0;
     if (hasServices) {
       servicesStepN = steps.length + 1;
-      var servicesDone = allReady && (!credstore || (credBound && bindingActive));
+      var servicesDone = allReady && dbReady && (!credstore || (credBound && bindingActive));
       var when = "";
       if (missing.length) {
         when = missing.length + " of " + svc.length + " instance" + (missing.length === 1 ? "" : "s") +
@@ -102,12 +109,18 @@
         when = "Instances ready. The Credential Store is not bound to the manager: click \"Bind to manager\" below, then restart.";
       } else if (credstore && !bindingActive) {
         when = "Bound. Restart the manager (below) to activate the binding.";
+      } else if (!dbReady) {
+        var dbInst = dbNotPrepared[0].instanceName || dbNotPrepared[0].name;
+        var dbState = (dbNotPrepared[0].databaseAccess && dbNotPrepared[0].databaseAccess.state) || "not-prepared";
+        when = dbState === "stale"
+          ? "The database access entry is stale (" + ((dbNotPrepared[0].databaseAccess && dbNotPrepared[0].databaseAccess.reason) || "instance changed") + "). Click \"Prepare database access\" for " + dbInst + " below."
+          : "Instances ready. The database access is not prepared: click \"Prepare database access\" for " + dbInst + " below (role faid_app, schema faid, Credential Store entry).";
       }
       steps.push({
         id: "services",
         n: servicesStepN,
         title: "Base services",
-        why: "The service instances of this release, created in step 1. The database takes a few minutes.",
+        why: "The service instances of this release, created in step 1. The database takes a few minutes; then its access for the FAID backend is prepared here (own role, schema faid).",
         when: when,
         done: servicesDone,
         blocked: servicesDone ? "" : afterPrepare,
@@ -121,9 +134,9 @@
       title: "Shared backend and first app",
       why: "Install the first app on FAID Apps. The shared backend connector every app uses is " +
         "deployed with it, automatically.",
-      when: hasServices ? "Waits until every base service is ready." : "",
+      when: hasServices ? "Waits until every base service is ready and the database access is prepared." : "",
       done: platformDone,
-      blocked: platformDone ? "" : (!ssoDone ? afterPrepare : (hasServices && !allReady ? "after step " + servicesStepN : "")),
+      blocked: platformDone ? "" : (!ssoDone ? afterPrepare : (hasServices && (!allReady || !dbReady) ? "after step " + servicesStepN : "")),
       cta: "Open FAID Apps",
     });
 

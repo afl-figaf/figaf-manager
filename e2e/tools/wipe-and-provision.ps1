@@ -11,14 +11,14 @@
 #   -Mode wipe                DRY RUN: print what would be deleted
 #   -Mode wipe -Force         delete ALL apps, service keys, service
 #                             instances, and orphaned routes in the space
-#   -Mode wipe -Force -Keep figaf-faid-db
+#   -Mode wipe -Force -Keep figaf-db
 #                             same, but keep the named service instances
 #                             (PostgreSQL alone costs ~15 min to delete and
 #                             re-create; xsuaa and credstore take seconds).
 #                             Apps are always deleted, so bindings to a kept
 #                             instance are removed with them.
 #   -Mode provision           create the base services of a virgin FAID Apps install:
-#                               figaf-faid-db         postgresql-db / free
+#                               figaf-db              postgresql-db / free  (the FAID backend's own role is prepared in Setup step 3)
 #                               figaf-faid-xsuaa      xsuaa / application  (xs-security.json)
 #                               figaf-faid-credstore  credstore / free     (basic auth on instance)
 #                             and wait until every create succeeded.
@@ -169,7 +169,7 @@ if ($Mode -eq 'provision') {
     # Re-running provision is fine as long as only the base services are present
     # (a partial or retried provision). Any OTHER leftover service means the wipe
     # was incomplete - stop rather than build on a dirty space.
-    $baseServices = @('figaf-faid-db', 'figaf-faid-xsuaa', 'figaf-faid-credstore')
+    $baseServices = @('figaf-db', 'figaf-faid-xsuaa', 'figaf-faid-credstore')
     $unexpected = @($services | Where-Object { $baseServices -notcontains $_ })
     if ($unexpected.Count) {
         Fail ("unexpected leftover services: " + ($unexpected -join ', ') + " - run -Mode wipe -Force first.")
@@ -195,11 +195,11 @@ if ($Mode -eq 'provision') {
 
     # Idempotent: skip a service that already exists (e.g. after a partial run).
     $existing = @(Get-SpaceServices)
-    if ($existing -notcontains 'figaf-faid-db') { Invoke-Cf @('create-service', 'postgresql-db', 'free', 'figaf-faid-db') }
+    if ($existing -notcontains 'figaf-db') { Invoke-Cf @('create-service', 'postgresql-db', 'free', 'figaf-db') }
     if ($existing -notcontains 'figaf-faid-xsuaa') { Invoke-Cf @('create-service', 'xsuaa', 'application', 'figaf-faid-xsuaa', '-c', $xsSecurity) }
     if ($existing -notcontains 'figaf-faid-credstore') { Invoke-Cf @('create-service', 'credstore', 'free', 'figaf-faid-credstore', '-c', $credstoreConfig) }
 
-    $wanted = @('figaf-faid-db', 'figaf-faid-xsuaa', 'figaf-faid-credstore')
+    $wanted = @('figaf-db', 'figaf-faid-xsuaa', 'figaf-faid-credstore')
     $deadline = (Get-Date).AddMinutes(9)
     while ($true) {
         $pending = @()

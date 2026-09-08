@@ -76,7 +76,7 @@ test("happy path with assignment: the six phases run in order, the chosen plans 
     "xsuaa:upgradeStatus", "cf:createXsuaa", "xsuaa:assignRoleCollection", "faid:prepareSpaceServices",
     "cf:pushManagerApprouter", "cf:mapRoute", "cf:restage",
   ]);
-  assert.deepEqual(calls.find((c) => c.name === "faid:prepareSpaceServices").args[0], { plans: { "figaf-faid-db": "standard", "figaf-faid-credstore": "free" }, groups: [] });
+  assert.deepEqual(calls.find((c) => c.name === "faid:prepareSpaceServices").args[0], { plans: { "figaf-faid-db": "standard", "figaf-faid-credstore": "free" }, names: {}, groups: [] });
   assert.deepEqual(calls.find((c) => c.name === "xsuaa:assignRoleCollection").args, ["FAID-Manager-Admin", "me@example.com"]);
   assert.deepEqual(calls.find((c) => c.name === "cf:mapRoute").args[0], { app: "figaf-manager-approuter", domain: "cfapps.eu10-004.hana.ondemand.com", hostname: "figaf-manager-x" });
   assert.deepEqual(calls.find((c) => c.name === "cf:restage").args[0], { app: "figaf-manager", bindXsuaa: true, skipIfBound: true, unmapRoute: { domain: "cfapps.eu10-004.hana.ondemand.com", hostname: "figaf-manager-x" } });
@@ -166,4 +166,12 @@ test("prepare-space: the chosen optional service groups reach faid:prepareSpaceS
   assert.equal(r.ok, true, JSON.stringify(r));
   const call = calls.find((c) => c.name === "faid:prepareSpaceServices");
   assert.deepEqual(call.args[0].groups, ["pipo"]);
+});
+
+test("names (catalog v6): the typed instance names reach faid:prepareSpaceServices next to the plans", async () => {
+  const w = load();
+  const { api, calls } = fakeApi({ services: { ok: true, created: ["customer-pg", "figaf-faid-credstore"], bound: ["figaf-faid-credstore"], pending: ["customer-pg"] } });
+  const r = await w.figafRunPrepareSpace({ api, plans: { "figaf-db": "standard" }, names: { "figaf-db": "customer-pg" }, autoAssign: false, onPhase: () => {} });
+  assert.equal(r.ok, true);
+  assert.deepEqual(calls.find((c) => c.name === "faid:prepareSpaceServices").args[0], { plans: { "figaf-db": "standard" }, names: { "figaf-db": "customer-pg" }, groups: [] });
 });

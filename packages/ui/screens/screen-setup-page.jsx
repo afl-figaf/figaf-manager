@@ -43,9 +43,24 @@ function planNote(offering, plan) {
   return (o && o[plan]) || "";
 }
 
-// ── Step 1, part 1: which plans. One dropdown per MISSING instance with more
-// than one plan; existing instances are shown as they are.
-function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, disabled }) {
+// The consequence of an own-role database on an instance that already exists
+// (catalog v6, decision 0012 section 10). Shown wherever the instance is named.
+function DatabaseAccessNote({ s }) {
+  const bound = (s.boundApps || []).filter(Boolean);
+  return (
+    <span style={{ display: "block", fontSize: 12, color: "var(--ink-3)", marginTop: 2 }} data-database-note="">
+      The FAID backend gets its own role <span className="kbd">faid_app</span>, limited to schema <span className="kbd">faid</span>; it never binds this instance.
+      {bound.length > 0 && <> Bound today: <strong>{bound.join(", ")}</strong>. Every app bound to this instance runs as <span className="kbd">dbo</span> and keeps full access, including schema <span className="kbd">faid</span>. One backup and restore point for everything in this instance; plan, connection limit and engine version are shared.</>}
+    </span>
+  );
+}
+
+// ── Step 1, part 1: which plans, and which instance for an editable name. One
+// dropdown per MISSING instance with more than one plan; existing instances are
+// shown as they are. A service with `nameEditable` (catalog v6: the database)
+// gets a text field: the catalog name is the default; the space's PostgreSQL
+// instance is prefilled when there is one; the person may type any name.
+function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, names, setNames, onNamesChanged, nameError, disabled }) {
   if (services === null) {
     return (
       <div className="setup-panel" data-panel="service-plans">
@@ -80,12 +95,31 @@ function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, disab
         const exists = s.status !== "missing";
         const plan = plans[s.name] || s.plan;
         const canChoose = !exists && (s.plans || []).length > 1;
+        const editable = !!s.nameEditable;
+        const instanceName = s.instanceName || s.name;
+        const typed = names && names[s.name] != null ? names[s.name] : instanceName;
+        const others = (s.candidates || []).map((c) => c.name).filter((n) => n !== instanceName);
         return (
-          <div key={s.name} className="setup-plan-row" data-service={s.name}>
-            <span className="kbd">{s.name}</span>
+          <div key={s.name} className="setup-plan-row" data-service={s.name} data-instance={instanceName} style={editable ? { flexWrap: "wrap" } : undefined}>
+            {editable ? (
+              <input
+                className="input is-mono"
+                data-instance-name={s.name}
+                value={typed}
+                disabled={disabled}
+                spellCheck={false}
+                style={{ width: 220 }}
+                title="The name of the PostgreSQL service instance. Default figaf-db; an existing instance (for example the Figaf Tool's) is used as it is; a new name is created."
+                onChange={(e) => setNames((p) => ({ ...(p || {}), [s.name]: e.target.value }))}
+                onBlur={() => onNamesChanged && onNamesChanged()}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onNamesChanged && onNamesChanged(); } }}
+              />
+            ) : (
+              <span className="kbd">{instanceName}</span>
+            )}
             <span style={{ fontSize: 12, color: "var(--ink-3)", flex: 1, minWidth: 160 }}>{s.purpose || s.offering}</span>
             {exists && <span className="pill green">exists</span>}
-            {exists && <span style={{ fontSize: 12, color: "var(--ink-3)" }}>plan {s.plan}</span>}
+            {exists && <span style={{ fontSize: 12, color: "var(--ink-3)" }}>plan {s.actualPlan || s.plan}</span>}
             {!exists && !canChoose && <span style={{ fontSize: 12, color: "var(--ink-3)" }}>plan {s.plan}</span>}
             {canChoose && (
               <>
@@ -100,6 +134,16 @@ function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, disab
                 </select>
                 <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{planNote(s.offering, plan)}</span>
               </>
+            )}
+            {editable && nameError && nameError.name === s.name && (
+              <span style={{ display: "block", width: "100%", fontSize: 12, color: "var(--error, #b91c1c)" }} data-name-error="">{nameError.error}</span>
+            )}
+            {editable && exists && <span style={{ width: "100%" }}><DatabaseAccessNote s={s} /></span>}
+            {editable && !exists && (
+              <span style={{ display: "block", width: "100%", fontSize: 12, color: "var(--ink-3)", marginTop: 2 }} data-database-note="">
+                Will be created with the plan above (about 7 minutes, in the background). The FAID backend gets its own role <span className="kbd">faid_app</span>, limited to schema <span className="kbd">faid</span>.
+                {others.length > 0 && <> Other PostgreSQL instances in this space: {others.join(", ")}.</>}
+              </span>
             )}
           </div>
         );
@@ -212,6 +256,25 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged 
   // Optional service groups the person ticked (catalog v4, decision 0011).
   // Empty by default: nothing optional is created unless it is asked for.
   const [groups, setGroups] = React.useState([]);
+  // Editable instance names (catalog v6: the database). `names` holds what the
+  // person typed per catalog name; `named` the faid:services answer for those
+  // names (status of the typed instance), shown instead of the page's list.
+  const [names, setNames] = React.useState({});
+  const [named, setNamed] = React.useState(null);
+  const [nameError, setNameError] = React.useState(null);
+  const shownServices = named || services;
+  const refreshNamed = React.useCallback(async () => {
+    if (!api || !api.faid || !api.faid.services) return;
+    const sent = {};
+    for (const [k, v] of Object.entries(names || {})) if (String(v || "").trim()) sent[k] = String(v).trim();
+    try {
+      const r = await api.faid.services({ names: sent });
+      if (r && r.ok) { setNamed(r.services || null); setNameError(null); }
+      else if (r && r.error) setNameError({ name: Object.keys(sent)[0] || "", error: r.error });
+    } catch (e) {
+      setNameError({ name: Object.keys(sent)[0] || "", error: e.message });
+    }
+  }, [api, names]);
   const [precheck, setPrecheck] = React.useState(null);
   const [autoAssign, setAutoAssign] = React.useState(false);
   const [assignTo, setAssignTo] = React.useState("");
@@ -284,7 +347,7 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged 
   }, [markPhase]);
 
   const spaceOk = spaceCheck.status === "ok";
-  const canStart = signedIn && spaceOk && rolePlan !== null && services !== null && (!autoAssign || emailOk);
+  const canStart = signedIn && spaceOk && rolePlan !== null && services !== null && (!autoAssign || emailOk) && !nameError;
 
   async function run() {
     if (!canStart || started) return;
@@ -295,11 +358,14 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged 
     setCtx((c) => ({ ...c, setupRunning: true }));
     // Only the plans of instances that do not exist yet are sent.
     const chosen = {};
-    for (const s of services || []) {
+    for (const s of shownServices || []) {
       if (s.status === "missing" && (s.plans || []).length > 1) chosen[s.name] = plans[s.name] || s.plan;
     }
+    // The typed instance names (catalog v6); empty = the default.
+    const sentNames = {};
+    for (const [k, v] of Object.entries(names || {})) if (String(v || "").trim()) sentNames[k] = String(v).trim();
     try {
-      const r = await runner({ api, plans: chosen, groups, autoAssign, assignTo, onPhase: markPhase });
+      const r = await runner({ api, plans: chosen, names: sentNames, groups, autoAssign, assignTo, onPhase: markPhase });
       if (!r.ok) { setError(r.error); return; }
       setOutcome({ ...r, managerMode: r.alreadyBound ? "xsuaa" : null });
       setCtx((c) => ({ ...c, xsuaaUpgradeInitiated: true }));
@@ -376,7 +442,8 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged 
     <div className="setup-step-body" data-body="prepare">
       {!started && (
         <>
-          <ServicePlansPanel services={services} plans={plans} setPlans={setPlans} groups={groups} setGroups={setGroups} disabled={started} />
+          <ServicePlansPanel services={shownServices} plans={plans} setPlans={setPlans} groups={groups} setGroups={setGroups}
+            names={names} setNames={setNames} onNamesChanged={refreshNamed} nameError={nameError} disabled={started} />
           <RoleAssignPanel plan={rolePlan} autoAssign={autoAssign} setAutoAssign={setAutoAssign} assignTo={assignTo}
             setAssignTo={setAssignTo} emailOk={emailOk} roleName={roleName} onAddBtp={addBtpLoginFirst} />
         </>
@@ -576,16 +643,25 @@ function BaseServicesStep({ ctx, services, onRefresh, onOpenTerminal }) {
     return () => clearInterval(h);
   }, [signedIn, creating, onRefresh]);
 
+  const [dbNote, setDbNote] = React.useState(null); // the last database action's result line
+
   async function serviceAction(kind, fn) {
     if (busy) return;
     setBusy(kind);
     setOutcome(null);
+    if (/^database-/.test(kind)) setDbNote(null);
     try {
       const r = await fn();
       if (r && !r.ok && r.error) {
         const build = (typeof window !== "undefined" && window.figafActionOutcome) || null;
         const input = { action: kind, appName: "Base services", result: r, managerVersion: window.figafVersion, org: ctx.login.org, space: ctx.login.space, at: new Date().toISOString() };
         setOutcome(build ? build(input) : { ok: false, title: `${kind} failed`, facts: [{ label: "Error", value: r.error }], report: JSON.stringify(input, null, 2), at: input.at });
+      } else if (r && r.ok && kind === "database-prepare") {
+        setDbNote(`Database access prepared on ${r.instanceName}: role ${r.role}, schema ${r.schema}, entry written.${r.verify && r.verify.note ? " " + r.verify.note : ""}${r.passwordReused ? " The existing password was kept." : ""}`);
+      } else if (r && r.ok && kind === "database-rotate") {
+        setDbNote(`Password rotated on ${r.instanceName}.${r.restarted ? ` ${r.restarted} was restarted and reads the new entry.` : " The backend reads it at its next start."}`);
+      } else if (r && r.ok && kind === "database-drop") {
+        setDbNote(`Schema faid and role faid_app dropped on ${r.instanceName}; the entry was deleted.`);
       }
       return r;
     } finally {
@@ -600,10 +676,14 @@ function BaseServicesStep({ ctx, services, onRefresh, onOpenTerminal }) {
   return (
     <div className="setup-step-body" data-body="services">
       <FaidActionOutcome outcome={outcome} onDismiss={() => setOutcome(null)} onOpenTerminal={onOpenTerminal} />
+      {dbNote && <div className="setup-box is-ok" data-database-outcome="" style={{ marginBottom: 10 }}>{dbNote}</div>}
       <BaseServicesCard
         services={services}
         busy={busy}
         onRefresh={onRefresh}
+        onDatabasePrepare={api.faid.databasePrepare ? (instanceName) => serviceAction("database-prepare", () => api.faid.databasePrepare({ instanceName })) : null}
+        onDatabaseRotate={api.faid.databaseRotate ? () => serviceAction("database-rotate", () => api.faid.databaseRotate()) : null}
+        onDatabaseDrop={api.faid.databaseDrop ? () => serviceAction("database-drop", () => api.faid.databaseDrop({ confirm: true })) : null}
         onProvision={(plans, only) => serviceAction("provision", () => api.faid.provisionServices(only && only.length ? { plans, only } : { plans }))}
         onBind={(name) => serviceAction("bind", () => api.faid.bindManagerService({ name }))}
         onBindPlatform={api.faid.bindPlatformService

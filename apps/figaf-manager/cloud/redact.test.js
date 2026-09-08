@@ -70,3 +70,14 @@ test("non-string input returned unchanged (defensive)", () => {
   assert.equal(redact(null), null);
   assert.equal(redact(42), 42);
 });
+
+test("does NOT redact kebab-case names and GUIDs (hyphens, no uppercase): CF app names of 32-44 characters stay readable", () => {
+  const line = "cf push figaf-faid-apps-b2b-archiving-setup -p dir --no-manifest";
+  assert.equal(redact(line), line);
+  const guid = "cf curl /v3/apps?space_guids=e4fb438f-1df1-4e4f-8962-02b4ed2eca63";
+  assert.equal(redact(guid), guid);
+  // A hyphenated token WITH uppercase letters is still hidden.
+  assert.equal(redact("x AbCd-Ef1234567890aBcDeFGHIJKLmnop y"), "x [redacted] y");
+  // A lowercase string without hyphens in the token shape is still hidden (safe direction).
+  assert.equal(redact("x " + "abcdefghij0123456789abcdefghijkl" + " y"), "x [redacted] y");
+});

@@ -158,3 +158,48 @@ test("every step carries a title and a why-line; step 1 names the passcode, the 
   assert.equal(byId(r, "services").cta, null);
   assert.equal(byId(r, "platform").title, "Shared backend and first app");
 });
+
+// Catalog v6: the database is reached with the backend's own role; the access
+// (Credential Store entry) must be prepared in step 3 before step 4 opens.
+const V6 = (dbAccess, dbStatus = "ready") => ({
+  ok: true,
+  services: [
+    { name: "figaf-db", instanceName: "customer-pg", status: dbStatus, access: "own-role", nameEditable: true, databaseAccess: dbAccess },
+    { name: "figaf-faid-xsuaa", status: "ready" },
+    { name: "figaf-faid-credstore", status: "ready", bindToManager: true, boundToManager: true },
+  ],
+});
+const V6_CTX = { stored: { available: true, bindingPresent: true }, faid: { ok: true, platform: { status: "missing" } }, figaf: { configured: false } };
+
+test("v6: instances ready but the database access not prepared -> step 3 stays open with the Prepare hint naming the instance; step 4 is blocked", () => {
+  const r = load()({ ...V6_CTX, services: V6({ state: "not-prepared", prepared: false }) }, { ssoDone: true });
+  const s3 = byId(r, "services");
+  assert.equal(s3.done, false);
+  assert.equal(s3.current, true);
+  assert.match(s3.when, /database access is not prepared/);
+  assert.match(s3.when, /"Prepare database access" for customer-pg/);
+  assert.match(s3.when, /faid_app/);
+  assert.equal(byId(r, "platform").blocked, "after step 3");
+  assert.match(byId(r, "platform").when, /database access is prepared/);
+});
+
+test("v6: a stale entry keeps step 3 open and says why", () => {
+  const r = load()({ ...V6_CTX, services: V6({ state: "stale", prepared: false, reason: "instance customer-pg was re-created (another GUID); prepare again" }) }, { ssoDone: true });
+  const s3 = byId(r, "services");
+  assert.equal(s3.done, false);
+  assert.match(s3.when, /stale/);
+  assert.match(s3.when, /re-created/);
+});
+
+test("v6: access prepared -> step 3 done, step 4 current; the database still creating wins over the access text", () => {
+  const done = load()({ ...V6_CTX, services: V6({ state: "prepared", prepared: true, instanceName: "customer-pg" }) }, { ssoDone: true });
+  assert.equal(byId(done, "services").done, true);
+  assert.equal(byId(done, "platform").current, true);
+  const creating = load()({ ...V6_CTX, services: V6({ state: "not-prepared", prepared: false }, "in-progress") }, { ssoDone: true });
+  assert.match(byId(creating, "services").when, /Still being created: figaf-db/);
+});
+
+test("v3 rows without `access` are unchanged by the v6 rule", () => {
+  const r = load()({ ...V6_CTX, services: V3("ready", "ready", "ready", true) }, { ssoDone: true });
+  assert.equal(byId(r, "services").done, true);
+});

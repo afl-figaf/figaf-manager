@@ -2896,6 +2896,15 @@ function createOrchestrator({ host, send, audit }) {
           { name: "delete manager",           args: ["delete", "figaf-manager", "-r", "-f"] },
         ];
         if (legacy) steps.push({ name: "delete-service xsuaa", args: ["delete-service", xsuaaInst, "-f"] });
+        // The manager's standing service key on the FAID database instance
+        // (catalog v6, faid-database.js) goes with the manager; the role,
+        // the schema and the entry stay for the backend.
+        try {
+          const st = await handlers["faid:databaseStatus"]();
+          if (st && st.instanceName) steps.unshift({ name: "delete-service-key database", args: ["delete-service-key", st.instanceName, "figaf-manager", "-f"] });
+        } catch (e) {
+          log("teardown", "warn", `database key check skipped: ${e.message}`);
+        }
         for (const step of steps) {
           log("teardown", "line", `Running: cf ${step.args.join(" ")}`);
           await run(resolveCf(), step.args, { source: "cf" }).catch((e) => {

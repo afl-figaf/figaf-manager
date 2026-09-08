@@ -8,9 +8,10 @@ are in the figaf-faid repo (`decisions/`); the human install procedure is
 figaf-faid `docs/d1/MANUAL-RUNBOOK.md`; run records are figaf-faid
 `docs/d1/RUNBOOK-VIRGIN.md`; what to do when an action fails is
 `TROUBLESHOOTING.md` and what is still open is `OPEN-ITEMS.md` (this folder).
-Last edited 2026-09-04 (the release store and one version per installation,
-figaf-faid decision 0010; the CF sign-in targets the manager's own space by
-itself, section 5.3).
+Last edited 2026-09-08 (catalog v6: the backend's own database role and the
+editable database instance name, section 4.2; before: the release store and
+one version per installation, decision 0010; the CF sign-in targets the
+manager's own space by itself, section 5.3).
 
 Delivery unit: the versioned FAID release installed by the manager, not
 an MTAR (figaf-faid `decisions/0007-delivery-unit-platform-release.md`,
@@ -25,7 +26,7 @@ command and every download visible, and without stored personal credentials.
 It also creates the service instances the platform needs, sets up its own
 persistent sign-in, and holds the system connections the apps use.
 
-## 2. Release, catalog (v5) and the release store
+## 2. Release, catalog (v6) and the release store
 
 A RELEASE is a versioned set: `catalog.json`, `release.json` (checksums and
 the source commit), `xs-security.json` and one zip per CF app. Releases live
@@ -41,6 +42,14 @@ The manager verifies them when the Figaf connection is stored and before
 every install and update (section 3, step 2; section 7). Older catalogs
 without the field verify nothing.
 
+Catalog v6 (2026-09-08, figaf-faid decision 0012 section 10) adds to a
+service entry `"access": "own-role"` and `"nameEditable": true`. Today only
+the database carries them: `figaf-db` (the default name) is reached by the
+FAID backend with ITS OWN DATABASE ROLE, never through a binding, and the
+person may give the instance any name in Setup step 1 (section 4.2). The
+shared backend's `services` list no longer names the database; the
+Credential Store is required (the database credentials come from it).
+
 ### 2.1 The release source
 
 Exactly one source per manager process, named on the FAID Apps page:
@@ -48,6 +57,7 @@ Exactly one source per manager process, named on the FAID Apps page:
 | Setting | Kind | Used for |
 |---|---|---|
 | `FIGAF_FAID_RELEASE_URL` (manifest.yml, e.g. `https://pub-<id>.r2.dev/faid`) | remote | every shipped manager; a custom domain or a mirror is a change of this value |
+| the same URL ending in `/faid-dev` | remote | a manager used to TEST changes (Emil's space, the dev space): the dev channel, figaf-faid decision 0017 |
 | `FIGAF_FAID_ARTIFACTS_DIR` (a directory with ONE release in the flat build shape) | local | development, the e2e fixtures, the install smoke; wins over the URL when set |
 | `faid-artifacts/` next to `host.cloud.js`, nothing set | local | a developer's `npm start` after a local build |
 
@@ -58,6 +68,17 @@ Store layout (the contract with figaf-faid): `<url>/index.json` =
 `{ latest, versions: [{ version, publishedAt }] }`; `<url>/<version>/` holds
 `catalog.json`, `release.json`, `xs-security.json`, the zips. Versions are
 immutable.
+
+Two channels, two prefixes, each with its own `index.json` (figaf-faid
+decision 0017, 2026-09-08): `faid/` holds the release versions `x.y.z`;
+`faid-dev/` holds the dev versions `x.y.z-dev.N` that Jenkins publishes from
+any branch (N = the Jenkins build number). The manager treats both the same;
+only the version rule differs: `x.y.z-dev.N` is accepted, sorts below `x.y.z`
+and above `x.y.(z-1)`, and two dev builds compare by N. So on the dev channel
+**Update installation** moves `0.6.2-dev.9` to `0.6.2-dev.10`, and a manager
+that is later pointed at `faid/` moves `0.6.2-dev.10` to `0.6.2` upwards.
+Dev versions are immutable like release versions (the cache is keyed by
+version). No other suffix is valid (`-rc.1`, `-e2e` are refused).
 
 ### 2.2 Read, verify, cache (`packages/core/release-store.js`)
 
@@ -117,8 +138,9 @@ immutable.
 {
   "releaseVersion": "0.4.0",
   "services": [
-    { "name": "figaf-faid-db", "offering": "postgresql-db", "plan": "free",
-      "plans": ["free", "standard"], "purpose": "Application database" },
+    { "name": "figaf-db", "offering": "postgresql-db", "plan": "free",
+      "plans": ["free", "standard"], "access": "own-role", "nameEditable": true,
+      "purpose": "PostgreSQL instance; the backend gets its own role" },
     { "name": "figaf-faid-xsuaa", "offering": "xsuaa", "plan": "application",
       "configFile": "xs-security.json", "purpose": "Roles of the FAID Apps" },
     { "name": "figaf-faid-credstore", "offering": "credstore", "plan": "free",
@@ -129,8 +151,8 @@ immutable.
     "name": "Shared backend (connector)",
     "cfApps": [ { "name": "figaf-faid-backend", "artifact": "backend.zip", "sha256": "...",
                   "buildpack": "nodejs_buildpack", "stack": "cflinuxfs5", "memory": "256M", "disk": "1024M",
-                  "services": ["figaf-faid-db", "figaf-faid-xsuaa"],
-                  "optionalServices": ["figaf-faid-credstore"], "env": { } } ]
+                  "services": ["figaf-faid-xsuaa", "figaf-faid-credstore"],
+                  "optionalServices": ["figaf-connectivity", "figaf-destination"], "env": { } } ]
   },
   "apps": [
     { "id": "b2b-archiving-setup", "name": "B2B Archiving Setup", "version": "0.4.0",
@@ -161,12 +183,18 @@ Rules:
   admin's decision). `configFile` ships next to the catalog; `config` is
   inline JSON. Both reach `cf create-service -c` as a FILE.
   `bindToManager` = bound to the manager itself (the Credential Store).
+  `access: "own-role"` (v6) = the backend reaches the instance with its own
+  database role; the manager never binds it to any FAID app, whatever a
+  cfApp's `services` says (section 4.2). `nameEditable: true` (v6) = the
+  catalog `name` is a default the person may change in Setup step 1; the
+  actual name is discovered, never stored (section 4.2).
 - `sha256` per artifact is verified before extraction; a mismatch deploys
   nothing.
 - Names are frozen (decision 0008): CF apps `figaf-faid-backend`,
-  `figaf-faid-apps-<app-id>`; instances `figaf-faid-db/-xsuaa/-credstore`; approuter
-  destination `figaf-faid-backend`. `channelVersion` is read as a legacy
-  alias of `releaseVersion`.
+  `figaf-faid-apps-<app-id>`; instances `figaf-faid-xsuaa/-credstore`; approuter
+  destination `figaf-faid-backend`. The database instance is the exception
+  since v6: default `figaf-db`, editable (decision 0008 to be amended).
+  `channelVersion` is read as a legacy alias of `releaseVersion`.
 - The release's `xs-security.json` holds the APPS' roles only; the manager
   merges its own roles in (section 5).
 
@@ -181,10 +209,11 @@ the audit log.
 | `faid:catalog({version?})`, `faid:status` | the catalog of the installation's version (installed, else latest; section 2.3) with `source`, `installed`, `latest`; live state per CF app from `cf curl /v3/apps` (scoped to the targeted space), installed version from the env var `FIGAF_APP_VERSION`, the in-flight action (`running`), per part `staging` (a STOPPED part with a build in `STAGING`, one `cf curl /v3/builds`), and `release` (the version the rows were computed against) |
 | `faid:releases({refresh?})` | the release store: `source`, `installed`, `latest`, `current`, `updateAvailable`, `versions[]` with `selectable` / `reason` (section 2.3). `refresh` re-reads `index.json` now. No cf call beyond the installed-version probe |
 | `faid:running` | the lifecycle action running now, or null. No cf call. For a page that did not start it (reload, second tab, second session) |
-| `faid:services`, `faid:provisionServices({plans, only, waitOnly})` | `cf service <name>`; `cf create-service` for missing instances, poll every 10 s until `succeeded` (15 min limit); a `failed` instance is deleted and created again. With `waitOnly`, only those names are awaited; the others are started and reported as `pending`. Per row `boundToManager` (Credential Store, one `cf curl /v3/service_credential_bindings`); for optional instances (catalog v4) also `backendDeployed` (from the same `cf app <backend> --guid` probe that reads the installed version, no extra call) and `boundToBackend` (the same curl against the shared backend, one per instance), so the panel offers the bind only when it is needed (section 4.1) |
+| `faid:services({names?})`, `faid:provisionServices({plans, only, waitOnly, names?})` | `cf service <instance>`; `cf create-service` for missing instances, poll every 10 s until `succeeded` (15 min limit); a `failed` instance is deleted and created again (never an `own-role` database: it is reported and left alone). With `waitOnly`, only those names are awaited; the others are started and reported as `pending`. `names` = `{ catalogName: instanceName }` for `nameEditable` services (v6); `plans`, `only` and `waitOnly` stay keyed by the CATALOG name. Per row `name` (catalog), `instanceName` (actual, section 4.2), `nameSource`, `candidates`, `boundApps`, `actualPlan`, `access`, `nameEditable`, `databaseAccess` (own-role rows), `boundToManager` (Credential Store, one `cf curl /v3/service_credential_bindings`); for optional instances (catalog v4) also `backendDeployed` (from the same `cf app <backend> --guid` probe that reads the installed version, no extra call) and `boundToBackend` (the same curl against the shared backend, one per instance), so the panel offers the bind only when it is needed (section 4.1) |
+| `faid:databaseStatus`, `faid:databasePrepare({instanceName})`, `faid:databaseRotate`, `faid:databaseDrop({confirm:true})` | the backend's database access (section 4.2, `packages/core/faid-database.js`): status without a database connection; prepare = temporary service key, SQL as the owner, verification as `faid_app`, Credential Store entry, key deleted; rotate = new password, entry updated, `cf restart <backend>` when deployed; drop = `DROP SCHEMA faid CASCADE`, `DROP ROLE faid_app`, entry deleted. Prepare, rotate and drop take the lifecycle lock. Hosted only |
 | `faid:bindManagerService`, `faid:restartSelf` | `cf bind-service <manager> <name>`; `cf restart <manager>` (fire-and-forget) |
 | `faid:ensureXsuaa({updateOnly})` | create or `cf update-service figaf-faid-xsuaa` with the composed document (section 5) |
-| `faid:prepareSpaceServices({plans})` | Setup step 1: create every missing catalog instance except XSUAA with the plans the person chose; wait only for the manager-bound ones (Credential Store) and bind them, no restart; the database is started and left creating (`pending`) (section 5.2) |
+| `faid:prepareSpaceServices({plans, names, groups})` | Setup step 1: create every missing catalog instance except XSUAA with the plans the person chose and under the names typed for editable ones (v6); an instance that exists under that name is accepted as it is; wait only for the manager-bound ones (Credential Store) and bind them, no restart; the database is started and left creating (`pending`) (section 5.2) |
 | `faid:prepareManagerServices` | legacy: the wizard frame's SSO upgrade (Credential Store only, default plan). Not used by the console |
 | `faid:install({appId, version?})` | one app at the installed version (latest on an empty space); see below |
 | `faid:update({version})` / `faid:update({appId})` | installation-wide update to `version` (lock name `platform`) / re-deploy of one app at the installed version; see below and section 2.3 |
@@ -215,7 +244,10 @@ Install / update algorithm:
 2. Refuse when the landscape lacks a stack the catalog names (`cf stacks`
    once per action; step `stack`, nothing pushed; a failing `cf stacks` only
    skips the check), or when a REQUIRED instance (any name in a cfApp's
-   `services`) is missing: "create them first (Setup, step 3)", or when the
+   `services`, own-role services left out) is missing: "create them first
+   (Setup, step 3)", or when the database access is not prepared (v6: no
+   Credential Store entry, or its instance is gone or not ready; step
+   `database`: "Setup step 3, Prepare database access"), or when the
    stored Figaf API client lacks an authority of the release's `figafScopes`
    (step `figafScopes`, `connections:figafScopesCheck`: one token request,
    the answer's `scope` field is compared). No stored Figaf connection is not
@@ -230,7 +262,8 @@ Install / update algorithm:
    <name> -p <dir> -b <buildpack> -s <stack> -m -k --no-start --no-manifest`
    (fresh; `-s` only when the catalog names a stack) or
    `cf push` without `--no-start` (update); `cf bind-service` for `services`
-   and for `optionalServices` that exist; `cf set-env` for `env`,
+   and for `optionalServices` that exist, NEVER for an `own-role` service
+   (the database; a warning line says so); `cf set-env` for `env`,
    `FIGAF_APP_VERSION` (the release version), and for frontends the approuter
    `destinations` JSON pointing at the live backend route
    (`forwardAuthToken: true`); `cf start`.
@@ -255,10 +288,83 @@ binding is missing (failure path of step 1). Before step 1 the panel is
 blocked; nothing on it can restart the manager in token mode. FAID Apps
 shows only a one-line status of the instances with a link to the Setup.
 
-Reusing an existing PostgreSQL instance works by NAME: an instance called
-`figaf-faid-db` is bound, never re-created. Only an instance dedicated to this
-platform may be reused (a previous installation, or an empty pre-created
-one), never the Figaf tool's database or one another application writes to.
+### 4.2 The database: the backend's own role, an editable instance name (catalog v6)
+
+Why (figaf-faid decision 0012 section 10; the plan was
+`docs/shared-database-plan.md`): every binding user of a BTP `postgresql-db`
+instance runs as the group role `dbo` with full access to every schema. A
+binding is never isolation. So the FAID backend gets NO binding of the
+database. The manager creates the role `faid_app` (LOGIN, not a member of
+`dbo`), the schema `faid` (owned by `dbo`; `USAGE` and `CREATE` granted to
+the role), and writes `{ host, port, dbname, user: "faid_app", password,
+schema: "faid", instanceName, instanceGuid }` into the Credential Store
+(namespace `figaf-faid`, name `backend-database`). The instance's CA
+certificate chain (public; about 4.6 KB, three certificates) is not in the
+entry: a Credential Store value holds about 4 KB (HTTP 413 above it,
+measured 2026-09-08). When the manager deploys the shared backend it reads
+the chain from its service key and sets it on the backend as the environment
+variable `FAID_DATABASE_CA` (`cf set-env`, value masked in the terminal).
+The backend reads the entry at start, verifies the server with that chain
+(no variable = no start, never an unverified connection) and sets `search_path` to `faid` on
+every connection; its migrations refuse a connection whose
+`current_schema()` is not `faid`. The instance may be the Figaf Tool's
+(schema `irt`), or one made for FAID; the procedure is the same. The
+protection is one-directional: every app bound to the instance (the Figaf
+Tool) keeps full access, including schema `faid`; the row says so.
+
+The instance name. The catalog `name` (`figaf-db`) is the DEFAULT. Setup
+step 1 shows it in a text field the person may change (validated as a cf
+instance name, `^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$`, always one argv element).
+The actual name is discovered, never stored: the page's override, else the
+Credential Store entry (`instanceName`, `instanceGuid`), else the space
+(`cf services`: exactly one PostgreSQL instance, or one with the default
+name, or one bound to a `<id>-app` = the Figaf Tool's pattern), else the
+default. An instance that exists under the chosen name is accepted as it is
+(never re-created, never deleted, never `update-service`d); a missing one is
+created with the chosen plan (started in step 1, about 7 minutes). The same
+`names` mechanism will serve the other instances later (a separate task).
+
+Base services (step 3), database row: instance name, cf status, an access
+pill (`access prepared` / `access not prepared` / `access entry stale` /
+`access unknown` while the Credential Store binding is not active), plan,
+bound apps, and the note. Buttons in XSUAA mode: **Prepare database access**
+(instance ready, access not prepared; the name field is still editable
+here), **Prepare again** (idempotent; the password is kept), **Rotate
+password** (new password, entry updated, shared backend restarted when
+deployed), **Drop the FAID schema...** under a confirmation that names the
+instance (`DROP SCHEMA faid CASCADE`, `DROP ROLE faid_app`, entry deleted;
+a deployed backend fails at its next start until Prepare runs again). The
+prepare needs the manager's Credential Store binding, which is active only
+after the restart at the end of step 1: that is why it lives in step 3.
+Step 3 is done only when every required instance is ready AND the access is
+prepared; step 4 is blocked until then; Install and Update refuse before
+any push while it is not (section 3, step 2).
+
+The manager administers through ONE standing service key of the instance,
+named `figaf-manager` (Arsenii, 2026-09-08; it replaced a temporary key per
+action: the manager's cf login can create a key at any time, so a temporary
+key was no boundary, and a standing key is idempotent and lets the deploy
+read the CA chain). The key lives in Cloud Foundry: `cf create-service-key`
+on first use ("already exists" is success), `cf service-key` read quietly
+with `auditStdout: false` for one action, dropped from memory afterwards;
+deleted by **Drop the FAID schema** and by the manager's uninstall. On the
+Figaf Tool's instance the customer's admin sees that key; the row says so.
+The generated password (32 alphanumeric characters) is reused on a
+re-run when the entry exists, so a running backend is never surprised. The
+prepare verifies as `faid_app`: `current_schema()` is `faid`, and one table
+of another schema (when one exists; found as the owner) answers `permission
+denied`; a readable table is a refusal and nothing is stored. Failures name
+their step (`instance`, `store`, `key`, `connect`, `role`, `schema`,
+`grant`, `verify`) with the SQLSTATE and message, never the
+statement text. `packages/core/faid-database.js` is the only module that
+requires `pg`; it administers, it never reads or writes application data.
+The instance is reachable only from inside the Cloud Foundry landscape (the
+manager runs there; a laptop needs a `cf ssh -L` tunnel through an app in
+the space, see the live run of 2026-09-08 in `docs/shared-database-plan.md`).
+
+`faid:remove` of an app never touches the database; the schema and role stay
+until a person drops them. The manager never deletes a database instance,
+also one it created (`cf delete-service` by hand).
 
 ### 4.1 Optional services: on-premise PI/PO (catalog v4, decision 0011)
 
@@ -341,11 +447,11 @@ everything it needs; the run itself needs no input.
 | Part | Handler | Effect |
 |---|---|---|
 | Sign in to Cloud Foundry | `ScreenLogin` embedded in step 1 | one-time passcode, once; the BTP login stays optional |
-| Service plans | `faid:services` | one dropdown per instance that is missing and has more than one plan (PostgreSQL, Credential Store: `free` / `standard`, each with a one-line note); existing instances are shown as "exists" |
+| Service plans | `faid:services({names})` | one dropdown per instance that is missing and has more than one plan (PostgreSQL, Credential Store: `free` / `standard`, each with a one-line note); existing instances are shown as "exists" with their plan. The database row (v6) has a text field for the instance name (default `figaf-db`, prefilled with the space's PostgreSQL instance when there is one); leaving the field asks `faid:services` again for the typed name, so the row shows whether it exists, its plan and bound apps, and the consequence line (section 4.2) |
 | Role assignment | `xsuaa:roleAssignmentPrecheck` | as before: with a BTP login the collection is assigned automatically to the named person; without it the button says so ("... without role assignment") |
 | Prepare the XSUAA instance | `cf:createXsuaa` -> `faid:ensureXsuaa` | create or update `figaf-faid-xsuaa`, composed document; always runs |
 | Assign role collection (optional) | `xsuaa:assignRoleCollection` | `btp assign security/role-collection FAID-Manager-Admin --to-user <e-mail>`; needs a BTP login in THIS session (a restart forgets it); subaccount GUID from the BTP login or from a throw-away service key of the instance |
-| Create the base services | `faid:prepareSpaceServices({plans})` | every missing instance except XSUAA, with the chosen plans; the Credential Store is awaited and bound to the manager (no restart); the database is started and NOT awaited; non-fatal (the success state explains the repair path: Setup step 3) |
+| Create the base services | `faid:prepareSpaceServices({plans, names, groups})` | every missing instance except XSUAA, with the chosen plans and the typed names; an existing database under the typed name is accepted as it is; the Credential Store is awaited and bound to the manager (no restart); the database is started and NOT awaited, and never bound; non-fatal (the success state explains the repair path: Setup step 3) |
 | Deploy approuter | `cf:pushManagerApprouter` | `cf push figaf-manager-approuter --no-manifest`, bound to the instance, internal route mapped to the manager, `destinations` env set |
 | Hand off public route | `cf:mapRoute` | the approuter takes the public hostname |
 | Restart manager | `cf:restage` | bind the manager to the instance, unmap its public route, `cf restage` once (30-90 s); the page polls `/_manager-health` until `mode: "xsuaa"`, then **Continue** reloads `/#/setup` |
@@ -421,7 +527,7 @@ green, later steps are compact and gray with the reason ("after step 1").
 |---|------|-------------------|-----------|---------------|
 | 1 | Prepare the space | token mode without a CF login: the sign-in card (passcode). With a login: service plans, role assignment, **Prepare the space** button, progress rows, success state with **Continue** | XSUAA mode | - |
 | 2 | Management user | form: technical user + password, **Verify & store**; the manager then signs itself in. Link "sign in with a passcode instead" for the failure path (no Credential Store) | stored | step 1; Credential Store binding active |
-| 3 | Base services | the panel of section 4 (status list, self-refresh every 10 s while creating, repair actions when missing / failed / unbound) | all ready; Credential Store bound and active | step 1 |
+| 3 | Base services | the panel of section 4 (status list, self-refresh every 10 s while creating, repair actions when missing / failed / unbound, **Prepare database access** for the database, section 4.2) | all ready; Credential Store bound and active; database access prepared | step 1 |
 | 4 | Shared backend and first app | button **Open FAID Apps** (Install deploys the shared backend before the app) | platform running | step 3 (all instances ready) |
 | 5 | Figaf tool connection | button **Open Connections** | configured | step 1; binding active |
 
@@ -548,7 +654,9 @@ with Alex's standard release.
 Every action ends with a visible result. Handler result on failure:
 `{ ok:false, error, step?, cfApp?, command?, detail?, failedApp? }` — where
 it failed (`download` / `extract` / `push` / `bind` / `env` / `start` /
-`stop` / `delete` / `roles`), the exact command (masked; for `download` the
+`stop` / `delete` / `roles` / `database`; the database actions of section
+4.2: `instance` / `store` / `key` / `connect` / `role` / `schema` / `grant` /
+`verify` / `restart`), the exact command (masked; for `download` the
 file and the store), the CLI's last lines (`detail`, up to 400 characters). Console: a red **Failed** panel (`packages/ui/action-outcome.js`)
 with action + app, where, error, command, a plain-English hint for known
 patterns, buttons Show CLI output / Copy report / Dismiss; it survives the
@@ -564,6 +672,13 @@ JSON record. Procedure: `TROUBLESHOOTING.md`.
 - Secret values never appear in the terminal stream, the CLI audit log, the
   RPC audit, or a result object (masking, `auditStdout: false` for service
   keys, redaction of `connections:save*` and `login:storeManagementUser`).
+- The database owner (`dbo`) credential exists for the manager as one
+  standing service key `figaf-manager` in Cloud Foundry, read for one admin
+  action and never stored by the manager; the `faid_app` password lives in
+  the Credential Store only; the CA chain is public and travels as an
+  environment variable of the backend. Every `cf service-key` read is in
+  the manager's audit log (section 4.2). The database instance is never
+  bound to a FAID app.
 - Verify before store: the management user, the Figaf client, and every
   service key are checked against the real endpoint first.
 - No shell concatenation: every CLI call is `spawn()` with an argument array.
@@ -596,6 +711,9 @@ a row in `TROUBLESHOOTING.md`. Known: one pre-existing cloud test
 - Role assignment to users (no API; cockpit, or `btp assign` by a person).
 - Rollback (decommissioned: forward-only migrations, decision in SOLUTION 3.1).
 - DMS / Service Manager / Destination credential kinds in the manager.
-- "Use an existing instance" dropdown on the Base services card.
+- Editable names for the other instances (`figaf-connectivity`,
+  `figaf-destination`, XSUAA, Credential Store) on top of the `names`
+  mechanism of section 4.2; their discovery source is the bindings.
+- Deleting a database instance from the manager, also one it created.
 - Figaf-tool management parity (env vars, manifest parameters, persisted
   deployment metadata) — requirements to be written (plan Step 2).

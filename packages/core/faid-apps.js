@@ -38,6 +38,9 @@ const fs = require("fs");
 const crypto = require("crypto");
 const { loadCatalog, chooseVersion, createReleaseStore, requiredFigafScopes } = require("./release-store");
 const { stackArgs, parseStackNames, wantedStacks, missingStacks, missingStackError } = require("./cf-stack");
+// The backend's own database role (catalog v6 `access: "own-role"`): the only
+// module that talks to PostgreSQL. docs/shared-database-plan.md.
+const faidDatabase = require("./faid-database");
 
 const VERSION_ENV = "FIGAF_APP_VERSION";
 const NO_SOURCE_ERROR = "No release source configured: set FIGAF_FAID_RELEASE_URL (the release store) or FIGAF_FAID_ARTIFACTS_DIR (a local release directory)";
@@ -122,6 +125,66 @@ function wantedService(service, groups) {
   if (!service || !service.optional) return true;
   const asked = Array.isArray(groups) ? groups : [];
   return asked.includes(service.group || "");
+}
+
+/**
+ * Catalog v6: a service the backend reaches with ITS OWN DATABASE ROLE
+ * (faid-database.js), never through a binding. A binding of a BTP
+ * postgresql-db instance runs as dbo with full access to every schema, so the
+ * manager never issues `cf bind-service` for such an instance - whatever a
+ * cfApp's `services` list says.
+ */
+function ownRoleService(service) {
+  return !!service && service.access === "own-role";
+}
+function ownRoleNames(catalog) {
+  return new Set(((catalog && catalog.services) || []).filter(ownRoleService).map((s) => s.name));
+}
+
+/**
+ * Catalog names -> actual instance names. The catalog `name` is the DEFAULT;
+ * `overrides` ({ catalogName: actualName }) may rename a service that carries
+ * `nameEditable: true` (every value is validated as a cf instance name);
+ * `discovered` holds names found in the space or in the Credential Store
+ * entry. Returns { ok, names } or { ok:false, error }. Plans stay keyed by
+ * the catalog name; the map is used for every cf call.
+ */
+function resolveServiceNames(catalog, overrides, discovered) {
+  const names = {};
+  const over = overrides && typeof overrides === "object" ? overrides : {};
+  const found = discovered && typeof discovered === "object" ? discovered : {};
+  for (const s of (catalog && catalog.services) || []) {
+    let actual = s.name;
+    if (over[s.name] != null && String(over[s.name]).trim() !== "" && String(over[s.name]).trim() !== s.name) {
+      if (!s.nameEditable) return { ok: false, error: `the name of ${s.name} cannot be changed in this release` };
+      const v = faidDatabase.validateInstanceName(over[s.name]);
+      if (!v.ok) return { ok: false, error: `${s.name}: ${v.error}` };
+      actual = v.name;
+    } else if (found[s.name]) {
+      actual = found[s.name];
+    }
+    names[s.name] = actual;
+  }
+  for (const key of Object.keys(over)) {
+    if (!(key in names)) return { ok: false, error: `unknown service ${key} in names` };
+  }
+  return { ok: true, names };
+}
+
+/**
+ * Which PostgreSQL instance of the space is the backend's database when no
+ * entry names one yet (between Setup step 1 and the prepare in step 3, and as
+ * the prefill of step 1). `candidates` = the `cf services` rows of the same
+ * offering. Rules, in order: exactly one instance; one with the default name;
+ * one bound to a `<id>-app` (the Figaf Tool's pattern); else the default name.
+ */
+function chooseDatabaseInstance(defaultName, candidates) {
+  const list = Array.isArray(candidates) ? candidates : [];
+  if (list.length === 1) return { name: list[0].name, source: "space" };
+  if (list.some((c) => c.name === defaultName)) return { name: defaultName, source: "space" };
+  const tool = list.find((c) => (c.boundApps || []).some((a) => /-app$/.test(a)));
+  if (tool) return { name: tool.name, source: "space" };
+  return { name: defaultName, source: "default" };
 }
 
 /**
@@ -243,6 +306,8 @@ function validateConfigEnv(app, env) {
  */
 function createFaidHandlers(ctx) {
   const { host, run, log, send, resolveCf, extractZip, httpsText } = ctx;
+  // The backend's own database role (tests inject a fake).
+  const database = ctx.database || faidDatabase.createFaidDatabase({ run: (...a) => run(...a), log, resolveCf: () => resolveCf() });
 
   // ─── the release store ────────────────────────────────────────────────────
   let storeInst = null;
@@ -683,7 +748,12 @@ function createFaidHandlers(ctx) {
       phase(app.id, name, "push", "ok");
 
       phase(app.id, name, "bind", "running");
+      const ownRole = ownRoleNames(rel.catalog);
       for (const s of cfApp.services || []) {
+        if (ownRole.has(s)) {
+          log("cf", "warn", `${s}: the backend reaches this database with its own role (Credential Store entry ${faidDatabase.NAMESPACE}/${faidDatabase.ENTRY}), never through a binding - bind skipped`);
+          continue;
+        }
         const bindArgs = ["bind-service", name, s];
         r = await run(resolveCf(), bindArgs, { source: "cf" });
         if (r.code !== 0) {
@@ -691,6 +761,7 @@ function createFaidHandlers(ctx) {
         }
       }
       for (const s of cfApp.optionalServices || []) {
+        if (ownRole.has(s)) continue;
         const probe = await run(resolveCf(), ["service", s], { source: "cf", quiet: true });
         if (probe.code === 0) {
           r = await run(resolveCf(), ["bind-service", name, s], { source: "cf" });
@@ -711,6 +782,17 @@ function createFaidHandlers(ctx) {
         return { ok: false, error: `could not resolve the route of ${cfApp.destinationTo} — is the shared backend deployed and started?`, step: "env", cfApp: name, command: `cf app ${cfApp.destinationTo}` };
       }
       envPairs.destinations = buildDestinationsEnv(cfApp.destinationName || cfApp.destinationTo, url);
+    }
+    // Catalog v6: the shared backend reaches the database with its own role
+    // (Credential Store entry) and verifies the server with the instance's
+    // CA chain, which the manager reads from its standing service key and
+    // sets here as FAID_DATABASE_CA (public; too large for the store).
+    if (app.id === "platform" && rel.catalog.services && rel.catalog.services.some(ownRoleService)) {
+      const st = await database.status();
+      if (!st.instanceName) return { ok: false, error: `database access is not prepared (${st.reason || st.state}) - Setup step 3, "Prepare database access"`, step: "database", cfApp: name };
+      const ca = await database.certificateChain({ instanceName: st.instanceName });
+      if (!ca.ok) return { ok: false, error: `could not read the CA certificate of ${st.instanceName}: ${ca.error}`, step: "database", cfApp: name, command: ca.command };
+      envPairs[ca.envName] = ca.sslrootcert;
     }
     for (const [k, v] of Object.entries(envPairs)) {
       const r = await setEnvMasked(name, k, v);
@@ -736,8 +818,9 @@ function createFaidHandlers(ctx) {
   async function missingRequiredServices(catalog, app) {
     const platform = platformPseudoApp(catalog);
     const names = new Set();
+    const ownRole = ownRoleNames(catalog);
     for (const c of [...(platform ? platform.cfApps : []), ...app.cfApps]) {
-      for (const s of c.services || []) names.add(s);
+      for (const s of c.services || []) if (!ownRole.has(s)) names.add(s);
     }
     const missing = [];
     for (const name of names) {
@@ -774,6 +857,19 @@ function createFaidHandlers(ctx) {
       for (const app of apps) for (const m of await missingRequiredServices(rel.catalog, app)) names.add(m);
       if (names.size) {
         return { ok: false, error: `required service instance(s) missing: ${[...names].join(", ")} — create them first (Setup, step 3)` };
+      }
+      // Catalog v6: the backend's database is reached with its own role. The
+      // Credential Store entry must exist and name a ready instance, or the
+      // backend refuses to start after the push. Checked here, before any push.
+      if (rel.catalog.services.some(ownRoleService)) {
+        const st = await database.status();
+        if (!st.prepared) {
+          return {
+            ok: false,
+            step: "database",
+            error: `database access is not prepared (${st.reason || st.state}) - Setup step 3, "Prepare database access", then try again. Nothing was deployed.`,
+          };
+        }
       }
     }
     // Catalog v5 (figaf-faid decision 0016): the installation's ONE Figaf API
@@ -975,6 +1071,46 @@ function createFaidHandlers(ctx) {
   }
 
   /**
+   * The actual instance name of every catalog service, and how it was found.
+   * For an own-role database (catalog v6): the override from the page, else
+   * the Credential Store entry, else the space (`cf services`: the PostgreSQL
+   * instances of the offering, see chooseDatabaseInstance), else the catalog
+   * default. Nothing is stored (SPEC: the manager keeps no state).
+   * Returns { ok, names, info: { [catalogName]: { source, candidates } }, databaseAccess }.
+   */
+  async function effectiveServiceNames(catalog, overrides) {
+    const own = ownRoleNames(catalog);
+    const discovered = {};
+    const info = {};
+    let databaseAccess = null;
+    let spaceRows = null;
+    for (const s of catalog.services || []) {
+      if (!own.has(s.name)) continue;
+      databaseAccess = databaseAccess || await database.status();
+      if (overrides && overrides[s.name] != null && String(overrides[s.name]).trim() !== "") {
+        info[s.name] = { source: "override", candidates: [] };
+        continue;
+      }
+      if (databaseAccess.instanceName) {
+        discovered[s.name] = databaseAccess.instanceName;
+        info[s.name] = { source: "entry", candidates: [] };
+        continue;
+      }
+      if (spaceRows === null) {
+        const r = await run(resolveCf(), ["services"], { source: "cf", quiet: true });
+        spaceRows = r.code === 0 ? faidDatabase.parseCfServices(r.stdout) : [];
+      }
+      const candidates = spaceRows.filter((row) => row.offering === s.offering);
+      const pick = chooseDatabaseInstance(s.name, candidates);
+      discovered[s.name] = pick.name;
+      info[s.name] = { source: pick.source, candidates: candidates.map((row) => ({ name: row.name, plan: row.plan, boundApps: row.boundApps, operation: row.operation })) };
+    }
+    const res = resolveServiceNames(catalog, overrides, discovered);
+    if (!res.ok) return res;
+    return { ok: true, names: res.names, info, databaseAccess };
+  }
+
+  /**
    * Create every MISSING catalog service, then wait until all are ready.
    * plans: optional { <name>: <plan> } overrides, validated against the
    * catalog's allowed plans. only: optional list of service names that
@@ -986,7 +1122,7 @@ function createFaidHandlers(ctx) {
    * left alone - see wantedService(). Progress lines go to the terminal
    * drawer.
    */
-  async function provisionServices({ plans, only, waitOnly, groups } = {}) {
+  async function provisionServices({ plans, only, waitOnly, groups, names } = {}) {
       const rel = await currentRelease();
       if (!rel.ok) return { ok: false, error: rel.error };
       const dir = rel.dir;
@@ -997,21 +1133,30 @@ function createFaidHandlers(ctx) {
       if (declared.length === 0) {
         return { ok: true, created: [], note: Array.isArray(only) ? "nothing to create for the requested services" : "this release declares no services" };
       }
+      // Catalog names -> actual instance names (the person may rename an
+      // editable one in Setup step 1; a prepared database is found by its entry).
+      const nm = await effectiveServiceNames(c.catalog, names);
+      if (!nm.ok) return { ok: false, error: nm.error, created: [], failed: [], timedOut: [], pending: [] };
+      const actual = (svc) => nm.names[svc.name] || svc.name;
 
       const created = [];
       const failed = [];
       for (const s of declared) {
-        const probe = await run(resolveCf(), ["service", s.name], { source: "cf", quiet: true });
+        const inst = actual(s);
+        const probe = await run(resolveCf(), ["service", inst], { source: "cf", quiet: true });
         if (probe.code === 0) {
           // Exists. A FAILED instance blocks re-creation under the same name;
           // remove it and create again (the admin already asked to provision).
+          // An own-role database is NEVER deleted by the manager (it may be the
+          // Figaf Tool's): a failed one is reported and left alone.
           if (serviceStatusFromCf(probe.code, probe.stdout) !== "failed") continue;
-          log("faid", "warn", `${s.name} is in a failed state — deleting it before creating again`);
-          const del = await run(resolveCf(), ["delete-service", s.name, "-f"], { source: "cf" });
-          if (del.code !== 0) { failed.push({ name: s.name, error: `could not delete the failed instance: ${cfTail(del)}` }); continue; }
+          if (ownRoleService(s)) { failed.push({ name: s.name, instanceName: inst, error: `${inst} is in a failed state - the manager never deletes a database instance; inspect it with cf service ${inst}` }); continue; }
+          log("faid", "warn", `${inst} is in a failed state — deleting it before creating again`);
+          const del = await run(resolveCf(), ["delete-service", inst, "-f"], { source: "cf" });
+          if (del.code !== 0) { failed.push({ name: s.name, instanceName: inst, error: `could not delete the failed instance: ${cfTail(del)}` }); continue; }
           // Deletion is asynchronous — wait until the name is free.
           const gone = Date.now() + PROVISION_TIMEOUT_MS;
-          while ((await run(resolveCf(), ["service", s.name], { source: "cf", quiet: true })).code === 0) {
+          while ((await run(resolveCf(), ["service", inst], { source: "cf", quiet: true })).code === 0) {
             if (Date.now() > gone) break;
             await sleep(POLL_MS);
           }
@@ -1019,10 +1164,10 @@ function createFaidHandlers(ctx) {
         const allowed = s.plans || [s.plan];
         const plan = (plans && plans[s.name]) || s.plan;
         if (!allowed.includes(plan)) {
-          failed.push({ name: s.name, error: `plan '${plan}' is not allowed for ${s.name} (allowed: ${allowed.join(", ")})` });
+          failed.push({ name: s.name, instanceName: inst, error: `plan '${plan}' is not allowed for ${s.name} (allowed: ${allowed.join(", ")})` });
           continue;
         }
-        const args = ["create-service", s.offering, plan, s.name];
+        const args = ["create-service", s.offering, plan, inst];
         if (s.offering === "xsuaa") {
           // One XSUAA instance for the manager and the apps (decision 0009):
           // always the composed document (release part + manager part).
@@ -1052,16 +1197,17 @@ function createFaidHandlers(ctx) {
           fs.writeFileSync(file, JSON.stringify(s.config));
           args.push("-c", file);
         }
-        log("faid", "line", `Creating service instance ${s.name} (${s.offering} / ${plan}) …`);
+        log("faid", "line", `Creating service instance ${inst} (${s.offering} / ${plan}) …`);
         const r = await run(resolveCf(), args, { source: "cf" });
-        if (r.code !== 0) { failed.push({ name: s.name, error: `cf create-service ${s.name} failed: ${cfTail(r)}` }); continue; }
-        created.push(s.name);
+        if (r.code !== 0) { failed.push({ name: s.name, instanceName: inst, error: `cf create-service ${inst} failed: ${cfTail(r)}` }); continue; }
+        created.push(inst);
       }
 
       // Wait for asynchronous creations (PostgreSQL takes minutes). With
       // waitOnly, the other instances are probed once and reported as pending.
-      const candidates = declared.filter((s) => !failed.some((f) => f.name === s.name)).map((s) => s.name);
-      const toWait = Array.isArray(waitOnly) ? candidates.filter((n) => waitOnly.includes(n)) : candidates;
+      const candidates = declared.filter((s) => !failed.some((f) => f.name === s.name)).map((s) => actual(s));
+      const waitActual = Array.isArray(waitOnly) ? waitOnly.map((n) => nm.names[n] || n) : null;
+      const toWait = waitActual ? candidates.filter((n) => waitActual.includes(n)) : candidates;
       const w = await waitForServices(toWait);
       failed.push(...w.failed);
       const timedOut = w.timedOut;
@@ -1247,7 +1393,7 @@ function createFaidHandlers(ctx) {
      * needed - an instance created AFTER the backend was pushed. A fresh
      * install binds the optional instances on its own (SPEC section 4.1).
      */
-    async "faid:services"() {
+    async "faid:services"({ names } = {}) {
       const rel = await currentRelease();
       if (!rel.ok) return { ok: false, error: rel.error };
       const c = { catalog: rel.catalog };
@@ -1256,27 +1402,98 @@ function createFaidHandlers(ctx) {
       const backend = platform ? platform.cfApps[0].name : null;
       const hasOptional = (c.catalog.services || []).some((s) => s.optional);
       const backendDeployed = backend && hasOptional ? (await installedPlatformState(c.catalog)).exists : null;
+      // Catalog v6: the actual name of an editable instance (the page's
+      // override, the Credential Store entry, or the space) and the state of
+      // the backend's database access.
+      const nm = await effectiveServiceNames(c.catalog, names);
+      if (!nm.ok) return { ok: false, error: nm.error };
       const services = [];
       for (const s of c.catalog.services || []) {
-        const r = await run(resolveCf(), ["service", s.name], { source: "cf", quiet: true });
+        const instanceName = nm.names[s.name] || s.name;
+        const r = await run(resolveCf(), ["service", instanceName], { source: "cf", quiet: true });
         const status = serviceStatusFromCf(r.code, r.stdout);
+        const inst = faidDatabase.parseCfService(r.code, r.stdout);
         let boundToManager = null;
         if (s.bindToManager && self && status !== "missing") {
-          boundToManager = await bindingExists(s.name, self);
+          boundToManager = await bindingExists(instanceName, self);
         }
         let boundToBackend = null;
         if (s.optional && backendDeployed === true && status !== "missing") {
-          boundToBackend = await bindingExists(s.name, backend);
+          boundToBackend = await bindingExists(instanceName, backend);
         }
+        const own = ownRoleService(s);
+        const info = nm.info[s.name] || null;
         services.push({
-          name: s.name, offering: s.offering, plan: s.plan, plans: s.plans || [s.plan],
+          // `name` stays the catalog name (the key of plans, only, names);
+          // `instanceName` is what exists (or will be created) in the space.
+          name: s.name, instanceName, offering: s.offering, plan: s.plan, plans: s.plans || [s.plan],
+          actualPlan: inst.plan || null,
           purpose: s.purpose || "", bindToManager: !!s.bindToManager,
           optional: !!s.optional, group: s.group || "", sharedWith: s.sharedWith || "",
+          access: own ? "own-role" : "binding", nameEditable: !!s.nameEditable,
+          nameSource: info ? info.source : "catalog",
+          candidates: info ? info.candidates : [],
+          boundApps: inst.boundApps || [],
           exists: status !== "missing", status, boundToManager,
           backendDeployed: s.optional ? backendDeployed : null, boundToBackend,
+          databaseAccess: own ? nm.databaseAccess : null,
         });
       }
-      return { ok: true, selfApp: self, backend, backendDeployed, services };
+      return { ok: true, selfApp: self, backend, backendDeployed, services, databaseAccess: nm.databaseAccess };
+    },
+
+    /**
+     * The state of the backend's database access (catalog v6, faid-database.js):
+     * prepared / not-prepared / stale / unknown, with the entry's instance. No
+     * database connection, no lock.
+     */
+    async "faid:databaseStatus"() {
+      if (!host.isHosted) return { ok: false, error: "not available in desktop mode" };
+      return database.status();
+    },
+
+    /**
+     * Create or reconcile the backend's database role on `instanceName`
+     * (Setup step 3, "Prepare database access"; also "Prepare again"). One
+     * temporary service key, SQL as the owner, verification as faid_app, the
+     * Credential Store entry. Under the lifecycle lock: a deploy must not
+     * overlap (the backend reads the entry at its start).
+     */
+    async "faid:databasePrepare"({ instanceName } = {}) {
+      if (!host.isHosted) return { ok: false, error: "not available in desktop mode" };
+      return exclusive("database-prepare", String(instanceName || "?"), () => database.prepare({ instanceName }));
+    },
+
+    /**
+     * New password for faid_app; the entry is updated; the shared backend is
+     * restarted when it is deployed (it reads the entry at start).
+     */
+    async "faid:databaseRotate"() {
+      if (!host.isHosted) return { ok: false, error: "not available in desktop mode" };
+      return exclusive("database-rotate", "platform", async () => {
+        const r = await database.rotate();
+        if (!r.ok) return r;
+        const rel = await currentRelease();
+        const platform = rel.ok ? platformPseudoApp(rel.catalog) : null;
+        const backend = platform ? platform.cfApps[0].name : null;
+        if (!backend || !(await cfAppExists(backend))) return { ...r, restarted: null };
+        const rs = await run(resolveCf(), ["restart", backend], { source: "cf" });
+        if (rs.code !== 0) {
+          return { ...r, ok: false, step: "restart", cfApp: backend, command: `cf restart ${backend}`, error: `the password is rotated and stored, but cf restart ${backend} failed: ${cfTail(rs)} - restart it by hand` };
+        }
+        return { ...r, restarted: backend };
+      });
+    },
+
+    /**
+     * DROP SCHEMA faid CASCADE and DROP ROLE faid_app on the entry's instance;
+     * the entry is deleted. Destructive: `confirm: true` is required (the page
+     * asks). A deployed backend fails at its next start until Prepare runs again.
+     */
+    async "faid:databaseDrop"({ confirm } = {}) {
+      if (!host.isHosted) return { ok: false, error: "not available in desktop mode" };
+      if (confirm !== true) return { ok: false, error: "confirmation required: this drops schema faid with every table in it and the role faid_app" };
+      return exclusive("database-drop", "platform", () => database.drop());
     },
 
     /**
@@ -1349,7 +1566,7 @@ function createFaidHandlers(ctx) {
      * with IAS and stores the management user (Setup step 3 shows it).
      * Result: { ok, created, bound, pending, failed, error?, note? }.
      */
-    async "faid:prepareSpaceServices"({ plans, groups } = {}) {
+    async "faid:prepareSpaceServices"({ plans, groups, names } = {}) {
       if (!store()) return { ok: true, created: [], bound: [], pending: [], failed: [], note: "no release source on this host - nothing to prepare" };
       const rel = await currentRelease();
       if (!rel.ok) return { ok: false, error: rel.error };
@@ -1360,7 +1577,7 @@ function createFaidHandlers(ctx) {
       const toBind = targets.filter((s) => s.bindToManager);
       const self = selfAppName();
       if (toBind.length && !self) return { ok: false, error: "cannot determine the manager's own app name (not running in CF?)" };
-      const prov = await provisionServices({ plans, only: targets.map((s) => s.name), waitOnly: toBind.map((s) => s.name) });
+      const prov = await provisionServices({ plans, names, only: targets.map((s) => s.name), waitOnly: toBind.map((s) => s.name) });
       const errors = prov.ok ? [] : [prov.error];
       const bound = [];
       for (const s of toBind) {
@@ -1659,5 +1876,9 @@ module.exports = {
   validateConfigEnv,
   serviceStatusFromCf,
   wantedService,
+  ownRoleService,
+  ownRoleNames,
+  resolveServiceNames,
+  chooseDatabaseInstance,
   createFaidHandlers,
 };

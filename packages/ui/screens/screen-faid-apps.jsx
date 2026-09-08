@@ -385,9 +385,21 @@ const FAID_SERVICE_STATUS_META = {
   "unknown":     { label: "Unknown state", cls: "gray" },
 };
 
-function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform, onRestart, onRefresh }) {
+// The state of the backend's database access (catalog v6, faid-database.js).
+const FAID_DB_ACCESS_META = {
+  "prepared":     { label: "access prepared",     cls: "green" },
+  "not-prepared": { label: "access not prepared", cls: "gray" },
+  "stale":        { label: "access entry stale",  cls: "gray" },
+  "unknown":      { label: "access unknown",      cls: "gray" },
+};
+
+function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform, onRestart, onRefresh, onDatabasePrepare, onDatabaseRotate, onDatabaseDrop }) {
   const api = typeof window !== "undefined" ? window.figaf : null;
   const [plans, setPlans] = React.useState({});
+  // The instance name for "Prepare database access" while nothing is prepared
+  // yet (catalog v6): prefilled with what faid:services found, editable.
+  const [dbName, setDbName] = React.useState(null);
+  const [confirmDrop, setConfirmDrop] = React.useState(false);
   const [bindingLive, setBindingLive] = React.useState(null); // login:storedUserStatus.bindingPresent
   const [confirmRestart, setConfirmRestart] = React.useState(false);
   // Token mode (before Setup step 1, Prepare the space): nothing on this card may restart
@@ -450,12 +462,24 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform,
       </div>
       {required.map((s) => {
         const meta = FAID_SERVICE_STATUS_META[s.status] || FAID_SERVICE_STATUS_META.unknown;
+        const own = s.access === "own-role";
+        const access = own ? (s.databaseAccess || { state: "unknown", prepared: false }) : null;
+        const accessMeta = own ? (FAID_DB_ACCESS_META[access.state] || FAID_DB_ACCESS_META.unknown) : null;
+        const instanceName = s.instanceName || s.name;
+        const typedName = dbName != null ? dbName : instanceName;
+        const canEditName = own && !!s.nameEditable && !access.prepared;
         return (
-          <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid var(--line)", marginTop: 7, flexWrap: "wrap" }}>
-            <span className="kbd">{s.name}</span>
+          <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid var(--line)", marginTop: 7, flexWrap: "wrap" }} data-service-row={s.name} data-database-access={own ? access.state : undefined}>
+            {canEditName ? (
+              <input className="input is-mono" data-instance-name={s.name} value={typedName} disabled={!!busy} spellCheck={false} style={{ width: 200 }}
+                title="The PostgreSQL instance the FAID backend uses (default figaf-db)" onChange={(e) => setDbName(e.target.value)} />
+            ) : (
+              <span className="kbd">{instanceName}</span>
+            )}
             <span className={`pill ${meta.cls}`}>{meta.label}</span>
+            {own && <span className={`pill ${accessMeta.cls}`} data-access-pill="">{accessMeta.label}</span>}
             <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
-              {s.offering} · {s.status === "missing" && s.plans.length > 1 ? "plan:" : `plan ${s.plan}`}
+              {s.offering} · {s.status === "missing" && s.plans.length > 1 ? "plan:" : `plan ${s.actualPlan || s.plan}`}
             </span>
             {s.status === "missing" && s.plans.length > 1 && (
               <select
@@ -483,6 +507,46 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform,
             )}
             {s.bindToManager && s.status === "ready" && s.boundToManager === true && bindingLive === true && (
               <span className="pill green">bound to manager</span>
+            )}
+            {own && s.status === "ready" && !access.prepared && ssoMode && onDatabasePrepare && (
+              <button className="btn btn-primary" data-action="database-prepare" disabled={!!busy}
+                title={`cf create-service-key ${typedName} <temporary>, SQL as the owner, verification as faid_app, Credential Store entry, cf delete-service-key`}
+                onClick={() => onDatabasePrepare(String(typedName || "").trim())}>
+                {busy === "database-prepare" ? "Preparing…" : "Prepare database access"}
+              </button>
+            )}
+            {own && s.status === "ready" && !access.prepared && !ssoMode && (
+              <span style={{ fontSize: 12, color: "var(--ink-3)" }} data-gated="database-prepare">access prepared after step 1 (needs the Credential Store binding)</span>
+            )}
+            {own && access.prepared && ssoMode && onDatabasePrepare && (
+              <button className="btn" data-action="database-prepare-again" disabled={!!busy} title="Runs the same SQL again (idempotent); the password is kept"
+                onClick={() => onDatabasePrepare(instanceName)}>{busy === "database-prepare" ? "Preparing…" : "Prepare again"}</button>
+            )}
+            {own && access.prepared && ssoMode && onDatabaseRotate && (
+              <button className="btn" data-action="database-rotate" disabled={!!busy} title="New password for faid_app; the entry is updated; the shared backend is restarted when deployed"
+                onClick={onDatabaseRotate}>{busy === "database-rotate" ? "Rotating…" : "Rotate password"}</button>
+            )}
+            {own && access.prepared && ssoMode && onDatabaseDrop && !confirmDrop && (
+              <button className="btn" data-action="database-drop" disabled={!!busy} onClick={() => setConfirmDrop(true)}>Drop the FAID schema…</button>
+            )}
+            {own && (
+              <div style={{ width: "100%", fontSize: 12, color: "var(--ink-3)" }} data-database-note="">
+                The FAID backend connects as <span className="kbd">faid_app</span>, limited to schema <span className="kbd">faid</span>; the instance is never bound to a FAID app.
+                {s.status !== "missing" && (s.boundApps || []).length > 0 && <> Bound today: <strong>{s.boundApps.join(", ")}</strong> - every bound app runs as <span className="kbd">dbo</span> with full access, including schema <span className="kbd">faid</span>; one backup and restore point for everything in this instance.</>}
+                {access.state === "stale" && access.reason && <> <strong>Entry stale:</strong> {access.reason}.</>}
+                {access.state === "unknown" && access.reason && <> ({access.reason})</>}
+                {access.prepared && <> Entry <span className="kbd">figaf-faid/backend-database</span> for instance <span className="kbd">{access.instanceName}</span>.</>}
+              </div>
+            )}
+            {own && confirmDrop && (
+              <div style={{ width: "100%", padding: 10, border: "1px solid var(--line)", borderRadius: 8, fontSize: 13 }} data-confirm="database-drop">
+                <strong>Drop schema faid and role faid_app on {instanceName}?</strong> Every table of the FAID Apps in this instance is deleted; the
+                Figaf Tool's data is not touched. A deployed shared backend fails at its next start until you prepare the access again.
+                <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                  <button className="btn btn-primary" data-action="database-drop-confirm" disabled={!!busy} onClick={() => { setConfirmDrop(false); onDatabaseDrop(); }}>Yes, drop the FAID schema</button>
+                  <button className="btn" disabled={!!busy} onClick={() => setConfirmDrop(false)}>Cancel</button>
+                </div>
+              </div>
             )}
           </div>
         );
@@ -575,15 +639,17 @@ function BaseServicesSummary({ services, onOpenSetup }) {
   }
   if (!services || services.length === 0) return null;
   // Optional instances (PI/PO) are not part of "ready": see BaseServicesCard.
+  // An own-role database (catalog v6) is ready only when its access is prepared.
   const required = services.filter((s) => !s.optional);
-  const notReady = required.filter((s) => s.status !== "ready");
+  const ready = (s) => s.status === "ready" && (s.access !== "own-role" || !!(s.databaseAccess && s.databaseAccess.prepared));
+  const notReady = required.filter((s) => !ready(s));
   return (
     <div data-services-summary="" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
       <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Base services</span>
       {notReady.length === 0
         ? <span className="pill green">all ready</span>
         : <span className="pill gray">{notReady.length} not ready</span>}
-      <span>{required.map((s) => `${s.name}: ${s.status}`).join(" · ")}</span>
+      <span>{required.map((s) => `${s.instanceName || s.name}: ${s.status}${s.access === "own-role" ? ` (access ${(s.databaseAccess && s.databaseAccess.state) || "unknown"})` : ""}`).join(" · ")}</span>
       {notReady.length > 0 && onOpenSetup && (
         <button className="btn-link" onClick={onOpenSetup}>Repair in Setup (step 3)</button>
       )}

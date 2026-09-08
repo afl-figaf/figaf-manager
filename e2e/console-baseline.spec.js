@@ -88,9 +88,20 @@ test("setup step 1 (signed in): asks for the plans and the role assignment BEFOR
   await expect(pipo.locator('input[type="checkbox"]')).not.toBeChecked();
   await expect(pipo).toContainText("figaf-connectivity");
   await expect(pipo).toContainText("figaf-destination");
-  for (const name of ["figaf-faid-db", "figaf-faid-xsuaa", "figaf-faid-credstore"]) {
+  for (const name of ["figaf-db", "figaf-faid-xsuaa", "figaf-faid-credstore"]) {
     const row = plans.locator(`.setup-plan-row[data-service="${name}"]`);
-    await expect(row).toContainText(name);
+    if (name === "figaf-db") {
+      // Catalog v6: the database name is editable (default figaf-db, or the
+      // PostgreSQL instance the space already has); the backend gets its own
+      // role, and the row says so. The dev space has no Figaf Tool, so the
+      // field holds the default or the one instance of the space.
+      const field = row.locator('input[data-instance-name="figaf-db"]');
+      await expect(field).toHaveCount(1);
+      await expect(field).toHaveValue(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+      await expect(row.locator('[data-database-note=""]')).toContainText("faid_app");
+    } else {
+      await expect(row).toContainText(name);
+    }
     const exists = (await row.locator(".pill", { hasText: "exists" }).count()) === 1;
     const dropdowns = await row.locator("select").count();
     if (exists) {
@@ -157,7 +168,7 @@ test("deep link #/apps still opens the dashboard, with the setup notice; the bas
   const summary = page.locator('[data-services-summary=""]');
   await expect(summary).toContainText("Base services");
   await expect(summary.locator(".pill")).toHaveText(/^(all ready|\d not ready)$/);
-  await expect(summary).toContainText(/figaf-faid-db: (ready|missing|in-progress|failed)/);
+  await expect(summary).toContainText(/[A-Za-z0-9._-]+: (ready|missing|in-progress|failed) \(access (prepared|not-prepared|stale|unknown)\)/);
   await expect(summary).toContainText("figaf-faid-xsuaa:");
   await expect(summary).toContainText("figaf-faid-credstore:");
   const allReady = (await summary.locator(".pill").textContent()) === "all ready";
