@@ -6,7 +6,12 @@
 // source commit), xs-security.json and one zip per CF app. Releases live in a
 // STORE. Two kinds, one code path:
 //
-//   remote  the artifact store (Cloudflare R2 behind a public URL). Layout,
+//   remote  the artifact store (Cloudflare R2 behind a public URL). Two
+//           channels, each a prefix with its own index.json (figaf-faid
+//           decision 0017): <public-url>/faid holds the release versions
+//           x.y.z, <public-url>/faid-dev the dev versions x.y.z-dev.N that a
+//           developer's or Emil's manager installs to test a change. A
+//           manager points at ONE of them (FIGAF_FAID_RELEASE_URL). Layout,
 //           the contract with the figaf-faid repo (release/publish.js):
 //             <url>/index.json              { latest, versions: [{ version, publishedAt }] }
 //             <url>/<version>/catalog.json   the release catalog
@@ -29,7 +34,9 @@ const path = require("path");
 const crypto = require("crypto");
 const { compareSemver } = require("./release-config");
 
-const VERSION_RE = /^\d+\.\d+\.\d+$/;
+// x.y.z (release channel) or x.y.z-dev.N (dev channel). The same rule as
+// figaf-faid release/build.js and release/publish.js.
+const VERSION_RE = /^\d+\.\d+\.\d+(-dev\.\d+)?$/;
 const INDEX_TTL_MS = 30_000;
 const MAX_CACHED_VERSIONS = 4;
 

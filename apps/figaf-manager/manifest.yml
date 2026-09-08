@@ -21,6 +21,12 @@ applications:
       # Cloudflare R2 bucket (figaf-faid release/publish.js writes it). A
       # custom domain or a mirror is a change of this value only. For a local
       # release directory (development, e2e) set FIGAF_FAID_ARTIFACTS_DIR instead.
+      # Two channels (figaf-faid decision 0017): .../faid holds the release
+      # versions x.y.z for customers; .../faid-dev holds the dev versions
+      # x.y.z-dev.N that Jenkins publishes from a branch. A manager used to
+      # TEST changes (Emil's space, the dev space) ends this value in /faid-dev
+      # (cf set-env figaf-manager FIGAF_FAID_RELEASE_URL <url>/faid-dev, then
+      # cf restart); a customer's manager never does.
       FIGAF_FAID_RELEASE_URL: https://pub-086a7914662e477595f40f58270518b9.r2.dev/faid
       # FIGAF_LOG_LEVEL controls the verbosity of logs emitted by the wizard.
       #│ off   │ nothing (no-op fast path)                                     │

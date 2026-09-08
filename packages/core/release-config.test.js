@@ -50,6 +50,21 @@ test("compareSemver: malformed input is NaN-safe", () => {
   assert.equal(compareSemver(null, undefined), 0);
 });
 
+test("compareSemver: the FAID dev channel (x.y.z-dev.N, figaf-faid decision 0017)", () => {
+  const { compareSemver } = loadFresh();
+  // a dev build of the next version is newer than the current release ...
+  assert.equal(compareSemver("0.6.2-dev.9", "0.6.1"), 1);
+  // ... and older than the release it leads to
+  assert.equal(compareSemver("0.6.2-dev.9", "0.6.2"), -1);
+  assert.equal(compareSemver("0.6.2", "0.6.2-dev.9"), 1);
+  // two dev builds compare by their number, not as text
+  assert.equal(compareSemver("0.6.2-dev.10", "0.6.2-dev.9"), 1);
+  assert.equal(compareSemver("0.6.2-dev.9", "0.6.2-dev.10"), -1);
+  assert.equal(compareSemver("0.6.2-dev.4", "0.6.2-dev.4"), 0);
+  // the update rule "only upwards" follows: dev.9 -> dev.10 -> 0.6.2 -> 0.6.3-dev.1
+  assert.equal(compareSemver("0.6.3-dev.1", "0.6.2"), 1);
+});
+
 test("RELEASE_REPO defaults to the figaf code repo (single-repo releases)", () => {
   const { RELEASE_REPO, RELEASE_LATEST_URL } = loadFresh(null);
   assert.equal(RELEASE_REPO, "figaf/FigafManager");

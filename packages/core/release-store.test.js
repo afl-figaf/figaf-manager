@@ -54,6 +54,23 @@ test("parseIndex: validates, sorts newest first, trusts a listed latest, falls b
   assert.equal(parseIndex({}).ok, false);
   assert.equal(parseIndex({ versions: [] }).ok, false);
   assert.match(parseIndex({ versions: [{ version: "0.0.0-e2e" }] }).error, /invalid version/);
+  // the dev channel (figaf-faid decision 0017): x.y.z-dev.N is valid and sorts below its release
+  const dev = parseIndex({ versions: [{ version: "0.6.2-dev.9" }, { version: "0.6.2-dev.10" }, { version: "0.6.1" }] });
+  assert.equal(dev.ok, true);
+  assert.deepEqual(dev.versions.map((v) => v.version), ["0.6.2-dev.10", "0.6.2-dev.9", "0.6.1"]);
+  assert.equal(dev.latest, "0.6.2-dev.10");
+  assert.match(parseIndex({ versions: [{ version: "0.6.2-rc.1" }] }).error, /invalid version/, "only the dev suffix is known");
+});
+
+test("chooseVersion on the dev channel: update moves dev.9 -> dev.10 -> the release; a lower dev build is a rollback", () => {
+  const versions = ["0.6.1", "0.6.2-dev.9", "0.6.2-dev.10"];
+  assert.deepEqual(chooseVersion({ installed: "0.6.2-dev.9", latest: "0.6.2-dev.10", versions, purpose: "update" }), { ok: true, version: "0.6.2-dev.10" });
+  assert.deepEqual(chooseVersion({ installed: "0.6.1", latest: "0.6.2-dev.10", versions, purpose: "update" }), { ok: true, version: "0.6.2-dev.10" });
+  assert.match(chooseVersion({ requested: "0.6.2-dev.9", installed: "0.6.2-dev.10", latest: "0.6.2-dev.10", versions, purpose: "update" }).error, /lower than the installed 0\.6\.2-dev\.10/);
+  assert.match(chooseVersion({ installed: "0.6.2-dev.10", latest: "0.6.2-dev.10", versions, purpose: "update" }).error, /already at 0\.6\.2-dev\.10/);
+  // the release channel later: 0.6.2 is above every dev build of it
+  assert.deepEqual(chooseVersion({ requested: "0.6.2", installed: "0.6.2-dev.10", latest: "0.6.2", versions: [...versions, "0.6.2"], purpose: "update" }), { ok: true, version: "0.6.2" });
+  assert.deepEqual(chooseVersion({ installed: "0.6.2-dev.10", latest: "0.6.2-dev.10", versions, purpose: "install" }), { ok: true, version: "0.6.2-dev.10" });
 });
 
 test("chooseVersion: install uses the installed version, latest on an empty space, refuses another version", () => {
