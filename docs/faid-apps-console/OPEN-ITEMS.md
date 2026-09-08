@@ -146,6 +146,15 @@ Last edited 2026-09-08.
     mechanism (a separate task); (g) release 0.7.0 is built locally, not
     published.
 
+17. **The manager owns the base service instances** (2026-09-08). Today the
+    release catalog's `services` list defines names, plans and flags of the
+    base instances, so a manager screen feature is invisible until a release
+    carries the flag (seen with the editable database name and release
+    0.6.1). Plan: `docs/base-services-ownership-plan.md` (catalog v7 with
+    `requires`, a built-in `base-services.js`, about 2.5 days). Decisions
+    needed first: refuse catalogs older than v7 or keep a compatibility layer.
+    To be done before the next console work.
+
 ## Design notes still in force
 
 ### Desktop installer frozen (Arsenii, 2026-09-03)

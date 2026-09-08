@@ -46,6 +46,7 @@ template sourcing).
 
 - `docs/faid-apps-console/FIGAF-TOOL-MANAGEMENT-GAPS.md` — Figaf-tool management gaps (next to `SPEC.md`).
 - `docs/CLEANUP-2026-09-03.md` — what was deleted from this repo on 2026-09-03 and why.
+- `docs/base-services-ownership-plan.md` — plan (2026-09-08, not built): the manager owns the base service instances, the catalog only says what the backend requires (catalog v7). Read it before changing `catalog.services` handling.
 
 ---
 
