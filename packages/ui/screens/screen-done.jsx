@@ -104,8 +104,8 @@ function ScreenDone({ ctx, setCtx, setStep, STEPS }) {
         <div className="summary-grid" style={{ marginBottom: 18 }}>
           <div className="cell"><div className="k">App URL</div><div className="v" style={{ color: "var(--fg-blue)" }}>{appUrl}</div></div>
           <div className="cell"><div className="k">Image tag</div><div className="v">figaf/app:{ctx.config.dockerVersion || ctx.config.locationId}</div></div>
-          <div className="cell"><div className="k">Database</div><div className="v">{ctx.config.dbServiceName || "figaf-db"} · {ctx.config.dbPlan}</div></div>
-          <div className="cell"><div className="k">Auth</div><div className="v">figaf-xsuaa</div></div>
+          <div className="cell"><div className="k">Database</div><div className="v">{ctx.config.dbServiceName || "figaf-db"}{ctx.dbReused ? " · existing instance" : ` · ${ctx.config.dbPlan}`}</div></div>
+          <div className="cell"><div className="k">Auth</div><div className="v">{ctx.config.xsuaaServiceName || "figaf-xsuaa"}{ctx.xsuaaReused ? " · existing instance" : ""}</div></div>
           <div className="cell"><div className="k">Org / Space</div><div className="v">{ctx.login.org || "—"} / {ctx.login.space || "—"}</div></div>
           <div className="cell"><div className="k">Location ID</div><div className="v">{ctx.config.locationId || "—"}</div></div>
           <CockpitCell url={cockpitUrl} />

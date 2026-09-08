@@ -76,11 +76,12 @@ Binary resolved via `host.resolveBinary("cf")`.
 
 | # | Command | IPC handler | Scope | Notes |
 |---|---------|-------------|-------|-------|
-| 8 | `cf create-service <offering> <plan> <name> [-c <configFile>]` | `cf:createService` | both | |
-| 9 | `cf service <name>` | `cf:service`, `cf:pollService` | both | `cf:pollService`: polls every 10s, 15-min timeout |
+| 8 | `cf create-service <offering> <plan> <name> [-c <configFile>]` | `cf:createService` | both | "already exists" on a non-zero exit is a success only when row 9 confirms the instance is in this space (the XSUAA broker says the same words for an xsappname taken in another space of the subaccount; 2026-09-08) |
+| 8a | `cf services` | `cf:services`; `update:readCurrentConfig` | both | Read-only listing of the space (`parseCfServices`). The Figaf Tool Configuration screen tells an existing database / XSUAA instance (reused, no plan asked) from one to create; the update flow finds the bound XSUAA and database instances by offering |
+| 9 | `cf service <name>` | `cf:service`, `cf:pollService`, `cf:createService` (confirmation, row 8) | both | `cf:pollService`: polls every 10s, 15-min timeout. The Figaf Tool provisioning step (`screen-ops.jsx`) calls `cf:service` first and reuses an instance that exists instead of creating it |
 | 10 | `cf create-service-key <service> <key>` | `cf:createServiceKey` | both | |
 | 11 | `cf service-key <service> <key>` | `cf:serviceKey` | both | Direct spawn (not via `run()`); stdout routed through `redactServiceKeyLine` before terminal emission |
-| 12 | `cf update-service figaf-xsuaa -c <xsPath>` | `update:updateXsuaa` | cloud | Polls every 5s, 10-min timeout |
+| 12 | `cf update-service <xsuaa instance> -c <xsPath>` | `update:updateXsuaa` | cloud | Polls every 5s, 10-min timeout. The instance is the one bound to the deployed app (`xsuaaServiceName` from `update:readCurrentConfig`; default `figaf-xsuaa`) |
 | 13 | `cf create-service xsuaa application figaf-manager-xsuaa -c <xs-security.json>` | `cf:createXsuaa` | cloud | XSUAA v2 upgrade; polls every 5s, 10-min timeout |
 | 14 | `cf service figaf-manager-xsuaa` | `cf:createXsuaa`, `xsuaa:upgradeStatus` | cloud | |
 | 15 | `cf delete-service figaf-manager-xsuaa -f` | `cf:uninstallManager` | cloud | |

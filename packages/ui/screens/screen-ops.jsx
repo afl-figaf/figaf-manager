@@ -11,33 +11,53 @@ function ScreenProgress({ ctx, setCtx, onNext, onBack, appendLog }) {
 
   React.useEffect(() => {
     if (ctx.deployStarted) return;
-    setCtx(c => {
-      const extra = [];
-      if (ctx.config.enableConnectivity) extra.push({ id: "connectivity", status: "pending", title: "Create Connectivity service (figaf-connectivity)", sub: "cf create-service connectivity lite" });
-      if (ctx.config.enableDestination)  extra.push({ id: "destination",  status: "pending", title: "Create Destination service (figaf-destination)",   sub: "cf create-service destination lite" });
-      return { ...c, deployStarted: true, tasks: [...c.tasks, ...extra] };
-    });
+    // The checklist follows the configuration and the space: an instance that
+    // exists is reused, the others are created (figaf-tool-services.js).
+    const svc = window.figafToolServices(ctx.config, ctx.spaceServices);
+    setCtx(c => ({ ...c, deployStarted: true, tasks: window.figafToolProvisioningTasks(c.config, c.spaceServices) }));
     const api = fg();
     if (!api) return;
 
     const mark = (id, patch) =>
       setCtx(c => ({ ...c, tasks: c.tasks.map(t => t.id === id ? { ...t, ...patch } : t) }));
 
+    // Reuse an instance that is in the space (`cf service <name>` is the
+    // authority, not the listing the Configuration screen saw), otherwise
+    // create it and wait for "create succeeded". `plan` may be empty when
+    // the Configuration screen hid the plan because the instance existed.
+    async function ensureService(id, { label, offering, plan, name, configFile, reusedKey }) {
+      const s = await api.cf.service(name);
+      if (s.ok) {
+        mark(id, { status: "running", title: `Reuse ${label} (${name})`, sub: `exists · ${s.status}` });
+        const p = /succeeded/i.test(s.status) ? s : await api.cf.pollService(name);
+        const ready = /succeeded/i.test(p.status || "");
+        mark(id, { status: ready ? "done" : "error", sub: ready ? `already exists · reused (${p.status})` : (p.status || "not ready") });
+        if (ready && reusedKey) setCtx(c => ({ ...c, [reusedKey]: true }));
+        return ready;
+      }
+      if (!plan) {
+        mark(id, { status: "error", title: `Create ${label} (${name})`, sub: `${name} is not in the space any more and no plan was chosen — go back and choose a plan` });
+        return false;
+      }
+      mark(id, { status: "running", title: `Create ${label} (${name})` });
+      const c = await api.cf.createService({ offering, plan, name, configFile });
+      if (!c.ok) { mark(id, { status: "error", sub: c.stderr || "create-service failed" }); return false; }
+      const p = await api.cf.pollService(name);
+      mark(id, { status: p.ok ? "done" : "error", sub: p.status });
+      return p.ok;
+    }
+
     (async () => {
       // 1. vars.yml — written in config step; just mark done
       mark("vars", { status: "done", sub: "vars.yml updated" });
 
-      // 2. db creation runs fully in parallel — no dependency on XSUAA.
-      const dbName = ctx.config.dbServiceName || "figaf-db";
-      const dbPromise = (async () => {
-        mark("db", { status: "running", title: `Create PostgreSQL service (${dbName})` });
-        const c1 = await api.cf.createService({
-          offering: "postgresql-db", plan: ctx.config.dbPlan, name: dbName, configFile: "db.json",
-        });
-        if (!c1.ok) { mark("db", { status: "error", sub: c1.stderr || "create-service failed" }); return; }
-        const p1 = await api.cf.pollService(dbName);
-        mark("db", { status: p1.ok ? "done" : "error", sub: p1.status });
-      })();
+      // 2. The database runs fully in parallel — no dependency on XSUAA. An
+      //    existing instance (usually the one shared with the FAID backend)
+      //    is reused; db.json is only read when a new one is created.
+      const dbPromise = ensureService("db", {
+        label: "PostgreSQL service", offering: "postgresql-db", plan: ctx.config.dbPlan,
+        name: svc.db.name, configFile: "db.json", reusedKey: "dbReused",
+      });
 
       // 3. XSUAA creation, THEN role assignment chained off it.
       //
@@ -50,15 +70,16 @@ function ScreenProgress({ ctx, setCtx, onNext, onBack, appendLog }) {
       // the role collection behind; on a fresh subaccount the assign
       // raced ahead of materialization and failed with "role collection
       // not found".
+      //
+      // An XSUAA instance that already exists in the space is reused as it
+      // is (its role collections are already there); xs-security.json carries
+      // the xsappname that follows the instance name (config:writeVars).
       const xsRolePromise = (async () => {
-        mark("xsuaa", { status: "running" });
-        const c2 = await api.cf.createService({
-          offering: "xsuaa", plan: "application", name: "figaf-xsuaa", configFile: "xs-security.json",
+        const ready = await ensureService("xsuaa", {
+          label: "XSUAA service", offering: "xsuaa", plan: "application",
+          name: svc.xsuaa.name, configFile: "xs-security.json", reusedKey: "xsuaaReused",
         });
-        if (!c2.ok) { mark("xsuaa", { status: "error", sub: c2.stderr || "create-service failed" }); return; }
-        const p2 = await api.cf.pollService("figaf-xsuaa");
-        mark("xsuaa", { status: p2.ok ? "done" : "error", sub: p2.status });
-        if (!p2.ok) {
+        if (!ready) {
           mark("roles", { status: "error", sub: "skipped — XSUAA not ready" });
           return;
         }

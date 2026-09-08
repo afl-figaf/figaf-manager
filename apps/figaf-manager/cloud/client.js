@@ -174,6 +174,7 @@
       marketplacePostgresql:function ()  { return rpc("cf:marketplacePostgresql"); },
       createService:        function (a) { return rpc("cf:createService", a); },
       service:              function (name) { return rpc("cf:service", { name: name }); },
+      services:             function ()  { return rpc("cf:services"); },
       pollService:          function (name) { return rpc("cf:pollService", { name: name }); },
       createServiceKey:     function (a) { return rpc("cf:createServiceKey", a); },
       serviceKey:           function (a) { return rpc("cf:serviceKey", a); },

@@ -30,7 +30,7 @@ const fg = () => (typeof window !== "undefined" && window.figaf) || null;
 
 const UPDATE_PHASES = [
   { id: "refresh-templates", label: "Refresh deploy templates",  sub: "github.com/figaf/Figaf-BTP-Deployment · btp-users" },
-  { id: "update-xsuaa",      label: "Update XSUAA service",      sub: "cf update-service figaf-xsuaa -c xs-security.json" },
+  { id: "update-xsuaa",      label: "Update XSUAA service",      sub: "cf update-service <xsuaa instance> -c xs-security.json" },
   { id: "delete-apps",       label: "Delete current apps",       sub: "cf delete <id>-router/-app -f (recreate only)" },
   { id: "create-services",   label: "Create PI services",        sub: "cf create-service connectivity/destination lite" },
   { id: "push-app",          label: "Push app",                  sub: "cf push <id>-app" },
@@ -323,7 +323,7 @@ function ScreenUpdateConfig({ ctx, setCtx, onNext, onBack }) {
             <span>
               <div style={{ fontSize: 13, color: "var(--ink-0)" }}>Skip XSUAA update</div>
               <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
-                Leaves <span className="kbd">figaf-xsuaa</span> untouched. Pick this if you've hand-edited role collections in the cockpit and don't want them reset to the template defaults.
+                Leaves <span className="kbd">{vars.xsuaaServiceName || "figaf-xsuaa"}</span> untouched. Pick this if you've hand-edited role collections in the cockpit and don't want them reset to the template defaults.
               </div>
             </span>
           </label>
@@ -475,7 +475,7 @@ function ScreenUpdateConfig({ ctx, setCtx, onNext, onBack }) {
                   </label>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "not-allowed", opacity: 0.6, fontSize: 13 }}>
                     <input type="checkbox" checked disabled style={{ cursor: "not-allowed" }} />
-                    <span><span className="kbd">figaf-xsuaa</span> <span className="pill gray">required</span></span>
+                    <span><span className="kbd">{vars.xsuaaServiceName || "figaf-xsuaa"}</span> <span className="pill gray">required</span></span>
                   </label>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
                     <input type="checkbox" checked={!!vars.enableConnectivity} onChange={(e) => setVar({ enableConnectivity: e.target.checked })} style={{ cursor: "pointer" }} />
@@ -515,6 +515,7 @@ function ScreenUpdateProgress({ ctx, setCtx, onNext, onBack }) {
   const skipXsuaa = !!upd.skipXsuaa;
   const vars = upd.vars || {};
   const strategy = upd.strategy || "recreate";
+  const xsuaaName = vars.xsuaaServiceName || "figaf-xsuaa";
 
   // Only show the create-services row when the operator actually selected a PI
   // service — otherwise update:createServices short-circuits and the row would
@@ -547,10 +548,10 @@ function ScreenUpdateProgress({ ctx, setCtx, onNext, onBack }) {
       markPhase(msg.phase, patch);
     });
     const offSvc = api.on("cf:serviceStatus", (msg) => {
-      if (msg && msg.name === "figaf-xsuaa") markPhase("update-xsuaa", { sub: `status: ${msg.status}` });
+      if (msg && msg.name === xsuaaName) markPhase("update-xsuaa", { sub: `status: ${msg.status}` });
     });
     return () => { offPhase && offPhase(); offSvc && offSvc(); };
-  }, [markPhase]);
+  }, [markPhase, xsuaaName]);
 
   const runFlow = React.useCallback(async () => {
     const api = fg();
@@ -568,7 +569,7 @@ function ScreenUpdateProgress({ ctx, setCtx, onNext, onBack }) {
       const wv = await api.update.writeVars({ deployId, dockerTag: targetTag, vars });
       if (!wv.ok) { setError(wv.error || "writeVars failed"); setRunning(false); return; }
 
-      const ux = await api.update.updateXsuaa({ deployId, skip: skipXsuaa });
+      const ux = await api.update.updateXsuaa({ deployId, skip: skipXsuaa, xsuaaServiceName: xsuaaName });
       if (!ux.ok) { setError(ux.error || "updateXsuaa failed"); setRunning(false); return; }
 
       // Recreate strategy frees the org quota by deleting both apps before the
@@ -600,7 +601,7 @@ function ScreenUpdateProgress({ ctx, setCtx, onNext, onBack }) {
       setError(e.message || String(e));
       setRunning(false);
     }
-  }, [deployId, targetTag, skipXsuaa, vars, strategy, setCtx]);
+  }, [deployId, targetTag, skipXsuaa, xsuaaName, vars, strategy, setCtx]);
 
   React.useEffect(() => {
     if (startedRef.current) return;

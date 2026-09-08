@@ -62,6 +62,11 @@ function App() {
       id: "figaf-tool",
       domain: "",
       locationId: "",
+      // The two required service instances. Defaults the person may change
+      // on the Configuration screen; an instance that already exists in the
+      // space is reused as it is (figaf-tool-services.js, 2026-09-08).
+      dbServiceName: "figaf-db",
+      xsuaaServiceName: "figaf-xsuaa",
       dbPlan: "trial",
       dockerVersion: "",
       instanceMemory: "3700M",
@@ -81,12 +86,17 @@ function App() {
       { name: "development", description: "Small dev database · single AZ · 4 GB storage", free: false, size: "S"    },
       { name: "standard",    description: "Production · HA · 32 GB storage · backups",      free: false, size: "M"    },
     ],
+    // The provisioning checklist. ScreenProgress rebuilds it from the
+    // configuration and the space's instances (window.figafToolProvisioningTasks)
+    // when the deployment starts; this is the shape before that.
     tasks: [
       { id: "vars",  status: "pending", title: "Update vars.yml",                     sub: "ID · LANDSCAPE_APPS_DOMAIN · LOCATION_ID · DOCKER_IMAGE_VERSION" },
       { id: "db",    status: "pending", title: "Create PostgreSQL service",             sub: "cf create-service postgresql-db · poll every 10s" },
       { id: "xsuaa", status: "pending", title: "Create XSUAA service (figaf-xsuaa)",   sub: "cf create-service xsuaa application" },
       { id: "roles", status: "pending", title: "Assign role collection",               sub: "btp assign security/role-collection IRTAdmin (after XSUAA)" },
     ],
+    // `cf services` rows of the target space, loaded by ScreenConfig.
+    spaceServices: null,
     pushStatus: "idle",
     pushStarted: false,
     // Populated by ScreenUpdateConfig + ScreenUpdateProgress when the

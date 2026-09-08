@@ -34,6 +34,8 @@ const {
   explainPinnedLoginFailure,
 } = require("./cf-target");
 const { patchManifestName } = require("./manifest-patch");
+const figafToolTemplates = require("./figaf-tool-templates");
+const { parseCfServices, validateInstanceName } = require("./faid-database");
 const releaseConfig = require("./release-config");
 const { createFaidHandlers } = require("./faid-apps");
 const { ownStack, stackArgs } = require("./cf-stack");
@@ -127,11 +129,6 @@ const DEPLOYMENT_ZIP_URL =
  *   Figaf tool into a space the operator picks. A host without the method
  *   counts as "not the console", so the picker stays.
  */
-
-function patchManifestService(text, serviceName, enable) {
-  const re = new RegExp(`^(#?)(  - ${serviceName})$`, "m");
-  return text.replace(re, enable ? "$2" : "#$2");
-}
 
 function createOrchestrator({ host, send, audit }) {
   const state = {
@@ -533,6 +530,37 @@ function createOrchestrator({ host, send, audit }) {
     }
 
     return state.deployDirResolved;
+  }
+
+  // The deploy dir is patched in place and lives as long as the container.
+  // The first patch of a template file keeps a pristine copy next to it
+  // (`<file>.template`); every later patch starts from that copy.
+  async function pristineTemplate(deployDir, file) {
+    const copy = path.join(deployDir, `${file}.template`);
+    try { return await fsp.readFile(copy, "utf8"); } catch { /* first patch */ }
+    const text = await fsp.readFile(path.join(deployDir, file), "utf8");
+    await fsp.writeFile(copy, text, "utf8");
+    return text;
+  }
+
+  // The two required instance names of a Figaf Tool deployment, validated as
+  // cf instance names; the defaults when empty.
+  // Returns { ok, dbServiceName, xsuaaServiceName } or { ok:false, error }.
+  function figafToolServiceNames(vars) {
+    const v = vars || {};
+    const out = { ok: true };
+    const fields = [
+      ["dbServiceName", figafToolTemplates.DEFAULT_DB_SERVICE, "database service name"],
+      ["xsuaaServiceName", figafToolTemplates.DEFAULT_XSUAA_SERVICE, "XSUAA service name"],
+    ];
+    for (const [key, def, label] of fields) {
+      const raw = v[key] == null ? "" : String(v[key]).trim();
+      if (!raw) { out[key] = def; continue; }
+      const r = validateInstanceName(raw);
+      if (!r.ok) return { ok: false, error: `${label}: ${r.error}` };
+      out[key] = r.name;
+    }
+    return out;
   }
 
   // ─── update-state.json helpers ────────────────────────────────────────────
@@ -1875,8 +1903,33 @@ function createOrchestrator({ host, send, audit }) {
       const args = ["create-service", offering, plan, name];
       if (configFile) args.push("-c", configFile);
       const r = await run(resolveCf(), args, { source: "cf", cwd: deployDir });
-      const alreadyExists = /already exists/i.test(r.stdout + r.stderr);
-      return { ok: r.code === 0 || alreadyExists, alreadyExists, stderr: r.stderr };
+      const saysExists = /already exists/i.test(r.stdout + r.stderr);
+      if (r.code === 0) return { ok: true, alreadyExists: saysExists, stderr: r.stderr };
+      // "already exists" is a success only when the instance is in THIS
+      // space. The XSUAA broker says the same words when the xsappname is
+      // taken by an instance in another space of the subaccount; then there
+      // is nothing here to bind or to poll (2026-09-08).
+      if (saysExists) {
+        const chk = await run(resolveCf(), ["service", name], { source: "cf" });
+        if (chk.code === 0) return { ok: true, alreadyExists: true, stderr: r.stderr };
+        return {
+          ok: false, alreadyExists: false,
+          stderr: `${(r.stderr || r.stdout).trim()}\n${name} is not in this space: the name (for XSUAA: the xsappname) is taken elsewhere in the subaccount. Choose another service name.`,
+        };
+      }
+      return { ok: false, alreadyExists: false, stderr: r.stderr };
+    },
+
+    /**
+     * The service instances of the current space (`cf services`, quiet):
+     * [{ name, offering, plan, boundApps, operation }]. The Figaf Tool
+     * Configuration screen uses it to tell an existing instance (reused as
+     * it is, no plan asked) from one that will be created.
+     */
+    async "cf:services"() {
+      const r = await run(resolveCf(), ["services"], { source: "cf", quiet: true });
+      if (r.code !== 0) return { ok: false, error: r.stderr || "cf services failed", services: [] };
+      return { ok: true, services: parseCfServices(r.stdout) };
     },
 
     async "cf:service"({ name }) {
@@ -2291,6 +2344,8 @@ function createOrchestrator({ host, send, audit }) {
     },
 
     async "config:writeVars"(vars) {
+      const names = figafToolServiceNames(vars);
+      if (!names.ok) return names;
       const deployDir = await resolveDeployDir();
       const file = path.join(deployDir, "vars.yml");
       let text = await fsp.readFile(file, "utf8");
@@ -2315,19 +2370,29 @@ function createOrchestrator({ host, send, audit }) {
       }
       await fsp.writeFile(file, text, "utf8");
 
-      // Patch manifest.yml: toggle optional services and rename the DB service if needed.
-      const manifestFile = path.join(deployDir, "manifest.yml");
+      // manifest.yml: toggle the optional PI/PO services, rename the two
+      // required instances when the person chose other names. xs-security.json:
+      // the xsappname follows the XSUAA instance name (unique per subaccount).
+      // Both start from the PRISTINE template, so a second deployment in the
+      // same container does not patch an already-patched file.
       try {
-        let manifest = await fsp.readFile(manifestFile, "utf8");
-        manifest = patchManifestService(manifest, "figaf-connectivity", !!vars.enableConnectivity);
-        manifest = patchManifestService(manifest, "figaf-destination", !!vars.enableDestination);
-        if (vars.dbServiceName && vars.dbServiceName !== "figaf-db") {
-          manifest = manifest.replace(/^(\s*- )figaf-db(\s*)$/m, `$1${vars.dbServiceName}$2`);
-        }
-        await fsp.writeFile(manifestFile, manifest, "utf8");
+        const manifest = figafToolTemplates.applyManifestServices(await pristineTemplate(deployDir, "manifest.yml"), {
+          enableConnectivity: vars.enableConnectivity,
+          enableDestination: vars.enableDestination,
+          dbServiceName: names.dbServiceName,
+          xsuaaServiceName: names.xsuaaServiceName,
+        });
+        await fsp.writeFile(path.join(deployDir, "manifest.yml"), manifest, "utf8");
       } catch { /* manifest may not exist yet during early setup */ }
+      let xsTemplate = null;
+      try { xsTemplate = await pristineTemplate(deployDir, "xs-security.json"); } catch { /* not there during early setup */ }
+      if (xsTemplate !== null) {
+        const xs = figafToolTemplates.setXsappname(xsTemplate, names.xsuaaServiceName);
+        if (!xs.ok) return { ok: false, error: xs.error };
+        await fsp.writeFile(path.join(deployDir, "xs-security.json"), xs.text, "utf8");
+      }
 
-      return { ok: true, path: file };
+      return { ok: true, path: file, dbServiceName: names.dbServiceName, xsuaaServiceName: names.xsuaaServiceName };
     },
 
     /**
@@ -3072,7 +3137,10 @@ function createOrchestrator({ host, send, audit }) {
       }
 
       // Detect bound service instances: figaf-connectivity, figaf-destination,
-      // and the DB service (anything that isn't a known non-DB service).
+      // the XSUAA instance and the DB instance. The bindings give the names;
+      // `cf services` gives their offerings, so renamed instances (the
+      // Configuration screen allows other names since 2026-09-08) are found
+      // too. Without the listing, fall back to the known non-DB names.
       const NON_DB_SERVICES = new Set(["figaf-xsuaa", "figaf-connectivity", "figaf-destination"]);
       const sb = await run(resolveCf(), ["curl", `/v3/service_credential_bindings?app_guids=${guid}&include=service_instance`], { source: "cf" });
       if (sb.code === 0) {
@@ -3082,7 +3150,17 @@ function createOrchestrator({ host, send, audit }) {
           const names = instances.map((i) => i.name);
           if (names.includes("figaf-connectivity")) vars.enableConnectivity = true;
           if (names.includes("figaf-destination")) vars.enableDestination = true;
-          const dbCandidates = names.filter((n) => !NON_DB_SERVICES.has(n));
+          const ls = await run(resolveCf(), ["services"], { source: "cf", quiet: true });
+          const rows = ls.code === 0 ? parseCfServices(ls.stdout) : [];
+          const offeringOf = (n) => ((rows.find((row) => row.name === n) || {}).offering || "");
+          let dbCandidates;
+          if (rows.length) {
+            const xs = names.filter((n) => offeringOf(n) === "xsuaa");
+            if (xs.length === 1) vars.xsuaaServiceName = xs[0];
+            dbCandidates = names.filter((n) => offeringOf(n) === "postgresql-db");
+          } else {
+            dbCandidates = names.filter((n) => !NON_DB_SERVICES.has(n));
+          }
           if (dbCandidates.length === 1) {
             vars.dbServiceName = dbCandidates[0];
           } else {
@@ -3142,10 +3220,11 @@ function createOrchestrator({ host, send, audit }) {
       return { ok: true, path: file };
     },
 
-    async "update:updateXsuaa"({ deployId, skip } = {}) {
+    async "update:updateXsuaa"({ deployId, skip, xsuaaServiceName } = {}) {
       if (!host.isHosted) return { ok: false, error: "not available in desktop mode" };
       if (!deployId) return { ok: false, error: "deployId required" };
       const phase = "update-xsuaa";
+      const xsuaaName = (xsuaaServiceName && String(xsuaaServiceName).trim()) || figafToolTemplates.DEFAULT_XSUAA_SERVICE;
       if (skip) {
         send("update:phase", { phase, state: "done", detail: "skipped by operator" });
         writeUpdateState({ phase: "xsuaa-updated", xsuaaSkipped: true });
@@ -3168,7 +3247,7 @@ function createOrchestrator({ host, send, audit }) {
         return { ok: true, skipped: true, reason: "hash-match" };
       }
       send("update:phase", { phase, state: "running" });
-      const upd = await run(resolveCf(), ["update-service", "figaf-xsuaa", "-c", xsPath], { source: "cf" });
+      const upd = await run(resolveCf(), ["update-service", xsuaaName, "-c", xsPath], { source: "cf" });
       if (upd.code !== 0) {
         const errText = upd.stderr || "update-service failed";
         send("update:phase", { phase, state: "failed", error: errText });
@@ -3181,9 +3260,9 @@ function createOrchestrator({ host, send, audit }) {
       const start = Date.now();
       const timeoutMs = 10 * 60 * 1000;
       while (Date.now() - start < timeoutMs) {
-        const s = await run(resolveCf(), ["service", "figaf-xsuaa"], { source: "cf" });
+        const s = await run(resolveCf(), ["service", xsuaaName], { source: "cf" });
         const line = /status:\s+(.+)/i.exec(s.stdout)?.[1]?.trim() || "unknown";
-        send("cf:serviceStatus", { name: "figaf-xsuaa", status: line });
+        send("cf:serviceStatus", { name: xsuaaName, status: line });
         if (/update succeeded|create succeeded|succeeded/i.test(line)) {
           send("update:phase", { phase, state: "done" });
           writeUpdateState({ phase: "xsuaa-updated", "xs-security-hash": hash });
@@ -3197,8 +3276,8 @@ function createOrchestrator({ host, send, audit }) {
         await new Promise((r) => setTimeout(r, 5000));
       }
       send("update:phase", { phase, state: "failed", error: "timeout" });
-      writeUpdateState({ lastError: "timeout polling figaf-xsuaa" });
-      return { ok: false, error: "timeout polling figaf-xsuaa" };
+      writeUpdateState({ lastError: `timeout polling ${xsuaaName}` });
+      return { ok: false, error: `timeout polling ${xsuaaName}` };
     },
 
     // Recreate strategy: delete <deployId>-router and <deployId>-app before

@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld("figaf", {
     marketplacePostgresql: () => ipcRenderer.invoke("cf:marketplacePostgresql"),
     createService: (args) => ipcRenderer.invoke("cf:createService", args),
     service: (name) => ipcRenderer.invoke("cf:service", { name }),
+    services: () => ipcRenderer.invoke("cf:services"),
     pollService: (name) => ipcRenderer.invoke("cf:pollService", { name }),
     createServiceKey: (a) => ipcRenderer.invoke("cf:createServiceKey", a),
     serviceKey:       (a) => ipcRenderer.invoke("cf:serviceKey", a),

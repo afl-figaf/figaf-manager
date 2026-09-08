@@ -143,6 +143,13 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
   const [plans, setPlans] = React.useState(ctx.dbPlans);
   const [dockerTags, setDockerTags] = React.useState([]);
   const [writing, setWriting] = React.useState(false);
+  const [writeError, setWriteError] = React.useState("");
+  // `cf services` of the target space (null while loading). Decides whether
+  // the database and the XSUAA instance are reused or created
+  // (figaf-tool-services.js): an existing database needs no plan and no
+  // parameters; an existing XSUAA instance is not created again.
+  const [spaceServices, setSpaceServices] = React.useState(ctx.spaceServices || null);
+  const svc = window.figafToolServices(cfg, spaceServices);
 
   // Trial autodetection: the global account subdomain contains "trial" for
   // trial tenants (e.g. "12345trial-ga"). Seed lazily on mount so user
@@ -163,13 +170,20 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
   const dbParams = cfg.dbParams || {};
   const providerKnown = trialPg || !!provider;
 
-  const valid = cfg.id && cfg.domain && cfg.dbPlan && cfg.dockerVersion && providerKnown;
+  const dbSettingsOk = !svc.askDbPlan || (cfg.dbPlan && providerKnown);
+  const valid = cfg.id && cfg.domain && cfg.dockerVersion && svc.errors.length === 0 && dbSettingsOk;
 
   React.useEffect(() => {
     const api = fg();
     if (!api) return;
     (async () => {
       const landscape = ctx.login.landscape;
+
+      api.cf.services().then((ls) => {
+        const rows = ls && ls.ok ? ls.services : [];
+        setSpaceServices(rows);
+        setCtx(c => ({ ...c, spaceServices: rows }));
+      }).catch(() => { setSpaceServices([]); });
 
       const d = await api.cf.domains();
       let doms = d.ok ? d.domains : [];
@@ -202,6 +216,7 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
     const api = fg();
     if (!api) return onNext();
     setWriting(true);
+    setWriteError("");
     const r = await api.config.writeVars({
       id: cfg.id,
       domain: cfg.domain,
@@ -215,17 +230,40 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
       cloudConnectorDestinationNameForSmtpIntegration: cfg.cloudConnectorDestinationNameForSmtpIntegration,
       enableConnectivity: cfg.enableConnectivity,
       enableDestination: cfg.enableDestination,
-      dbServiceName: cfg.dbServiceName || "figaf-db",
+      dbServiceName: svc.db.name,
+      xsuaaServiceName: svc.xsuaa.name,
     });
-    if (!r || !r.ok) { setWriting(false); return; }
-    const r2 = await api.config.writeDbConfig({
-      trial: trialPg,
-      provider,
-      fields: dbParams,
-    });
+    if (!r || !r.ok) {
+      setWriting(false);
+      setWriteError((r && r.error) || "vars.yml could not be written");
+      if (appendLog && r && r.error) appendLog([{ type: "err", text: r.error }]);
+      return;
+    }
+    // db.json is only read by `cf create-service ... -c db.json`; an existing
+    // database is reused as it is, so nothing is written for it.
+    if (svc.askDbPlan) {
+      const r2 = await api.config.writeDbConfig({
+        trial: trialPg,
+        provider,
+        fields: dbParams,
+      });
+      if (!r2 || !r2.ok) {
+        setWriting(false);
+        setWriteError((r2 && r2.error) || "db.json could not be written");
+        if (appendLog && r2 && r2.error) appendLog([{ type: "err", text: r2.error }]);
+        return;
+      }
+    }
     setWriting(false);
-    if (r2 && r2.ok) onNext();
-    else if (appendLog && r2 && r2.error) appendLog([{ type: "err", text: r2.error }]);
+    onNext();
+  }
+
+  // One pill per required instance: what the provisioning step will do.
+  function InstancePill({ s }) {
+    if (!svc.loaded) return <span className="pill gray">checking the space…</span>;
+    if (s.error) return <span className="pill" style={{ background: "#fde8e8", color: "#b42318" }}>not usable</span>;
+    if (s.reuse) return <span className="pill green">exists · will be reused</span>;
+    return <span className="pill blue">will be created</span>;
   }
 
   return (
@@ -235,7 +273,8 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
           <div className="pane-eyebrow">Step 4 · Configuration</div>
           <h1 className="pane-title">Configure the deployment</h1>
           <p className="pane-desc">
-            We'll write these values to <span className="kbd">vars.yml</span> and create the PostgreSQL service from the selected plan.
+            We'll write these values to <span className="kbd">vars.yml</span>. Service instances that already exist
+            in the space are reused as they are; the others are created in the next step.
           </p>
         </div>
 
@@ -425,17 +464,17 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
         <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--ink-3)", margin: "0 0 12px" }}>CF services</div>
 
         <div style={{ fontSize: 12, color: "var(--ink-2)", marginBottom: 12 }}>
-          Select the Cloud Foundry services to bind in <span className="kbd">manifest.yml</span>. Your database service and <strong>figaf-xsuaa</strong> are always required. <strong>figaf-connectivity</strong> and <strong>figaf-destination</strong> are needed for PI/PO integration via SAP Cloud Connector — if the services do not already exist, they will be created during the next step.
+          Select the Cloud Foundry services to bind in <span className="kbd">manifest.yml</span>. The database and the XSUAA instance are always required; their names are set below. <strong>figaf-connectivity</strong> and <strong>figaf-destination</strong> are needed for PI/PO integration via SAP Cloud Connector — if the services do not already exist, they will be created during the next step.
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 4 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "not-allowed", opacity: 0.6, fontSize: 13 }}>
             <input type="checkbox" checked disabled style={{ cursor: "not-allowed" }} />
-            <span><span className="kbd">{cfg.dbServiceName || "figaf-db"}</span> <span className="pill gray">required</span></span>
+            <span><span className="kbd">{svc.db.name}</span> <span className="pill gray">required</span></span>
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "not-allowed", opacity: 0.6, fontSize: 13 }}>
             <input type="checkbox" checked disabled style={{ cursor: "not-allowed" }} />
-            <span><span className="kbd">figaf-xsuaa</span> <span className="pill gray">required</span></span>
+            <span><span className="kbd">{svc.xsuaa.name}</span> <span className="pill gray">required</span></span>
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
             <input
@@ -460,8 +499,33 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
         <div className="divider" />
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 12px" }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--ink-3)" }}>XSUAA service</div>
+          <InstancePill s={svc.xsuaa} />
+        </div>
+
+        <div className="field">
+          <label className="field-label">XSUAA service name</label>
+          <input
+            className="input is-mono"
+            value={cfg.xsuaaServiceName ?? "figaf-xsuaa"}
+            onChange={(e) => setCfg({ xsuaaServiceName: e.target.value })}
+            placeholder="figaf-xsuaa"
+          />
+          <div className="field-hint">
+            {svc.xsuaa.reuse
+              ? <>The existing instance is bound as it is; its role collections are not changed.</>
+              : <>Created as <span className="kbd">xsuaa application</span> with the roles of <span className="kbd">xs-security.json</span>; its <span className="kbd">xsappname</span> is <span className="kbd">{svc.xsappname}</span>. XSUAA needs that name to be unique in the subaccount — another Figaf Tool in the same subaccount (in any space) needs a different name here.</>}
+          </div>
+        </div>
+
+        <div className="divider" />
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 12px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--ink-3)" }}>PostgreSQL service</div>
-          <span className="pill gray">postgresql-db · from marketplace</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <span className="pill gray">postgresql-db · from marketplace</span>
+            <InstancePill s={svc.db} />
+          </div>
         </div>
 
         <div className="field" style={{ marginBottom: 14 }}>
@@ -472,9 +536,20 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
             onChange={(e) => setCfg({ dbServiceName: e.target.value })}
             placeholder="figaf-db"
           />
-          <div className="field-hint">Name for the PostgreSQL service instance to create and bind. Change this if you want a custom name or already have an existing service.</div>
+          <div className="field-hint">
+            {svc.db.reuse
+              ? <>This instance exists in the space{svc.db.plan ? <> (plan <span className="kbd">{svc.db.plan}</span>)</> : null} and is bound as it is. It may be shared with the FAID Apps. No plan and no parameters are needed.</>
+              : <>Name of the PostgreSQL service instance to create and bind. Enter the name of an existing instance to reuse it.</>}
+          </div>
         </div>
 
+        {svc.errors.length > 0 && (
+          <div style={{ padding: "10px 12px", borderRadius: 6, background: "#fde8e8", border: "1px solid #f5b5b5", fontSize: 12, color: "#b42318", marginBottom: 14 }}>
+            {svc.errors.map((e, i) => <div key={i}>{e}</div>)}
+          </div>
+        )}
+
+        {svc.askDbPlan && (
         <div className="field">
           <label className="field-label">
             Service plan <span className="field-required">*</span>
@@ -506,7 +581,10 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
             ))}
           </div>
         </div>
+        )}
 
+        {svc.askDbPlan && (
+        <>
         <div className="divider" />
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 12px" }}>
@@ -581,6 +659,14 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
             );
           })}
         </div>
+        </>
+        )}
+
+        {writeError && (
+          <div style={{ padding: "10px 12px", borderRadius: 6, background: "#fde8e8", border: "1px solid #f5b5b5", fontSize: 12, color: "#b42318", marginTop: 14 }}>
+            {writeError}
+          </div>
+        )}
       </div>
 
       <WizardFooter

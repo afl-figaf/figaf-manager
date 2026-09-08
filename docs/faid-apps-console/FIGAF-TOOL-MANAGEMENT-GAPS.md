@@ -38,6 +38,19 @@ it installs the FAID Apps? Facts come from the code on branch
 - **Console frame** (since 2026-09-02): the Figaf-tool flows are reachable
   from the rail (`screen-figaf-tool.jsx`), but they were built for the
   one-time wizard frame and were never run end to end in the console.
+- **Service instances of a deployment** (since 2026-09-08,
+  `packages/ui/figaf-tool-services.js`, `packages/core/figaf-tool-templates.js`):
+  the database (`figaf-db`) and the XSUAA instance (`figaf-xsuaa`) have
+  editable names on the Configuration screen. An instance that exists in
+  the space is reused as it is: no plan and no PostgreSQL parameters are
+  asked for an existing database (usually the one shared with the FAID
+  backend), no `cf create-service` runs for an existing XSUAA instance. The
+  `xsappname` in `xs-security.json` follows the XSUAA instance name, because
+  XSUAA wants it unique per subaccount. `manifest.yml` and `xs-security.json`
+  are patched from a pristine copy (`<file>.template`), so a second deploy
+  in one container starts clean. The update flow finds the bound XSUAA and
+  database instances by offering (`cf services`), so a renamed deployment
+  can be updated.
 
 ## 2. Gaps
 
@@ -117,7 +130,37 @@ approuter accepts both scopes; no migration exists.
 Decision: when and how legacy installations move (rebind, restage, reassign
 the collection), and whether Alex or the FAID stream owns it.
 
-### 2.7 Manual
+### 2.7 Two Figaf Tools in one subaccount
+
+Facts (verified 2026-09-08 in the dev subaccount, org `figafpartner-1`):
+space `dev` holds a Figaf Tool with `figaf-xsuaa` (xsappname
+`figaf-xsuaa!t157978`) and the role collections `IRTAdmin`, `IRTUser` and
+the rest. A deploy into space `figaf-faid` then fails twice: with the
+default XSUAA name at the xsappname (`Application with xsappname
+figaf-xsuaa!t157978 already exists`; the failed instance stays in the space
+as `create failed` and must be deleted), and with another XSUAA name at the
+role collections (`Role Collection IRTAdmin already exists in this
+subaccount. Please choose a different name.`). Role collections are
+subaccount-wide. The existing instance cannot be reused from another
+space: the `xsuaa` offering is not shareable (`cf curl
+/v3/service_offerings?names=xsuaa` -> `shareable: false`), so
+`cf share-service` is refused and a binding across spaces does not exist.
+Why it matters: a customer with a test and a production Figaf Tool in one
+subaccount hits the same wall; so does our dev subaccount today.
+Options: (a) unique names per deployment - a new XSUAA name, the
+xsappname that follows it (built), and every role collection suffixed with
+`_<xsuaa instance name>`; SAP's own answer for the same application in
+several spaces of one subaccount; (b) one set of role collections that
+holds the roles of BOTH apps - the second deployment's `xs-security.json`
+declares no `role-collections`, and the new app's roles are added to the
+existing collections (cockpit, or `btp` under the person's login); one
+`IRTAdmin` then grants admin in both Figaf Tools; (c) one Figaf Tool per
+subaccount, documented as a prerequisite - what customers do today.
+Decision (Alex and Arsenii): open on 2026-09-08. Until then the manager
+shows the broker's sentence as it is, and the Configuration screen marks a
+failed instance as "not usable".
+
+### 2.8 Manual
 
 Fact: the published manual describes the wizard frame screen by screen. The
 console frame changes navigation, sign-in order and the Setup page.
@@ -137,4 +180,4 @@ UI. Backlog items for the Figaf tool, not workarounds.
 2. Decide 2.3 (identity) and 2.2 (metadata) together; they shape the prerequisites.
 3. Decide 2.1: in or hidden for release 1.
 4. Version the templates (2.4).
-5. Manual (2.7) after the console pages are final.
+5. Manual (2.8) after the console pages are final.
