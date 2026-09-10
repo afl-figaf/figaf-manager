@@ -4,7 +4,11 @@
 applications:
   - name: figaf-manager
     memory: 128M
-    disk_quota: 512M
+    # The quota covers the whole container: the droplet with the cf and btp
+    # binaries, the release cache in /tmp (two versions, one zip per CF app)
+    # and the per-session directories under $HOME/sessions. 512M ran full
+    # on 2026-09-09 ("no space left on device" from every cf call).
+    disk_quota: 2G
     instances: 1
     buildpack: nodejs_buildpack
     # Ubuntu 24.04 stack (figaf-faid decision 0015, 2026-09-07). cflinuxfs4 is

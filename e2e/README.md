@@ -30,9 +30,11 @@ Servers started by global-setup (choose with `E2E_SERVERS=main,failure,remote`):
   It is a LOCAL release source (`FIGAF_FAID_ARTIFACTS_DIR`).
   Project `console` (read-only specs) and the install smoke run here.
 - `failure` on :8088 — the fixture release `e2e/fixtures/release-missing-service`.
-  Its platform base needs a service instance that does not exist, so every
-  Install is refused BEFORE any cf change. Project `failure-visibility` runs
-  here: a real failure, zero side effects.
+  Its CF apps name a Cloud Foundry stack no landscape offers
+  (`cflinuxfs-e2e-missing`), so every Install is refused at the stack check,
+  BEFORE any cf change (catalog v7 has no instance names to make "missing":
+  the base instances are the manager's, `packages/core/base-services.js`).
+  Project `failure-visibility` runs here: a real failure, zero side effects.
 - `remote` on :8089 — a REMOTE release source: `FIGAF_FAID_RELEASE_URL` points
   at a static file server on :8090 that serves `e2e/fixtures/store` (the
   bucket layout, versions 0.0.1 with one app and 0.0.2 with two; the server

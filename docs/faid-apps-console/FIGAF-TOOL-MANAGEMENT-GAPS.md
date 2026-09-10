@@ -83,17 +83,26 @@ re-derivation and ask the person for the rest.
 Decision: pick (a) or (b); (b) keeps the runtime independent of the manager,
 which is the rule for the FAID Apps too.
 
-### 2.3 Which identity runs Figaf-tool operations
+### 2.3 Which identity runs Figaf-tool operations — DECIDED 2026-09-08 (Arsenii)
 
-Fact: the FAID Apps console signs in as the stored technical user after Setup step 1.
-Alex's flows expect the person's own CF session and optionally a BTP login.
-Cross-space discovery under the technical user needs at least Space Auditor
-in the Figaf-tool spaces (`OPEN-ITEMS.md` item 5); the BTP login does not
-survive a restart, so `btp assign` steps fail after one.
-Decision: is the technical user also allowed to deploy and update the Figaf
-tool? If yes: its roles per space become part of the customer prerequisites
-(figaf-faid `docs/d1/MANUAL-RUNBOOK.md`, top section). If no: the console
-must ask for a passcode before these flows and say why.
+The stored management user signs in to Cloud Foundry only. It deploys and
+updates the Figaf tool wherever it has Space Developer (customer
+prerequisite, figaf-faid `docs/d1/MANUAL-RUNBOOK.md` item 4). The three
+steps that use the BTP CLI — role-collection assignment (`btp assign`), the
+IAS service and the IAS trust (`connect:createIasService`,
+`connect:establishIasTrust`) — stay **person-only**: they run under the
+person's own `btp login --sso`, which is never stored and is gone after a
+restart. The console says so next to each blocked button.
+
+Why not an unattended `btp login` with the stored user: it would need
+Subaccount Administrator rights for a password-only account without 2FA
+(the subaccount operations are subaccount-level), a stored global-account
+subdomain and subaccount id, and a security decision by Daniel and the
+customer. Revisit when a scheduled or agent-triggered update needs a role
+change; the alternative then is a role-collection mapping to the customer's
+identity-provider groups, which removes per-user assignment altogether.
+Cross-space discovery under the technical user (Space Auditor) stays
+`OPEN-ITEMS.md` item 5.
 
 ### 2.4 Templates are unversioned and fetched from GitHub at run time
 

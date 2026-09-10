@@ -57,7 +57,7 @@ function DatabaseAccessNote({ s }) {
 
 // ── Step 1, part 1: which plans, and which instance for an editable name. One
 // dropdown per MISSING instance with more than one plan; existing instances are
-// shown as they are. A service with `nameEditable` (catalog v6: the database)
+// shown as they are. A service with `nameEditable` (the database, base-services.js)
 // gets a text field: the catalog name is the default; the space's PostgreSQL
 // instance is prefilled when there is one; the person may type any name.
 function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, names, setNames, onNamesChanged, nameError, disabled }) {
@@ -65,7 +65,7 @@ function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, names
     return (
       <div className="setup-panel" data-panel="service-plans">
         <div className="setup-panel-title">Service plans</div>
-        <div style={{ color: "var(--ink-3)", fontSize: 13 }}>Checking the service instances of this release…</div>
+        <div style={{ color: "var(--ink-3)", fontSize: 13 }}>Checking the service instances of the platform…</div>
       </div>
     );
   }
@@ -87,7 +87,7 @@ function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, names
     <div className="setup-panel" data-panel="service-plans">
       <div className="setup-panel-title">Service plans</div>
       <p className="setup-panel-text">
-        The service instances this release needs. {choosable.length
+        The service instances the Figaf Platform needs. {choosable.length
           ? "Pick the plan for each instance that does not exist yet. Plans that cost money are your decision; the manager never picks one for you."
           : "They all exist already; this step only binds them and adds the current roles."}
       </p>
@@ -249,7 +249,7 @@ function CockpitAssignLink({ roleName }) {
 }
 
 // ── Step 1: Prepare the space.
-function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged }) {
+function PrepareSpaceStep({ ctx, setCtx, appendLog, services, servicesError, onServicesChanged }) {
   const api = fgSetup();
   const signedIn = ctx.login.cfStatus === "done";
   const [plans, setPlans] = React.useState({});
@@ -347,7 +347,7 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged 
   }, [markPhase]);
 
   const spaceOk = spaceCheck.status === "ok";
-  const canStart = signedIn && spaceOk && rolePlan !== null && services !== null && (!autoAssign || emailOk) && !nameError;
+  const canStart = signedIn && spaceOk && rolePlan !== null && services !== null && !servicesError && (!autoAssign || emailOk) && !nameError;
 
   async function run() {
     if (!canStart || started) return;
@@ -442,8 +442,22 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged 
     <div className="setup-step-body" data-body="prepare">
       {!started && (
         <>
-          <ServicePlansPanel services={shownServices} plans={plans} setPlans={setPlans} groups={groups} setGroups={setGroups}
-            names={names} setNames={setNames} onNamesChanged={refreshNamed} nameError={nameError} disabled={started} />
+          {servicesError ? (
+            // The release could not be read (a catalog older than v7, the store
+            // unreachable): no instance can be listed or created. Shown where
+            // the plans would be; the step never hides a failure.
+            <div className="setup-panel" data-panel="service-plans-error">
+              <div className="setup-panel-title">Service plans</div>
+              <p className="setup-box-note is-warn" data-services-error="">
+                <strong>The release could not be read, so the service instances cannot be listed or created.</strong> {servicesError}
+                <br />Point the manager at a release it can read (the release store or a local release directory), then reload this page.
+                The terminal drawer shows what was read.
+              </p>
+            </div>
+          ) : (
+            <ServicePlansPanel services={shownServices} plans={plans} setPlans={setPlans} groups={groups} setGroups={setGroups}
+              names={names} setNames={setNames} onNamesChanged={refreshNamed} nameError={nameError} disabled={started} />
+          )}
           <RoleAssignPanel plan={rolePlan} autoAssign={autoAssign} setAutoAssign={setAutoAssign} assignTo={assignTo}
             setAssignTo={setAssignTo} emailOk={emailOk} roleName={roleName} onAddBtp={addBtpLoginFirst} />
         </>
@@ -508,6 +522,7 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, onServicesChanged 
               : !spaceOk ? "Sign in to the manager's Cloud Foundry space first"
               : rolePlan === null ? "Checking the BTP login of this session…"
               : services === null ? "Checking the service instances…"
+              : servicesError ? "The release could not be read; the instances cannot be created (see above)"
               : (autoAssign && !emailOk) ? "Enter the e-mail the role goes to, or switch the automatic assignment off"
               : "Create the instances, turn on SAP IAS sign-in, restart the manager once"}>
             <Ico.Shield /> {autoAssign ? "Prepare the space" : "Prepare the space without role assignment"}
@@ -699,13 +714,16 @@ function BaseServicesStep({ ctx, services, onRefresh, onOpenTerminal }) {
 function ScreenSetupPage({ ctx, setCtx, appendLog, data, setup, navigate, onRefreshExternal, onRefreshCf, onOpenTerminal, releaseVersion }) {
   if (!setup) return null;
   const services = data && data.services ? (data.services.ok ? data.services.services : []) : null;
+  // faid:services failed: the release could not be read. Step 1 says so
+  // instead of showing no instances (setup-checklist.js carries the same text).
+  const servicesError = data && data.services && data.services.ok === false ? String(data.services.error || "the release could not be read") : "";
   const stored = data ? (data.stored === undefined ? null : data.stored) : null;
 
   const bodyFor = (s) => {
     if (s.done) return null;
     switch (s.id) {
       case "prepare":
-        return s.current ? <PrepareSpaceStep ctx={ctx} setCtx={setCtx} appendLog={appendLog} services={services} onServicesChanged={onRefreshCf} /> : null;
+        return s.current ? <PrepareSpaceStep ctx={ctx} setCtx={setCtx} appendLog={appendLog} services={services} servicesError={servicesError} onServicesChanged={onRefreshCf} /> : null;
       case "mgmt-user":
         return s.current ? <ManagementUserStep ctx={ctx} setCtx={setCtx} appendLog={appendLog} stored={stored} onStored={onRefreshExternal} /> : null;
       case "services":

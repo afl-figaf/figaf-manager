@@ -3,7 +3,7 @@
 // code path: the manager on :8089 has FIGAF_FAID_RELEASE_URL pointing at a
 // static server (:8090) that serves e2e/fixtures/store in the bucket layout,
 // two versions (0.0.1, 0.0.2). No internet, and no cf change: the fixture's
-// required service instance does not exist, so any Install is refused early.
+// CF apps name a stack no landscape offers, so any Install is refused early.
 //
 // What is pinned here:
 //   - the page names the source and lists installed / latest / every version;
@@ -30,7 +30,8 @@ async function rpc(page, channel, body) {
 test("the page names the release store, its versions, and works with the latest one on an empty space", async ({ page }) => {
   await page.goto("/#/apps");
   await expect(page.locator("h1.pane-title")).toHaveText("FAID Apps");
-  await expect(page.locator(".pane-desc")).toContainText("release 0.0.2");
+  // The release is named once, in the Release panel (the head stays short).
+  await expect(page.locator(".pane-desc")).not.toContainText("0.0.2");
 
   const panel = page.locator("[data-release-panel]");
   await expect(panel).toBeVisible();
@@ -42,11 +43,13 @@ test("the page names the release store, its versions, and works with the latest 
   await expect(panel).toContainText("Nothing is installed yet. Install uses the latest release, 0.0.2.");
   await expect(panel.locator("[data-release-target]")).toHaveCount(0); // no dropdown without an installation
 
-  const row = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
+  const row = page.locator(`.faid-card[data-app="${APP_ID}"]`);
   await expect(row).toContainText("Not installed");
-  await expect(row).toContainText("release: 0.0.2");
+  // A row that is not installed carries its version only on the Install
+  // button; the shared backend names the version it installs with.
   await expect(row.getByRole("button", { name: "Install 0.0.2" })).toBeVisible();
-  await expect(page.locator("[data-platform-row]")).toContainText("release: 0.0.2");
+  await expect(row).not.toContainText("installed:");
+  await expect(page.locator("[data-platform-row]")).toContainText("installed together with the first app, at 0.0.2");
 
   // Transparency: an explicit refresh reads index.json again (the page's own
   // reads reuse a 30 s memo and the cached, verified files silently) and
@@ -80,6 +83,12 @@ test("Refresh releases reads index.json again; the page's own reads do not flood
     await done;
   }
   await expect.poll(count).toBe(before + 2);
+  // The head's Refresh reads the catalog again as well (rows, pending apps and
+  // the panel describe one release), without a store read and without chatter.
+  const catalogRead = page.waitForResponse((r) => decodeURIComponent(r.url()).includes("/rpc/faid:catalog"));
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await catalogRead;
+  await expect.poll(count).toBe(before + 2);
   // The page load itself (catalog, status, services, releases) produced no
   // "cached" chatter: those lines appear only on an explicit refresh.
   const text = await terminal.innerText();
@@ -88,7 +97,7 @@ test("Refresh releases reads index.json again; the page's own reads do not flood
 
 test("Update refuses when nothing is installed and for unknown versions; Install refuses a version other than latest on an empty space; nothing changes", async ({ page }) => {
   await page.goto("/#/apps");
-  await expect(page.locator(`.faid-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
+  await expect(page.locator(`.faid-card[data-app="${APP_ID}"]`)).toContainText("Not installed");
 
   const noInstall = await rpc(page, "faid:update", { version: "0.0.2" });
   expect(noInstall.ok).toBe(false);
@@ -105,7 +114,7 @@ test("Update refuses when nothing is installed and for unknown versions; Install
   // The normal early refusal of this fixture: the store worked, cf was not changed.
   const install = await rpc(page, "faid:install", { appId: APP_ID });
   expect(install.ok).toBe(false);
-  expect(install.error).toMatch(/required service instance\(s\) missing: figaf-faid-e2e-missing/);
+  expect(install.error).toMatch(/needs the Cloud Foundry stack cflinuxfs-e2e-missing/);
 
   const releases = await rpc(page, "faid:releases", {});
   expect(releases.ok).toBe(true);
@@ -114,7 +123,7 @@ test("Update refuses when nothing is installed and for unknown versions; Install
   expect(releases.latest).toBe("0.0.2");
   expect(releases.versions.map((v) => v.version)).toEqual(["0.0.2", "0.0.1"]);
   expect(releases.versions.every((v) => v.selectable === false)).toBe(true);
-  await expect(page.locator(`.faid-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
+  await expect(page.locator(`.faid-card[data-app="${APP_ID}"]`)).toContainText("Not installed");
 });
 
 // Two apps in one release (figaf-faid decision 0016): 0.0.1 carries one app,
@@ -127,12 +136,11 @@ const SECOND_APP_ID = "functional-profiles-maintain-e2e-store";
 
 test("a release with two apps lists both, each installable on its own; a refused install of the second app leaves the first alone", async ({ page }) => {
   await page.goto("/#/apps");
-  const first = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
-  const second = page.locator(`.faid-app-row[data-app="${SECOND_APP_ID}"]`);
+  const first = page.locator(`.faid-card[data-app="${APP_ID}"]`);
+  const second = page.locator(`.faid-card[data-app="${SECOND_APP_ID}"]`);
   await expect(first).toContainText("Not installed");
   await expect(second).toContainText("Not installed");
   await expect(second).toContainText("Functional Profiles Maintain (e2e store fixture)");
-  await expect(second).toContainText("release: 0.0.2");
   await expect(second.getByRole("button", { name: "Install 0.0.2" })).toBeVisible();
   await expect(first.getByRole("button", { name: "Install 0.0.2" })).toBeVisible();
 
@@ -147,7 +155,7 @@ test("a release with two apps lists both, each installable on its own; a refused
 
   const install = await rpc(page, "faid:install", { appId: SECOND_APP_ID });
   expect(install.ok).toBe(false);
-  expect(install.error).toMatch(/required service instance\(s\) missing: figaf-faid-e2e-missing/);
+  expect(install.error).toMatch(/needs the Cloud Foundry stack cflinuxfs-e2e-missing/);
 
   await expect(first).toContainText("Not installed");
   await expect(second).toContainText("Not installed");

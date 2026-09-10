@@ -35,6 +35,8 @@ function ScreenFigafToolHub({ ctx, onStartFlow, onGoSession }) {
     <>
       Needs a BTP login —{" "}
       <button className="btn-link" onClick={onGoSession}>add it under Session &amp; access</button>.
+      {" "}The stored management user signs in to Cloud Foundry only; subaccount operations
+      (role assignment, IAS trust) run under your own BTP login, and the manager forgets it on every restart.
     </>
   );
 

@@ -44,7 +44,8 @@
         needsUserInput: false,
         reason: "no-btp-login",
         notice: "The automatic role assignment needs a BTP login in THIS session. " +
-          "A BTP login made before the last restart does not count: the manager forgets it on every restart.",
+          "A BTP login made before the last restart does not count: the manager forgets it on every restart. " +
+          "The stored management user signs in to Cloud Foundry only; subaccount operations run under your own BTP login.",
       };
     }
     if (pre.cfUserIsStoredUser) {

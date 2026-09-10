@@ -35,8 +35,9 @@ const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
 function catalogFor(version, { withSha = true } = {}) {
   return {
     releaseVersion: version,
-    services: [{ name: "xsuaa", offering: "xsuaa", plan: "application", configFile: "xs-security.json" }],
-    platform: { name: "Shared backend", cfApps: [{ name: "backend", artifact: "backend.zip", ...(withSha ? { sha256: sha(`backend-${version}`) } : {}) }] },
+    // Catalog v7: the backend requires XSUAA as a binding, so the release
+    // ships xs-security.json and the store must deliver it with the catalog.
+    platform: { name: "Shared backend", cfApps: [{ name: "backend", artifact: "backend.zip", requires: { xsuaa: "binding" }, ...(withSha ? { sha256: sha(`backend-${version}`) } : {}) }] },
     apps: [{ id: "arch", version, cfApps: [{ name: "arch-fe", artifact: "arch.zip", ...(withSha ? { sha256: sha(`arch-${version}`) } : {}) }] }],
   };
 }
@@ -137,7 +138,7 @@ test("local store: index and resolve come from the one catalog; another version 
   assert.equal(store.describe().kind, "local");
 });
 
-test("loadCatalog: missing file, bad JSON, missing fields, v3 services are validated", () => {
+test("loadCatalog: missing file, bad JSON, missing fields; a catalog with a services list (v6 or older) or an unknown kind is refused", () => {
   const empty = tmp("rs-empty-");
   assert.equal(loadCatalog(empty).ok, false);
   const bad = tmp("rs-bad-");
@@ -146,9 +147,14 @@ test("loadCatalog: missing file, bad JSON, missing fields, v3 services are valid
   const noApps = tmp("rs-noapps-");
   fs.writeFileSync(path.join(noApps, "catalog.json"), JSON.stringify({ apps: [{ id: "x", version: "1", cfApps: [] }] }));
   assert.equal(loadCatalog(noApps).ok, false);
-  const badSvc = tmp("rs-svc-");
-  fs.writeFileSync(path.join(badSvc, "catalog.json"), JSON.stringify({ ...catalogFor("1.0.0"), services: [{ name: "db", offering: "postgresql-db", plan: "free", plans: ["standard"] }] }));
-  assert.match(loadCatalog(badSvc).error, /containing the default plan/);
+  const oldSvc = tmp("rs-svc-");
+  fs.writeFileSync(path.join(oldSvc, "catalog.json"), JSON.stringify({ ...catalogFor("1.0.0"), services: [{ name: "figaf-db", offering: "postgresql-db", plan: "free" }] }));
+  assert.match(loadCatalog(oldSvc).error, /^catalog\.json: the catalog carries a 'services' list \(catalog v6 or older\); this manager needs catalog v7/);
+  const badKind = tmp("rs-kind-");
+  const kind = catalogFor("1.0.0");
+  kind.platform.cfApps[0].requires = { hana: "binding" };
+  fs.writeFileSync(path.join(badKind, "catalog.json"), JSON.stringify(kind));
+  assert.match(loadCatalog(badKind).error, /platform cfApp backend requires an unknown service kind 'hana'/);
   // catalog v5 (decision 0016): figafScopes is optional, and an array of authority names when present
   const badScopes = tmp("rs-scopes-");
   fs.writeFileSync(path.join(badScopes, "catalog.json"), JSON.stringify({ ...catalogFor("1.0.0"), figafScopes: ["agent:read", 3] }));

@@ -16,7 +16,7 @@
 //             <url>/index.json              { latest, versions: [{ version, publishedAt }] }
 //             <url>/<version>/catalog.json   the release catalog
 //             <url>/<version>/release.json   { files: [{ name, size, sha256 }], source, ... }
-//             <url>/<version>/<file>         xs-security.json, backend.zip, <app-id>.zip
+//             <url>/<version>/<file>         xs-security.json (the apps' roles), backend.zip, <app-id>.zip
 //           Versions are immutable, so a downloaded version is cached on the
 //           container disk under <cacheDir>/<version>/ and never re-fetched.
 //           Only index.json changes; it is read again after INDEX_TTL_MS.
@@ -33,12 +33,18 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const { compareSemver } = require("./release-config");
+// Catalog v7: what the release requires of the space, by kind; the instances
+// themselves are the manager's (base-services.js).
+const { requirementsOf, releaseConfigFiles } = require("./base-services");
 
 // x.y.z (release channel) or x.y.z-dev.N (dev channel). The same rule as
 // figaf-faid release/build.js and release/publish.js.
 const VERSION_RE = /^\d+\.\d+\.\d+(-dev\.\d+)?$/;
 const INDEX_TTL_MS = 30_000;
-const MAX_CACHED_VERSIONS = 4;
+// Two versions: the installed one and the one an update moves to. Each
+// version is one zip per CF app (about 7 MB each, growing with every app),
+// and the cache shares the container disk quota with everything else.
+const MAX_CACHED_VERSIONS = 2;
 
 // ─── pure helpers (unit-tested) ──────────────────────────────────────────────
 
@@ -88,18 +94,13 @@ function validateCatalog(parsed) {
       }
     }
   }
-  // Catalog v3: service INSTANCES the manager creates when missing.
-  if (parsed.services != null) {
-    if (!Array.isArray(parsed.services)) return { ok: false, error: "catalog 'services' must be an array" };
-    for (const s of parsed.services) {
-      if (!s.name || !s.offering || !s.plan) {
-        return { ok: false, error: `catalog service '${s.name || "?"}' needs name, offering and plan` };
-      }
-      if (s.plans != null && (!Array.isArray(s.plans) || !s.plans.includes(s.plan))) {
-        return { ok: false, error: `catalog service '${s.name}': 'plans' must be an array containing the default plan` };
-      }
-    }
-  }
+  // Catalog v7 (figaf-faid decision 0018): every CF app says what it REQUIRES
+  // of the space, by kind (`requires`) and optional group (`optional`); the
+  // instances are the manager's own (base-services.js). A catalog that still
+  // carries a `services` list, or instance names on a CF app, is v6 or older
+  // and refused with one sentence - no compatibility layer.
+  const req = requirementsOf(parsed);
+  if (!req.ok) return { ok: false, error: `catalog.json: ${req.error}` };
   // Catalog v5 (figaf-faid decision 0016): the authorities the installation's
   // ONE Figaf API client must have - the union over every app of the release.
   // Optional (older releases carry none = nothing to verify).
@@ -353,9 +354,10 @@ function createReleaseStore({ source, fetchJson, download, log, now }) {
       if (!c.ok) return { ok: false, error: `release ${version}: ${c.error}` };
       const v = catalogVersion(c.catalog);
       if (v !== version) return { ok: false, error: `release ${version}: its catalog says ${v} — the store content is inconsistent` };
-      for (const s of c.catalog.services || []) {
-        if (!s.configFile) continue;
-        const r = await need(s.configFile);
+      // The release config files of the instances this release requires
+      // (xs-security.json for XSUAA): part of the release, fixed names.
+      for (const name of releaseConfigFiles(c.catalog)) {
+        const r = await need(name);
         if (!r.ok) return { ok: false, error: `release ${version}: ${r.error}` };
       }
       evict(version);

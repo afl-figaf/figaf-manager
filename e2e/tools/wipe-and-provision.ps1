@@ -17,11 +17,16 @@
 #                             re-create; xsuaa and credstore take seconds).
 #                             Apps are always deleted, so bindings to a kept
 #                             instance are removed with them.
-#   -Mode provision           create the base services of a virgin FAID Apps install:
+#   -Mode provision           create the base services of a virgin FAID Apps install
+#                             and wait until every create succeeded. The list
+#                             (name, offering, default plan, inline config) is
+#                             read from the manager's own module
+#                             packages\core\base-services.js - the ONE source
+#                             (docs\base-services-ownership-plan.md); today:
 #                               figaf-db              postgresql-db / free  (the FAID backend's own role is prepared in Setup step 3)
 #                               figaf-faid-xsuaa      xsuaa / application  (xs-security.json)
 #                               figaf-faid-credstore  credstore / free     (basic auth on instance)
-#                             and wait until every create succeeded.
+#                             The optional PI/PO pair is not created here.
 #                             NOTE: it-rt/api is NOT created here - the FAID
 #                             Apps do not bind it (the Archiving Setup app
 #                             needs only db + xsuaa + credstore). The Figaf
@@ -166,10 +171,20 @@ if ($Mode -eq 'provision') {
     if ($apps.Count) {
         Fail 'the space still has apps - run -Mode wipe -Force first (or clean up by hand).'
     }
+    # The base instances are the manager's own (packages/core/base-services.js,
+    # catalog v7): one source for names, offerings, default plans and configs.
+    # Read them through node so this script never carries a copy.
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail 'node not found - the base services are read from packages/core/base-services.js' }
+    $baseModule = Join-Path $PSScriptRoot '..\..\packages\core\base-services.js'
+    if (-not (Test-Path $baseModule)) { Fail "$baseModule not found" }
+    $baseJson = (& node -e "const b=require(process.argv[1]);process.stdout.write(JSON.stringify(b.baseServices().filter(s=>!s.optional).map(s=>({name:s.name,kind:s.kind,offering:s.offering,plan:s.plan,config:s.config||null}))))" $baseModule) -join ''
+    if ($LASTEXITCODE -ne 0 -or -not $baseJson) { Fail 'could not read the base services from packages/core/base-services.js' }
+    $base = @($baseJson | ConvertFrom-Json)
+    $baseServices = @($base | ForEach-Object { $_.name })
+    Write-Host (">> base services (packages/core/base-services.js): " + (($base | ForEach-Object { "$($_.name) ($($_.offering) / $($_.plan))" }) -join ', '))
     # Re-running provision is fine as long as only the base services are present
     # (a partial or retried provision). Any OTHER leftover service means the wipe
     # was incomplete - stop rather than build on a dirty space.
-    $baseServices = @('figaf-db', 'figaf-faid-xsuaa', 'figaf-faid-credstore')
     $unexpected = @($services | Where-Object { $baseServices -notcontains $_ })
     if ($unexpected.Count) {
         Fail ("unexpected leftover services: " + ($unexpected -join ', ') + " - run -Mode wipe -Force first.")
@@ -188,18 +203,26 @@ if ($Mode -eq 'provision') {
     Write-Host ">> XSUAA redirect URI domain: $appsDomain"
     $xsSecurity = Join-Path $env:TEMP 'figaf-faid-xs-security.json'
     (Get-Content $xsSecurityTemplate -Raw).Replace('__CF_APPS_DOMAIN__', $appsDomain) | Set-Content -Encoding Ascii $xsSecurity
-    # Basic authentication MUST be configured on the credstore INSTANCE: the
-    # broker rejects it on binding level (learned 2026-08-31).
-    $credstoreConfig = Join-Path $env:TEMP 'figaf-faid-credstore-config.json'
-    '{"authentication":{"type":"basic"}}' | Set-Content -Encoding Ascii $credstoreConfig
-
     # Idempotent: skip a service that already exists (e.g. after a partial run).
+    # The XSUAA instance takes the filled xs-security.json; an instance with an
+    # inline config in the module (the Credential Store: basic authentication
+    # MUST be configured on the INSTANCE, the broker rejects it on binding
+    # level, learned 2026-08-31) takes that config as a file.
     $existing = @(Get-SpaceServices)
-    if ($existing -notcontains 'figaf-db') { Invoke-Cf @('create-service', 'postgresql-db', 'free', 'figaf-db') }
-    if ($existing -notcontains 'figaf-faid-xsuaa') { Invoke-Cf @('create-service', 'xsuaa', 'application', 'figaf-faid-xsuaa', '-c', $xsSecurity) }
-    if ($existing -notcontains 'figaf-faid-credstore') { Invoke-Cf @('create-service', 'credstore', 'free', 'figaf-faid-credstore', '-c', $credstoreConfig) }
+    foreach ($s in $base) {
+        if ($existing -contains $s.name) { continue }
+        $cfArgs = @('create-service', $s.offering, $s.plan, $s.name)
+        if ($s.kind -eq 'xsuaa') {
+            $cfArgs += @('-c', $xsSecurity)
+        } elseif ($null -ne $s.config) {
+            $cfgFile = Join-Path $env:TEMP ("figaf-faid-" + $s.name + "-config.json")
+            ($s.config | ConvertTo-Json -Compress -Depth 5) | Set-Content -Encoding Ascii $cfgFile
+            $cfArgs += @('-c', $cfgFile)
+        }
+        Invoke-Cf $cfArgs
+    }
 
-    $wanted = @('figaf-db', 'figaf-faid-xsuaa', 'figaf-faid-credstore')
+    $wanted = $baseServices
     $deadline = (Get-Date).AddMinutes(9)
     while ($true) {
         $pending = @()
@@ -215,6 +238,6 @@ if ($Mode -eq 'provision') {
         Write-Host ("   waiting for: " + ($pending -join ', '))
         Start-Sleep -Seconds 10
     }
-    Write-Host 'PROVISION PASSED: base services ready (db, xsuaa, credstore).'
+    Write-Host ("PROVISION PASSED: base services ready (" + ($baseServices -join ', ') + ").")
     exit 0
 }

@@ -6,7 +6,7 @@ const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
 const { createOrchestrator, DEPLOYMENT_ZIP_URL, createAuditLogger } = require("@figaf/core");
-const { createHost } = require("../host.cloud");
+const { createHost, sessionsRoot } = require("../host.cloud");
 const auth = require("./auth");
 // v2: XSUAA mode-switch (auth-gate-implementation-plan.md §2.7).
 // Selected once at boot based on whether VCAP_SERVICES contains an xsuaa
@@ -71,7 +71,7 @@ function newSession(sessionId) {
   const host = createHost({ sessionId });
   const audit = auditParent.withContext({ sessionId });
   const { handlers, dispose } = createOrchestrator({ host, send, audit });
-  const sess = { handlers, dispose, wsClients, lastSeen: Date.now(), audit };
+  const sess = { handlers, dispose, wsClients, lastSeen: Date.now(), audit, host };
   sessions.set(sessionId, sess);
   return sess;
 }
@@ -82,16 +82,35 @@ function getOrCreateSession(sessionId) {
   return newSession(sessionId);
 }
 
+// Remove the per-session directory ($HOME/sessions/<id>: scoped CF_HOME and
+// btp config, the deployment template, install work files). It shares the
+// container disk quota with the droplet and /tmp; kept directories filled
+// the 512M quota on 2026-09-09.
+function removeSessionDir(sess) {
+  try { fs.rmSync(sess.host.getUserDataDir(), { recursive: true, force: true }); } catch {}
+}
+
 // Prune idle sessions every 5 minutes
-setInterval(() => {
-  const cutoff = Date.now() - SESSION_TTL_MS;
+function pruneIdleSessions(now = Date.now()) {
+  const cutoff = now - SESSION_TTL_MS;
   for (const [id, sess] of sessions) {
     if (sess.lastSeen < cutoff) {
       try { sess.dispose(); } catch {}
+      removeSessionDir(sess);
       sessions.delete(id);
     }
   }
-}, 5 * 60 * 1000).unref();
+}
+setInterval(pruneIdleSessions, 5 * 60 * 1000).unref();
+
+// At boot every old session directory is waste: the cookie secret is per
+// boot, so no browser can resume one. Only in the container (VCAP_APPLICATION)
+// - a developer's home directory is never touched.
+function wipeSessionDirs() {
+  if (!process.env.VCAP_APPLICATION) return false;
+  try { fs.rmSync(sessionsRoot(), { recursive: true, force: true }); } catch {}
+  return true;
+}
 
 // ─── Signed-cookie helpers ─────────────────────────────────────────────────────
 // Mirrors the cookie-signature package (used by cookie-parser) so we can verify
@@ -546,6 +565,7 @@ function bootMintToken() {
 // (e.g., `node server.js`). When the test runner require()s this file, it
 // gets the Express app, HTTP server, and WS server without auto-starting.
 if (require.main === module) {
+  wipeSessionDirs();
   bootMintToken();
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`figaf-manager listening on :${PORT}`);
@@ -587,4 +607,8 @@ module.exports = {
   __lastActivityMs: lastActivityMs,
   __maybeIdleSelfDestruct: maybeIdleSelfDestruct,
   __IDLE_TTL_HOURS: IDLE_TTL_HOURS,
+  // session-dirs.test.js
+  __getOrCreateSession: getOrCreateSession,
+  __pruneIdleSessions: pruneIdleSessions,
+  __wipeSessionDirs: wipeSessionDirs,
 };

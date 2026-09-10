@@ -69,8 +69,8 @@ Binary resolved via `host.resolveBinary("cf")`.
 | 5 | `cf domains` | `cf:domains` | both | Filters to `cfapps.*` domains |
 | 6 | `cf marketplace -e postgresql-db` | `cf:marketplacePostgresql` | both | |
 | 7 | `cf marketplace -e <offering>` | `cf:marketplaceCheck` | both | |
-| 7a | `cf org <orgName> --guid` | `cf:cockpitUrl` | both | Resolve org GUID for the Finish-screen cockpit deep-link |
-| 7b | `cf space <spaceName> --guid` | `cf:cockpitUrl` | both | Resolve space GUID for the Finish-screen cockpit deep-link |
+| 7a | `cf org <orgName> --guid` | `cf:cockpitUrl` | both | Resolve org GUID for the Finish-screen cockpit deep-link; also the FAID Apps page, when a row's Details block is opened (once per page) |
+| 7b | `cf space <spaceName> --guid` | `cf:cockpitUrl` | both | Resolve space GUID for the Finish-screen cockpit deep-link; also the FAID Apps page, when a row's Details block is opened (once per page) |
 
 ### Service Lifecycle
 
@@ -85,7 +85,7 @@ Binary resolved via `host.resolveBinary("cf")`.
 | 13 | `cf create-service xsuaa application figaf-manager-xsuaa -c <xs-security.json>` | `cf:createXsuaa` | cloud | XSUAA v2 upgrade; polls every 5s, 10-min timeout |
 | 14 | `cf service figaf-manager-xsuaa` | `cf:createXsuaa`, `xsuaa:upgradeStatus` | cloud | |
 | 15 | `cf delete-service figaf-manager-xsuaa -f` | `cf:uninstallManager` | cloud | |
-| 15a | `cf services` | `faid:services`, `faid:provisionServices`, `faid:prepareSpaceServices` (via `effectiveServiceNames`) | cloud | Catalog v6: which PostgreSQL instance of the space is the backend's database when no Credential Store entry names one yet (prefill of the editable name; `parseCfServices` in `faid-database.js`). Read-only |
+| 15a | `cf services` | `faid:services`, `faid:provisionServices`, `faid:prepareSpaceServices`, the preflight of `faid:install` / `faid:update` (via `effectiveServiceNames`) | cloud | Which PostgreSQL instance of the space is the backend's database when no Credential Store entry names one yet (prefill of the editable name `figaf-db`, `base-services.js`; `parseCfServices` in `faid-database.js`). Read-only |
 | 15b | `cf service <instance>` | `faid:databaseStatus`, `faid:databasePrepare`, `faid:databaseRotate`, `faid:databaseDrop`, `faid:services` (`describeInstance` in `faid-database.js`) | cloud | GUID, offering, plan, status and bound apps of the database instance; the entry's GUID is compared with it (`stale` when re-created) |
 | 15c | `cf create-service-key <instance> figaf-manager` | `faid:databasePrepare`, `faid:databaseRotate`, `faid:databaseDrop`, the backend deploy in `faid:install` / `faid:update` (`ownerConnection` in `faid-database.js`) | cloud | The manager's ONE standing key on the FAID database instance (default `figaf-db`, editable); created on first use, "already exists" is success |
 | 15d | `cf service-key <instance> figaf-manager` | the same | cloud | `quiet`, `auditStdout: false`, masked `logCmd`: the key JSON is the database owner (`dbo`) credential; read into memory for one action, never logged or stored. At deploy only its public `sslrootcert` is used (row 15g) |
@@ -151,8 +151,10 @@ backend's database access and never reads or writes application data
 The connection details plus the generated password go to the SAP Credential
 Store (namespace `figaf-faid`, name `backend-database`, `credstore-client.js`
 over the manager's binding); the FAID backend reads them at start. The
-database instance is NEVER bound to a FAID app (`faid-apps.js` skips
-`bind-service` for a catalog service with `access: "own-role"`).
+database instance is NEVER bound to a FAID app: the manager's own list of the
+base instances (`packages/core/base-services.js`, catalog v7) marks the
+database `own-role`, `faid-apps.js` issues no `bind-service` for it, and the
+release store refuses a catalog that asks for the database as a binding.
 
 ## Other Process Spawns
 
@@ -200,7 +202,7 @@ All runtime calls go through `https.get` (Node built-in). No third-party HTTP li
 | 12 | `https://<hostname>-internal.<domain>` | `cf:pushManagerApprouter` | Internal approuter destination env var; never fetched by Node |
 | 13 | `https://<cockpitBase>/#/globalaccount/<gaGuid>/subaccount/<subGuid>/roles` | `connect:trustConfigUrl` | Returned to UI |
 | 14 | `https://<cockpitBase>/#/globalaccount/<gaGuid>/subaccount/<subGuid>/users` | `xsuaa:assignRoleCollectionPreflight` | Returned to UI |
-| 14b | `https://<cockpitBase>/#/globalaccount/<gaGuid>/subaccount/<subGuid>/org/<orgGuid>/space/<spaceGuid>/applications` | `cf:cockpitUrl` | Returned to UI; opened via `shell.openExternal` from the Finish screens. `cockpitBase` from `cockpitBaseFromLicense(state.licenseType)` |
+| 14b | `https://<cockpitBase>/#/globalaccount/<gaGuid>/subaccount/<subGuid>/org/<orgGuid>/space/<spaceGuid>/applications` | `cf:cockpitUrl` | Returned to UI; opened via `shell.openExternal` from the Finish screens. `cockpitBase` from `cockpitBaseFromLicense(state.licenseType)` Since 2026-09-09 also an `<a href>` "Open BTP cockpit" in the Details block of a FAID app row (role collections), asked once per page when a Details block is opened |
 | 14a | `https://github.com/figaf/FigafManager/releases/...` (release `html_url`, or matched asset `browser_download_url`) | `shell:openExternal` (desktop self-update CTA in `triggerSelfUpdate`) | Passed to `host.openExternal()`. URL comes from the `update:checkSelf` response (GitHub-provided). Opened so the operator can download the new portable exe and replace their copy — a running portable can't self-overwrite |
 
 ### Build-time — `apps/figaf-manager/scripts/build-zip.js`

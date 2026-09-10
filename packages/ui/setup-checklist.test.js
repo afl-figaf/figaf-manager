@@ -203,3 +203,19 @@ test("v3 rows without `access` are unchanged by the v6 rule", () => {
   const r = load()({ ...V6_CTX, services: V3("ready", "ready", "ready", true) }, { ssoDone: true });
   assert.equal(byId(r, "services").done, true);
 });
+
+test("faid:services failed (the release could not be read, e.g. a catalog older than v7): step 1 says so with the error, step 3 is not listed, nothing is hidden silently", () => {
+  const r = load()({
+    services: { ok: false, error: "catalog.json: the catalog carries a 'services' list (catalog v6 or older); this manager needs catalog v7 (requires per CF app; release 0.8.0 or newer)" },
+    stored: { available: false, bindingPresent: false }, faid: { ok: true, platform: { status: "missing" } }, figaf: { configured: false },
+  });
+  assert.deepEqual(ids(r), ["prepare", "mgmt-user", "platform", "figaf-connection"]);
+  const s1 = byId(r, "prepare");
+  assert.match(s1.when, /The release could not be read, so the service instances cannot be listed or created: catalog\.json: .*catalog v6 or older.*needs catalog v7/);
+  assert.match(s1.error, /catalog v6 or older/);
+  assert.equal(s1.current, true);
+  // a normal answer carries no error and the usual when-line
+  const ok = load()({ services: V3("missing", "missing", "missing", false), stored: { available: false, bindingPresent: false } });
+  assert.equal(byId(ok, "prepare").error, "");
+  assert.match(byId(ok, "prepare").when, /one-time passcode/);
+});

@@ -2,9 +2,10 @@
 // Failed actions must explain themselves (project "failure-visibility",
 // server :8088 with the fixture release — see global-setup.js).
 //
-// The fixture's platform base needs a service instance that does not exist,
-// so every Install is REFUSED before any cf change: a real failure with zero
-// side effects. Locks the 2026-09-03 lesson ("no logs, nothing"): a failed
+// The fixture's CF apps name a Cloud Foundry stack no landscape offers, so
+// every Install is REFUSED at the stack check, before any cf change: a real
+// failure with zero side effects. (Catalog v7 has no instance names: the base
+// instances are the manager's own, so "a missing instance" is no fixture any more.) Locks the 2026-09-03 lesson ("no logs, nothing"): a failed
 // action stays on the page with what failed, what was said and what to do
 // next; the status refresh that follows every action must not wipe it; the
 // terminal drawer ends with a red summary line; a report can be copied.
@@ -20,7 +21,7 @@ test.use({ permissions: ["clipboard-read", "clipboard-write"] });
 test("a refused install stays visible (where / what / next), survives the status refresh, opens the terminal, copies a report, can be dismissed", async ({ page }) => {
   await page.goto("/#/apps");
   await expect(page.locator("h1.pane-title")).toHaveText("FAID Apps");
-  const row = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
+  const row = page.locator(`.faid-card[data-app="${APP_ID}"]`);
   await expect(row).toContainText("Not installed");
   const panel = page.locator('[data-outcome="error"]');
   await expect(panel).toHaveCount(0);
@@ -35,13 +36,13 @@ test("a refused install stays visible (where / what / next), survives the status
 
   const result = await (await installDone).json();
   expect(result.ok).toBe(false);
-  expect(result.error).toMatch(/required service instance\(s\) missing: figaf-faid-e2e-missing/);
+  expect(result.error).toMatch(/needs the Cloud Foundry stack cflinuxfs-e2e-missing, which this landscape does not offer/);
 
   // 1. The outcome panel: action + app, the error, the next step.
   await expect(panel).toBeVisible();
   await expect(panel).toContainText("Install of B2B Archiving Setup (e2e fixture) failed");
-  await expect(panel).toContainText("figaf-faid-e2e-missing");
-  await expect(panel).toContainText("Create the base services first");
+  await expect(panel).toContainText("cflinuxfs-e2e-missing");
+  await expect(panel).toContainText("that this landscape does not offer yet");
 
   // 2. The refresh comes back, the row is re-rendered — and the panel stays.
   await statusAfter;
@@ -52,7 +53,7 @@ test("a refused install stays visible (where / what / next), survives the status
   await panel.getByRole("button", { name: "Show CLI output" }).click();
   const terminal = page.locator(".terminal");
   await expect(terminal).toBeVisible();
-  await expect(terminal).toContainText(`install ${APP_ID} FAILED: required service instance(s) missing`);
+  await expect(terminal).toContainText(`install ${APP_ID} FAILED at step "stack": this release needs the Cloud Foundry stack cflinuxfs-e2e-missing`);
   await expect(terminal.locator(".t-err").last()).toContainText("FAILED");
 
   // 4. Copy report: a self-contained text for a support ticket.
@@ -62,8 +63,8 @@ test("a refused install stays visible (where / what / next), survives the status
   expect(clip).toContain("Figaf App Manager - action report");
   expect(clip).toContain("release: 0.0.0-e2e");
   expect(clip).toContain("action: Install of B2B Archiving Setup (e2e fixture)");
-  expect(clip).toContain("figaf-faid-e2e-missing");
-  expect(clip).toContain("next: Create the base services first");
+  expect(clip).toContain("cflinuxfs-e2e-missing");
+  expect(clip).toContain("next: The release names a Cloud Foundry stack");
   expect(clip).not.toMatch(/Token:/);
 
   // 5. Dismiss removes it; nothing else changed.
@@ -130,13 +131,13 @@ test("a second lifecycle action is refused while one is running, and changes not
   expect(busy.running.action).toBe("install");
   // The other one is the normal early refusal of this fixture — no cf change.
   const other = pair.find((r) => !r.busy);
-  expect(other.error).toMatch(/required service instance\(s\) missing/);
+  expect(other.error).toMatch(/needs the Cloud Foundry stack cflinuxfs-e2e-missing/);
 
   // Nothing runs any more, and the row is untouched.
   const running = await page.evaluate(() =>
     fetch("/rpc/faid%3Arunning", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", credentials: "same-origin" }).then((r) => r.json()));
   expect(running.running).toBeNull();
-  await expect(page.locator(`.faid-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
+  await expect(page.locator(`.faid-card[data-app="${APP_ID}"]`)).toContainText("Not installed");
 });
 
 test("a deploy started elsewhere shows as Installing… and every action button is off", async ({ page }) => {
@@ -164,7 +165,7 @@ test("a deploy started elsewhere shows as Installing… and every action button 
     });
   });
   await page.goto("/#/apps");
-  const row = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
+  const row = page.locator(`.faid-card[data-app="${APP_ID}"]`);
   await expect(row).toContainText("Installing…");
   await expect(row).toContainText("installing…");                 // the busy pill
   await expect(page.locator("[data-platform-row]")).toContainText("staging");
@@ -172,6 +173,71 @@ test("a deploy started elsewhere shows as Installing… and every action button 
   for (const b of await row.getByRole("button").all()) {
     expect(await b.isDisabled(), `${(await b.textContent()) || ""} must be disabled`).toBe(true);
   }
+  await page.unroute("**/rpc/faid%3Astatus");
+});
+
+
+// ─── Bulk disable / enable (the cards' checkboxes) ──────────────────────────
+// UI only: the status is simulated on the RPC seam (the same contract
+// faid:status carries live), and the disable RPC is intercepted, so no cf
+// command runs. What is checked: a running app gets a checkbox in the
+// Installed section, the selection bar says what the two buttons will do, and
+// "Disable selected" sends ONE faid:disable with the list of app ids.
+test("several apps at once: tick cards, the selection bar counts them, Disable selected sends one faid:disable with appIds", async ({ page }) => {
+  await page.route("**/rpc/faid%3Astatus", async (route) => {
+    await route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify({
+        ok: true, running: null,
+        platform: {
+          id: "platform", name: "Platform base (e2e fixture)", status: "running",
+          installedVersion: "0.0.0-e2e", catalogVersion: "0.0.0-e2e",
+          parts: [{ name: "figaf-faid-e2e-backend", exists: true, state: "STARTED", staging: false, route: "backend.example.test" }],
+        },
+        apps: [{
+          id: APP_ID, name: "B2B Archiving Setup (e2e fixture)", status: "running",
+          installedVersion: "0.0.0-e2e", catalogVersion: "0.0.0-e2e",
+          parts: [{ name: "figaf-faid-apps-e2e-frontend", exists: true, state: "STARTED", route: "app.example.test" }],
+        }],
+      }),
+    });
+  });
+  let sent = null;
+  await page.route("**/rpc/faid%3Adisable", async (route) => {
+    sent = route.request().postDataJSON();
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, results: [{ appId: APP_ID, ok: true }] }) });
+  });
+  await page.goto("/#/apps");
+
+  // The card: in the Installed section, with the Open link and the checkbox.
+  const card = page.locator(`.faid-card[data-app="${APP_ID}"]`);
+  await expect(card).toContainText("Running");
+  await expect(card).toContainText("installed:");
+  await expect(card.locator("[data-open-app]")).toHaveAttribute("href", "https://app.example.test");
+  await expect(page.locator('[data-section="installed"]')).toContainText("Installed");
+  await expect(page.locator("[data-faid-stats]")).toContainText("Running");
+  await expect(page.locator("[data-selection-bar]")).toHaveCount(0);
+
+  // Tick it: the bar appears and says what each button would do.
+  await card.getByRole("checkbox").check();
+  const bar = page.locator("[data-selection-bar]");
+  await expect(bar).toContainText("1 selected");
+  await expect(bar.getByRole("button", { name: "Enable selected (0)" })).toBeDisabled();
+  await expect(bar.getByRole("button", { name: "Disable selected (1)" })).toBeEnabled();
+
+  // Clear and Select all work on the section.
+  await bar.getByRole("button", { name: "Clear selection" }).click();
+  await expect(page.locator("[data-selection-bar]")).toHaveCount(0);
+  await page.getByRole("button", { name: "Select all" }).click();
+  await expect(bar).toContainText("1 selected");
+
+  // One call with the list; the selection is cleared when every app succeeded.
+  await bar.getByRole("button", { name: "Disable selected (1)" }).click();
+  await expect.poll(() => sent).toEqual({ appIds: [APP_ID] });
+  await expect(page.locator("[data-selection-bar]")).toHaveCount(0);
+  await expect(page.locator('[data-outcome="error"]')).toHaveCount(0);
+
+  await page.unroute("**/rpc/faid%3Adisable");
   await page.unroute("**/rpc/faid%3Astatus");
 });
 
@@ -217,6 +283,6 @@ test("a refused Update installation is visible: panel with the version rule, ter
   await outcome.getByRole("button", { name: "Show CLI output" }).click();
   await expect(page.locator(".terminal")).toBeVisible();
   await expect(page.locator(".terminal")).toContainText("update installation to 0.0.0-e2e FAILED");
-  await expect(page.locator(`.faid-app-row[data-app="${APP_ID}"]`)).toContainText("Not installed");
+  await expect(page.locator(`.faid-card[data-app="${APP_ID}"]`)).toContainText("Not installed");
   await page.unroute("**/rpc/faid%3Areleases");
 });

@@ -235,7 +235,7 @@
       // The release store (decision 0010): source, installed / latest / every version.
       releases:  function (a) { return rpc("faid:releases", a || {}); },
       figafSystems: function () { return rpc("faid:figafSystems"); },
-      // Catalog v3: base service instances created by the manager.
+      // The base service instances (packages/core/base-services.js) the release requires; created by the manager.
       services:           function (a) { return rpc("faid:services", a || {}); },
       databaseStatus:     function ()  { return rpc("faid:databaseStatus"); },
       databasePrepare:    function (a) { return rpc("faid:databasePrepare", a || {}); },

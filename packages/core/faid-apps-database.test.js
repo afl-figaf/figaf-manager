@@ -1,8 +1,9 @@
 "use strict";
-// Catalog v6 in faid-apps.js: the backend's own database role (faid-database.js)
-// and editable instance names. A fake `database` is injected; `run` is a
+// The backend's own database role in faid-apps.js (catalog v7
+// `requires.database: "own-role"`, faid-database.js) and the editable
+// instance name (base-services.js). A fake `database` is injected; `run` is a
 // recorder. Coverage:
-//   - resolveServiceNames / chooseDatabaseInstance (pure)
+//   - chooseDatabaseInstance (pure); the requirement of the fixture
 //   - faid:services: instanceName from the override, the entry or the space;
 //     access, nameEditable, databaseAccess and boundApps on the row
 //   - faid:prepareSpaceServices / provisionServices with names: cf gets the
@@ -18,23 +19,20 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const { createFaidHandlers, resolveServiceNames, chooseDatabaseInstance, ownRoleNames, resetRunningAction } = require("./faid-apps");
+const { createFaidHandlers, chooseDatabaseInstance, resetRunningAction } = require("./faid-apps");
+const { requirementsOf } = require("./base-services");
 
-const CATALOG_V6 = {
-  releaseVersion: "0.7.0",
-  services: [
-    { name: "figaf-db", offering: "postgresql-db", plan: "free", plans: ["free", "standard"], access: "own-role", nameEditable: true, purpose: "database" },
-    { name: "xsuaa", offering: "xsuaa", plan: "application", configFile: "xs-security.json", purpose: "roles" },
-    { name: "credstore", offering: "credstore", plan: "free", config: { authentication: { type: "basic" } }, bindToManager: true },
-  ],
+// Catalog v7: the backend requires the database with its own role, XSUAA and
+// the Credential Store as bindings; the frontend XSUAA only.
+const CATALOG_V7 = {
+  releaseVersion: "0.8.0",
   platform: {
     name: "Platform base",
-    // An OLD-style list that still names the database: the manager must not bind it.
-    cfApps: [{ name: "arch-backend", artifact: "backend.zip", buildpack: "nodejs_buildpack", memory: "256M", services: ["figaf-db", "xsuaa", "credstore"], optionalServices: ["figaf-db"] }],
+    cfApps: [{ name: "arch-backend", artifact: "backend.zip", buildpack: "nodejs_buildpack", memory: "256M", requires: { database: "own-role", xsuaa: "binding", credstore: "binding" } }],
   },
   apps: [{
-    id: "arch", name: "B2B Archiving Setup", version: "0.7.0",
-    cfApps: [{ name: "arch-frontend", artifact: "frontend.zip", buildpack: "nodejs_buildpack", memory: "128M", services: ["xsuaa"], destinationTo: "arch-backend", destinationName: "figaf-faid-backend" }],
+    id: "arch", name: "B2B Archiving Setup", version: "0.8.0",
+    cfApps: [{ name: "arch-frontend", artifact: "frontend.zip", buildpack: "nodejs_buildpack", memory: "128M", requires: { xsuaa: "binding" }, destinationTo: "arch-backend", destinationName: "figaf-faid-backend" }],
     configTargetCfApp: "arch-backend", healthPath: "/health",
   }],
 };
@@ -47,7 +45,7 @@ other-pg      postgresql-db   free                           create succeeded   
 figaf-xsuaa   xsuaa           application irt-app            create succeeded   b        no
 `;
 
-function makeDir(catalog = CATALOG_V6) {
+function makeDir(catalog = CATALOG_V7) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "faid-v6-"));
   fs.writeFileSync(path.join(dir, "catalog.json"), JSON.stringify(catalog));
   fs.writeFileSync(path.join(dir, "backend.zip"), "zip");
@@ -106,18 +104,11 @@ function makeCtx(dir, { services = {}, cfServices = "", database, apps = {}, hos
 
 // ─── pure ────────────────────────────────────────────────────────────────────
 
-test("resolveServiceNames: the catalog name is the default; an editable one may be renamed (validated); a non-editable one may not; discovered names fill in", () => {
-  assert.deepEqual(resolveServiceNames(CATALOG_V6, {}, {}).names, { "figaf-db": "figaf-db", xsuaa: "xsuaa", credstore: "credstore" });
-  assert.deepEqual(resolveServiceNames(CATALOG_V6, { "figaf-db": " my-db " }, {}).names["figaf-db"], "my-db");
-  assert.deepEqual(resolveServiceNames(CATALOG_V6, {}, { "figaf-db": "found-db" }).names["figaf-db"], "found-db");
-  assert.equal(resolveServiceNames(CATALOG_V6, { "figaf-db": "found-db" }, { "figaf-db": "other" }).names["figaf-db"], "found-db", "the override wins over discovery");
-  assert.equal(resolveServiceNames(CATALOG_V6, { "figaf-db": "" }, { "figaf-db": "found-db" }).names["figaf-db"], "found-db", "an empty override is no override");
-  const bad = resolveServiceNames(CATALOG_V6, { "figaf-db": "a b" }, {});
-  assert.equal(bad.ok, false); assert.match(bad.error, /not a valid service instance name/);
-  const fixed = resolveServiceNames(CATALOG_V6, { xsuaa: "other-xsuaa" }, {});
-  assert.equal(fixed.ok, false); assert.match(fixed.error, /cannot be changed/);
-  assert.match(resolveServiceNames(CATALOG_V6, { nope: "x" }, {}).error, /unknown service nope/);
-  assert.deepEqual([...ownRoleNames(CATALOG_V6)], ["figaf-db"]);
+test("the fixture requires the database as own-role (the name resolution itself is tested in base-services.test.js)", () => {
+  const req = requirementsOf(CATALOG_V7);
+  assert.equal(req.ok, true, req.error);
+  assert.equal(req.consumption.database, "own-role");
+  assert.deepEqual(req.services.map((s) => s.name), ["figaf-db", "figaf-faid-xsuaa", "figaf-faid-credstore"]);
 });
 
 test("chooseDatabaseInstance: one instance wins; else the default name; else the one bound to a <id>-app; else the default (to be created)", () => {
@@ -132,7 +123,7 @@ test("chooseDatabaseInstance: one instance wins; else the default name; else the
 
 test("faid:services: no entry -> the space's PostgreSQL instance bound to the Tool app is the database (prefill); the row carries access, nameEditable, boundApps, candidates and databaseAccess", async () => {
   const dir = makeDir();
-  const { ctx, db } = makeCtx(dir, { services: { "figaf-db": "create succeeded", xsuaa: "create succeeded" }, cfServices: CF_SERVICES_TOOL });
+  const { ctx, db } = makeCtx(dir, { services: { "figaf-db": "create succeeded", "figaf-faid-xsuaa": "create succeeded" }, cfServices: CF_SERVICES_TOOL });
   const r = await createFaidHandlers(ctx)["faid:services"]();
   assert.equal(r.ok, true, JSON.stringify(r));
   const row = r.services.find((s) => s.name === "figaf-db");
@@ -144,10 +135,10 @@ test("faid:services: no entry -> the space's PostgreSQL instance bound to the To
   assert.equal(row.status, "ready");
   assert.equal(row.databaseAccess.state, "not-prepared");
   assert.equal(r.databaseAccess.prepared, false);
-  const xs = r.services.find((s) => s.name === "xsuaa");
+  const xs = r.services.find((s) => s.name === "figaf-faid-xsuaa");
   assert.equal(xs.access, "binding");
   assert.equal(xs.nameEditable, false);
-  assert.equal(xs.instanceName, "xsuaa");
+  assert.equal(xs.instanceName, "figaf-faid-xsuaa");
   assert.equal(xs.databaseAccess, null);
   assert.deepEqual(db.calls, ["status"]);
 });
@@ -188,7 +179,7 @@ test("faid:prepareSpaceServices with names: cf create-service gets the actual na
   assert.ok(r.created.includes("customer-pg"));
   assert.ok(r.pending.includes("customer-pg"), "the database is only started");
   assert.ok(!calls.some((c) => c.args[0] === "bind-service" && c.args[2] === "customer-pg"));
-  assert.ok(calls.some((c) => c.args[0] === "bind-service" && c.args[2] === "credstore"));
+  assert.ok(calls.some((c) => c.args[0] === "bind-service" && c.args[2] === "figaf-faid-credstore"));
 });
 
 test("faid:provisionServices: an existing instance under the chosen name is accepted as it is (never re-created); a FAILED own-role database is never deleted", async () => {
@@ -211,7 +202,7 @@ test("faid:provisionServices: an existing instance under the chosen name is acce
 test("faid:install: refused before any push while the database access is not prepared (step database, Setup step 3 hint)", async () => {
   resetRunningAction();
   const dir = makeDir();
-  const { ctx, calls } = makeCtx(dir, { services: { "figaf-db": "create succeeded", xsuaa: "create succeeded", credstore: "create succeeded" } });
+  const { ctx, calls } = makeCtx(dir, { services: { "figaf-db": "create succeeded", "figaf-faid-xsuaa": "create succeeded", "figaf-faid-credstore": "create succeeded" } });
   const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
   assert.equal(r.ok, false);
   assert.equal(r.step, "database");
@@ -219,11 +210,11 @@ test("faid:install: refused before any push while the database access is not pre
   assert.ok(!calls.some((c) => c.args[0] === "push"));
 });
 
-test("faid:install with the access prepared: the required instances are checked without the database; no bind-service ever names the database, also from an old services list; the backend gets FAID_DATABASE_CA (masked)", async () => {
+test("faid:install with the access prepared: the required instances are checked without the database; no bind-service ever names the database; the backend gets FAID_DATABASE_CA (masked)", async () => {
   resetRunningAction();
   const dir = makeDir();
   const { ctx, calls, logLines, db } = makeCtx(dir, {
-    services: { xsuaa: "create succeeded", credstore: "create succeeded", "figaf-db": "create succeeded" },
+    services: { "figaf-faid-xsuaa": "create succeeded", "figaf-faid-credstore": "create succeeded", "figaf-db": "create succeeded" },
     database: fakeDatabase({ state: "prepared", prepared: true, instanceName: "figaf-db", instanceGuid: "g" }),
   });
   const r = await createFaidHandlers(ctx)["faid:install"]({ appId: "arch" });
@@ -236,8 +227,8 @@ test("faid:install with the access prepared: the required instances are checked 
   assert.match(caSet[0].opts.logCmd, /<value hidden>/);
   assert.ok(!calls.some((c) => c.args[0] === "set-env" && c.args[1] === "arch-frontend" && c.args[2] === "FAID_DATABASE_CA"));
   const binds = calls.filter((c) => c.args[0] === "bind-service").map((c) => c.args[2]);
-  assert.ok(binds.includes("xsuaa"));
-  assert.ok(binds.includes("credstore"));
+  assert.ok(binds.includes("figaf-faid-xsuaa"));
+  assert.ok(binds.includes("figaf-faid-credstore"));
   assert.ok(!binds.includes("figaf-db"), `the database must never be bound: ${binds}`);
   assert.ok(logLines.some((l) => /figaf-db: .*never through a binding/.test(l)));
   assert.ok(calls.some((c) => c.args[0] === "push" && c.args[1] === "arch-backend"));

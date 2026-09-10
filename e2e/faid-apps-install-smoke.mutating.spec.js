@@ -67,7 +67,7 @@ test.afterAll(() => {
 test(`install ${APP_ID} ${app.version}: platform base + app end Running with the version stamped, health answers, every push isolated from any manifest`, async ({ page }) => {
   await page.goto("/#/apps");
   await expect(page.locator("h1.pane-title")).toHaveText("FAID Apps");
-  const row = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
+  const row = page.locator(`.faid-card[data-app="${APP_ID}"]`);
   const platformRow = page.locator("[data-platform-row]");
   const panel = page.locator('[data-outcome="error"]');
   await expect(row).toContainText("Not installed");
@@ -133,7 +133,7 @@ test(`install ${APP_ID} ${app.version}: platform base + app end Running with the
 test(`remove ${APP_ID} through the console: its CF apps go, the platform base stays`, async ({ page }) => {
   test.skip(KEEP, "E2E_KEEP_INSTALL=1");
   await page.goto("/#/apps");
-  const row = page.locator(`.faid-app-row[data-app="${APP_ID}"]`);
+  const row = page.locator(`.faid-card[data-app="${APP_ID}"]`);
   await expect(row).toContainText("Running");
   await row.getByRole("button", { name: "Remove" }).click();
   const removeDone = page.waitForResponse(isRpc("faid:remove"), { timeout: 5 * 60_000 });

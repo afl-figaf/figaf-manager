@@ -6,10 +6,11 @@
 //   faid/index.json
 //   faid/<version>/catalog.json, release.json, xs-security.json, *.zip
 //
-// The catalogs name CF apps that never exist in the dev space and a service
-// instance that never exists, so the page shows "Not installed" and every
-// Install is refused before any cf change (same safety as
-// release-missing-service). Version 0.0.1 has one app; 0.0.2 adds a second
+// The catalogs name CF apps that never exist in the dev space and a Cloud
+// Foundry STACK no landscape offers (catalog v7 has no instance names any
+// more: the base instances are the manager's, base-services.js), so the page
+// shows "Not installed" and every Install is refused at the stack check,
+// before any cf change (same safety as release-missing-service). Version 0.0.1 has one app; 0.0.2 adds a second
 // one (figaf-faid decision 0016: a release carries several apps, and an
 // update can bring a new app). Run once; the output is committed:
 //
@@ -24,14 +25,17 @@ const VERSIONS = ["0.0.1", "0.0.2"];
 const sha = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
 
 const SECOND_APP_FROM = "0.0.2";
+// E2E FIXTURE - a stack no landscape offers: every Install fails at the stack
+// check (preflight, before any service or role call), so nothing in the space changes.
+const MISSING_STACK = "cflinuxfs-e2e-missing";
 
 function catalogFor(version, backendZip, frontendZip, secondZip) {
   const apps = [{
     id: "b2b-archiving-setup-e2e-store",
     name: "B2B Archiving Setup (e2e store fixture)",
     version,
-    description: `Fixture release ${version} served from a local release store for release-store.spec.js. Install is always refused (required service missing).`,
-    cfApps: [{ name: "figaf-faid-apps-e2e-store-frontend", artifact: "b2b-archiving-setup-e2e-store.zip", sha256: sha(frontendZip), buildpack: "nodejs_buildpack", memory: "64M", services: ["figaf-faid-e2e-missing"] }],
+    description: `Fixture release ${version} served from a local release store for release-store.spec.js. Install is always refused (the release names a stack no landscape offers).`,
+    cfApps: [{ name: "figaf-faid-apps-e2e-store-frontend", artifact: "b2b-archiving-setup-e2e-store.zip", sha256: sha(frontendZip), buildpack: "nodejs_buildpack", stack: MISSING_STACK, memory: "64M", requires: { xsuaa: "binding" } }],
     healthPath: "/health",
   }];
   if (secondZip) {
@@ -39,8 +43,8 @@ function catalogFor(version, backendZip, frontendZip, secondZip) {
       id: "functional-profiles-maintain-e2e-store",
       name: "Functional Profiles Maintain (e2e store fixture)",
       version,
-      description: `Second app of fixture release ${version}: new in this version, so an update brings a new row. Install is always refused (required service missing).`,
-      cfApps: [{ name: "figaf-faid-apps-e2e-store-second", artifact: "functional-profiles-maintain-e2e-store.zip", sha256: sha(secondZip), buildpack: "nodejs_buildpack", memory: "64M", services: ["figaf-faid-e2e-missing"] }],
+      description: `Second app of fixture release ${version}: new in this version, so an update brings a new row. Install is always refused (the release names a stack no landscape offers).`,
+      cfApps: [{ name: "figaf-faid-apps-e2e-store-second", artifact: "functional-profiles-maintain-e2e-store.zip", sha256: sha(secondZip), buildpack: "nodejs_buildpack", stack: MISSING_STACK, memory: "64M", requires: { xsuaa: "binding" } }],
       healthPath: "/health",
       roleCollections: ["FAID-E2E-Second-Viewer"],
     });
@@ -48,15 +52,11 @@ function catalogFor(version, backendZip, frontendZip, secondZip) {
   return {
     releaseVersion: version,
     figafScopes: secondZip ? ["agent:read", "b2b.partner-profile:read", "download", "ctt:sync"] : ["agent:read"],
-    services: [
-      { name: "figaf-faid-e2e-missing", offering: "postgresql-db", plan: "free",
-        purpose: "E2E FIXTURE - this instance must never exist; its absence makes every Install fail early, before any cf change" },
-      { name: "figaf-faid-e2e-xsuaa", offering: "xsuaa", plan: "application", configFile: "xs-security.json",
-        purpose: "E2E FIXTURE - a config file the store must deliver with the catalog" },
-    ],
+    // Catalog v7: the backend requires XSUAA and the Credential Store as
+    // bindings, so the store must deliver xs-security.json with the catalog.
     platform: {
       name: "Platform base (e2e store fixture)",
-      cfApps: [{ name: "figaf-faid-e2e-store-backend", artifact: "backend.zip", sha256: sha(backendZip), buildpack: "nodejs_buildpack", memory: "64M", services: ["figaf-faid-e2e-missing"] }],
+      cfApps: [{ name: "figaf-faid-e2e-store-backend", artifact: "backend.zip", sha256: sha(backendZip), buildpack: "nodejs_buildpack", stack: MISSING_STACK, memory: "64M", requires: { xsuaa: "binding", credstore: "binding" } }],
     },
     apps,
   };

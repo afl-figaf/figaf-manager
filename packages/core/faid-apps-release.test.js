@@ -26,10 +26,12 @@ const BASE = "https://store.example/faid";
 function catalogFor(v) {
   return {
     releaseVersion: v,
-    platform: { name: "Shared backend", cfApps: [{ name: "arch-backend", artifact: "backend.zip", sha256: sha(`backend-${v}`), buildpack: "nodejs_buildpack", services: [] }] },
+    // Catalog v7: no CF app requires a service instance here, so these tests
+    // stay about versions and downloads (the base services have their own).
+    platform: { name: "Shared backend", cfApps: [{ name: "arch-backend", artifact: "backend.zip", sha256: sha(`backend-${v}`), buildpack: "nodejs_buildpack" }] },
     apps: [
-      { id: "arch", name: "Archiving", version: v, cfApps: [{ name: "arch-frontend", artifact: "arch.zip", sha256: sha(`arch-${v}`), buildpack: "nodejs_buildpack", services: [], destinationTo: "arch-backend" }] },
-      { id: "other", name: "Other app", version: v, cfApps: [{ name: "other-frontend", artifact: "other.zip", sha256: sha(`other-${v}`), buildpack: "nodejs_buildpack", services: [], destinationTo: "arch-backend" }] },
+      { id: "arch", name: "Archiving", version: v, cfApps: [{ name: "arch-frontend", artifact: "arch.zip", sha256: sha(`arch-${v}`), buildpack: "nodejs_buildpack", destinationTo: "arch-backend" }] },
+      { id: "other", name: "Other app", version: v, cfApps: [{ name: "other-frontend", artifact: "other.zip", sha256: sha(`other-${v}`), buildpack: "nodejs_buildpack", destinationTo: "arch-backend" }] },
     ],
   };
 }

@@ -49,6 +49,12 @@
     // PI/PO) are left out of the step state on purpose: an installation without
     // a PI system is complete, so a missing optional instance must never keep
     // step 3 open or block step 4. The Base services panel still lists them.
+    // faid:services failed (the release could not be read - for example a
+    // catalog older than v7, or the store unreachable): the instances cannot
+    // be listed, so step 3 cannot be computed. Say so on step 1 instead of
+    // showing a shorter list without a word (seen 2026-09-08 with store 0.6.1).
+    var servicesError = data.services && data.services.ok === false
+      ? String(data.services.error || "the release could not be read") : "";
     var allSvc = data.services && data.services.ok ? (data.services.services || []) : null;
     var svc = allSvc ? allSvc.filter(function (s) { return !s.optional; }) : null;
     var hasServices = !!(svc && svc.length > 0);
@@ -74,13 +80,17 @@
       id: "prepare",
       n: 1,
       title: "Prepare the space",
-      why: "Creates the service instances this release needs (database, roles, Credential Store), " +
+      why: "Creates the service instances the Figaf Platform needs (database, roles, Credential Store), " +
         "turns on SAP IAS sign-in through an approuter, and restarts the manager once.",
-      when: "Needs your Cloud Foundry sign-in (one-time passcode). About 4 minutes; the manager is " +
-        "offline for 30-90 s at the end. The database keeps being created in the background.",
+      when: servicesError
+        ? "The release could not be read, so the service instances cannot be listed or created: " + servicesError +
+          " Point the manager at a release it can read (release store or local directory), then reload this page."
+        : "Needs your Cloud Foundry sign-in (one-time passcode). About 4 minutes; the manager is " +
+          "offline for 30-90 s at the end. The database keeps being created in the background.",
       done: ssoDone,
       blocked: "",
       cta: "Prepare the space",
+      error: servicesError || "",
     });
 
     steps.push({
@@ -120,7 +130,7 @@
         id: "services",
         n: servicesStepN,
         title: "Base services",
-        why: "The service instances of this release, created in step 1. The database takes a few minutes; then its access for the FAID backend is prepared here (own role, schema faid).",
+        why: "The service instances of the Figaf Platform, created in step 1. The database takes a few minutes; then its access for the FAID backend is prepared here (own role, schema faid).",
         when: when,
         done: servicesDone,
         blocked: servicesDone ? "" : afterPrepare,

@@ -6,21 +6,6 @@
     "download",
     "ctt:sync"
   ],
-  "services": [
-    {
-      "name": "figaf-faid-e2e-missing",
-      "offering": "postgresql-db",
-      "plan": "free",
-      "purpose": "E2E FIXTURE - this instance must never exist; its absence makes every Install fail early, before any cf change"
-    },
-    {
-      "name": "figaf-faid-e2e-xsuaa",
-      "offering": "xsuaa",
-      "plan": "application",
-      "configFile": "xs-security.json",
-      "purpose": "E2E FIXTURE - a config file the store must deliver with the catalog"
-    }
-  ],
   "platform": {
     "name": "Platform base (e2e store fixture)",
     "cfApps": [
@@ -29,10 +14,12 @@
         "artifact": "backend.zip",
         "sha256": "f1b7b9256c598fc8bc660aeec22cd2de1078ca38b18210d76e949231bbd7afc3",
         "buildpack": "nodejs_buildpack",
+        "stack": "cflinuxfs-e2e-missing",
         "memory": "64M",
-        "services": [
-          "figaf-faid-e2e-missing"
-        ]
+        "requires": {
+          "xsuaa": "binding",
+          "credstore": "binding"
+        }
       }
     ]
   },
@@ -41,17 +28,18 @@
       "id": "b2b-archiving-setup-e2e-store",
       "name": "B2B Archiving Setup (e2e store fixture)",
       "version": "0.0.2",
-      "description": "Fixture release 0.0.2 served from a local release store for release-store.spec.js. Install is always refused (required service missing).",
+      "description": "Fixture release 0.0.2 served from a local release store for release-store.spec.js. Install is always refused (the release names a stack no landscape offers).",
       "cfApps": [
         {
           "name": "figaf-faid-apps-e2e-store-frontend",
           "artifact": "b2b-archiving-setup-e2e-store.zip",
           "sha256": "304e801818f6b138202580d5b95bd959dab08964421cdcacd644c25ba6dfcb25",
           "buildpack": "nodejs_buildpack",
+          "stack": "cflinuxfs-e2e-missing",
           "memory": "64M",
-          "services": [
-            "figaf-faid-e2e-missing"
-          ]
+          "requires": {
+            "xsuaa": "binding"
+          }
         }
       ],
       "healthPath": "/health"
@@ -60,17 +48,18 @@
       "id": "functional-profiles-maintain-e2e-store",
       "name": "Functional Profiles Maintain (e2e store fixture)",
       "version": "0.0.2",
-      "description": "Second app of fixture release 0.0.2: new in this version, so an update brings a new row. Install is always refused (required service missing).",
+      "description": "Second app of fixture release 0.0.2: new in this version, so an update brings a new row. Install is always refused (the release names a stack no landscape offers).",
       "cfApps": [
         {
           "name": "figaf-faid-apps-e2e-store-second",
           "artifact": "functional-profiles-maintain-e2e-store.zip",
           "sha256": "3c2e571f33b6ab6ded74efcfd4e10229b6e7f0ccb4cea7b1d4c678f7392da815",
           "buildpack": "nodejs_buildpack",
+          "stack": "cflinuxfs-e2e-missing",
           "memory": "64M",
-          "services": [
-            "figaf-faid-e2e-missing"
-          ]
+          "requires": {
+            "xsuaa": "binding"
+          }
         }
       ],
       "healthPath": "/health",

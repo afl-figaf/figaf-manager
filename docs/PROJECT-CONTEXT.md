@@ -97,7 +97,7 @@ one text, one owner. The rules that touch the manager:
 | Virgin install procedure (D1) and run records | figaf-faid: `docs/d1/` |
 | App specs and the first app's source (playground) | figaf-faid: `specs/`, `spikes/archiving-setup-playground/` |
 
-The contract between the two repositories is the **release catalog** (v3)
+The contract between the two repositories is the **release catalog** (v7)
 and the **store layout** (`index.json`, `<version>/…`), described in
 `docs/faid-apps-console/SPEC.md` section 2. figaf-faid produces and publishes
 them, the manager consumes them.
@@ -108,9 +108,12 @@ them, the manager consumes them.
 - Dev machine: cf CLI 8.7.11 (winget package `CloudFoundry.CLI.v8`), MultiApps plugin 3.11.1, mbt 1.2.47. The manager bundles btp 2.106.1 and cf 8.19.0 (Linux builds; pinned in `apps/figaf-manager/package.json`, recorded in `bin/VERSIONS.json`). Runtime pins (figaf-faid decision 0015, 2026-09-07): Node `24.x` (`engines.node`, CI, `.nvmrc`), stack `cflinuxfs5` (manager `manifest.yml`; the approuter follows via `CF_STACK`; FAID apps via the catalog's `stack`).
 - Manager version 26.5.0; release 0.4.1 (B2B Archiving Setup + shared backend)
   is in the release store (Cloudflare R2, public read URL) since 2026-09-04.
-  Release 0.7.0 (catalog v6, 2026-09-08: the backend's own database role,
-  `figaf-db` default name editable; SPEC section 4.2) is built locally and
-  not published yet.
+  Release 0.8.0 (catalog v7, 2026-09-08: the manager owns the base service
+  instances, `packages/core/base-services.js`; the catalog says only what
+  each CF app requires; SPEC sections 2 and 4) is published in the store
+  (latest, 2026-09-08; source commit tagged faid-v0.8.0 in figaf-faid). This
+  manager refuses catalogs of v6 or older (0.5.0 to 0.6.1 in the store):
+  0.8.0 is the first release it installs.
   The manager reads releases from there; its zip bundles no release.
   One version per installation: Install adds an app at the installed
   version, Update installation moves everything to a newer release.

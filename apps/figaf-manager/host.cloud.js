@@ -42,10 +42,15 @@ const VCAP_TARGET = (() => {
   } catch { return null; }
 })();
 
+// Parent of every per-session user-data directory. server.js empties it at
+// boot (the sessions are invalid after a restart anyway) and removes one
+// session directory when that session is pruned.
+function sessionsRoot() { return path.join(os.homedir(), "sessions"); }
+
 function createHost({ sessionId }) {
   return {
     isHosted: true,
-    getUserDataDir: () => path.join(os.homedir(), "sessions", sessionId),
+    getUserDataDir: () => path.join(sessionsRoot(), sessionId),
 
     getInstalledVersion: () => PKG_VERSION,
 
@@ -155,4 +160,4 @@ function createHost({ sessionId }) {
   };
 }
 
-module.exports = { createHost };
+module.exports = { createHost, sessionsRoot };

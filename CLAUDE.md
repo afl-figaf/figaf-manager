@@ -46,7 +46,7 @@ template sourcing).
 
 - `docs/faid-apps-console/FIGAF-TOOL-MANAGEMENT-GAPS.md` — Figaf-tool management gaps (next to `SPEC.md`).
 - `docs/CLEANUP-2026-09-03.md` — what was deleted from this repo on 2026-09-03 and why.
-- `docs/base-services-ownership-plan.md` — plan (2026-09-08, not built): the manager owns the base service instances, the catalog only says what the backend requires (catalog v7). Read it before changing `catalog.services` handling.
+- `docs/base-services-ownership-plan.md` — the plan (2026-09-08, built the same day): the manager owns the base service instances (`packages/core/base-services.js` is the one source of names, plans, bindings, optional groups); the catalog (v7) only says what each CF app `requires` by kind. Change the module, never a catalog, when a screen needs a new service flag.
 
 ---
 

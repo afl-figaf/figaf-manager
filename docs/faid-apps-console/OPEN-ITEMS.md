@@ -146,14 +146,36 @@ Last edited 2026-09-08.
     mechanism (a separate task); (g) release 0.7.0 is built locally, not
     published.
 
-17. **The manager owns the base service instances** (2026-09-08). Today the
-    release catalog's `services` list defines names, plans and flags of the
-    base instances, so a manager screen feature is invisible until a release
-    carries the flag (seen with the editable database name and release
-    0.6.1). Plan: `docs/base-services-ownership-plan.md` (catalog v7 with
-    `requires`, a built-in `base-services.js`, about 2.5 days). Decisions
-    needed first: refuse catalogs older than v7 or keep a compatibility layer.
-    To be done before the next console work.
+17. **The manager owns the base service instances** (2026-09-08; plan
+    `docs/base-services-ownership-plan.md`, figaf-faid decision 0018). Built
+    the same day in both repositories: `packages/core/base-services.js` is
+    the one source of the base instances; the catalog (v7) says only what
+    each CF app `requires` by kind and which optional groups it binds; a
+    catalog of v6 or older is refused (no compatibility layer - no customer
+    has an installation); the e2e fixtures refuse an install through a stack
+    no landscape offers instead of a missing instance; `wipe-and-provision.ps1`
+    reads the module. Unit suites green (SPEC sections 2 and 4 rewritten).
+    Read-only e2e suite green against 0.8.0; 0.8.0 published to the store
+    and verified (2026-09-08; `publish.js` learned to plan `xs-security.json`
+    from `requires`, or it would have been left out). Still open: (a) the
+    install smoke against 0.8.0 (the dev space is empty; it needs the base
+    instances and the database access first); (b) one virgin run in the dev
+    space with the manager in XSUAA mode (also the first live click on
+    Prepare database access, item 16a); (c) the tag `faid-v0.8.0` exists
+    locally in figaf-faid, branch and tag not pushed. The store's 0.5.0 to
+    0.6.1 are v6 or older and are refused by this manager - the first release
+    it installs is 0.8.0.
+
+18. **Cards grouped by business area** (2026-09-10). The FAID Apps page
+    shows cards in the sections Installed / Not installed / New in V
+    (`packages/ui/faid-cards.js`). The App Manager of the prototypes
+    (figaf-layer3, `app/appmanager`) groups its apps by business area
+    instead (Archiving, Mappings, Partner Onboarding, ...), with a fixed
+    list in its own code. The catalog (v7) has no such field, and the
+    manager must not hold a list of app ids. Open: add a `group` (or
+    `area`) field per app to the catalog in figaf-faid (`release/
+    catalog.template.json`, `release/build.js`), then group the cards by it
+    inside each section. Owner of the wording: Emil.
 
 ## Design notes still in force
 
