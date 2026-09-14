@@ -563,6 +563,41 @@ function createOrchestrator({ host, send, audit }) {
     return out;
   }
 
+  // `cf push` with a manifest ADDS the env of the manifest; it never removes a
+  // variable the manifest no longer names. So a row the operator deleted from
+  // the "Additional environment variables" table would stay set on the app
+  // forever. Before the push, unset every additional variable that is live but
+  // is no longer in the table (gap G1, 2026-09-14). Template-owned keys are
+  // never touched. Best effort: the app may already be gone under the
+  // "recreate" strategy, and a failed unset must not stop the update.
+  async function unsetRemovedEnv(deployId, additionalEnv) {
+    // No table was sent at all (the live environment could not be read, so the
+    // Update form never showed one): nothing is known to have been removed.
+    // An EMPTY table is different - it means "remove them all".
+    if (additionalEnv == null) return [];
+    const keep = figafToolTemplates.validateEnvRows(additionalEnv);
+    if (!keep.ok) return [];
+    const appName = `${deployId}-app`;
+    const g = await run(resolveCf(), ["app", "--guid", appName], { source: "cf", quiet: true });
+    if (g.code !== 0) return [];
+    const guid = g.stdout.trim().split(/\r?\n/).filter(Boolean).pop();
+    if (!guid) return [];
+    const e = await run(resolveCf(), ["curl", `/v3/apps/${guid}/environment_variables`], { source: "cf", quiet: true });
+    if (e.code !== 0) return [];
+    let live = {};
+    try { live = (JSON.parse(e.stdout).var) || {}; } catch { return []; }
+    const gone = Object.keys(live).filter((k) =>
+      !figafToolTemplates.TEMPLATE_ENV_KEYS.includes(k) && !Object.prototype.hasOwnProperty.call(keep.env, k));
+    const removed = [];
+    for (const key of gone) {
+      // The value is not on the command line, so no masking is needed here.
+      const u = await run(resolveCf(), ["unset-env", appName, key], { source: "cf" });
+      if (u.code === 0) removed.push(key);
+      else log("cf", "err", `could not remove the environment variable ${key} from ${appName}; it stays set.`);
+    }
+    return removed;
+  }
+
   // ─── update-state.json helpers ────────────────────────────────────────────
   // Persisted under <userDataDir>/figaf-tool-update/update-state.json. Each
   // phase handler in the Update flow reads it on entry (to short-circuit
@@ -2346,6 +2381,11 @@ function createOrchestrator({ host, send, audit }) {
     async "config:writeVars"(vars) {
       const names = figafToolServiceNames(vars);
       if (!names.ok) return names;
+      // The free-form "Additional environment variables" table of the
+      // Configuration screen and the Update form (gap G1, 2026-09-14). Checked
+      // before anything is written, so a bad row changes no file.
+      const extraEnv = figafToolTemplates.validateEnvRows((vars || {}).additionalEnv);
+      if (!extraEnv.ok) return { ok: false, error: extraEnv.error };
       const deployDir = await resolveDeployDir();
       const file = path.join(deployDir, "vars.yml");
       let text = await fsp.readFile(file, "utf8");
@@ -2375,15 +2415,24 @@ function createOrchestrator({ host, send, audit }) {
       // the xsappname follows the XSUAA instance name (unique per subaccount).
       // Both start from the PRISTINE template, so a second deployment in the
       // same container does not patch an already-patched file.
-      try {
-        const manifest = figafToolTemplates.applyManifestServices(await pristineTemplate(deployDir, "manifest.yml"), {
+      let mfTemplate = null;
+      try { mfTemplate = await pristineTemplate(deployDir, "manifest.yml"); } catch { /* not there during early setup */ }
+      if (mfTemplate !== null) {
+        let manifest = figafToolTemplates.applyManifestServices(mfTemplate, {
           enableConnectivity: vars.enableConnectivity,
           enableDestination: vars.enableDestination,
           dbServiceName: names.dbServiceName,
           xsuaaServiceName: names.xsuaaServiceName,
         });
+        // Not inside a catch: a manifest whose shape the env patcher does not
+        // recognise must FAIL here, not silently drop the operator's variables.
+        try {
+          manifest = figafToolTemplates.applyManifestEnv(manifest, extraEnv.env);
+        } catch (e) {
+          return { ok: false, error: e.message };
+        }
         await fsp.writeFile(path.join(deployDir, "manifest.yml"), manifest, "utf8");
-      } catch { /* manifest may not exist yet during early setup */ }
+      }
       let xsTemplate = null;
       try { xsTemplate = await pristineTemplate(deployDir, "xs-security.json"); } catch { /* not there during early setup */ }
       if (xsTemplate !== null) {
@@ -3109,7 +3158,8 @@ function createOrchestrator({ host, send, audit }) {
       const e = await run(resolveCf(), ["curl", `/v3/apps/${guid}/environment_variables`], { source: "cf" });
       if (e.code === 0) {
         let env = {};
-        try { env = (JSON.parse(e.stdout).var) || {}; } catch { partial = true; }
+        let envRead = true;
+        try { env = (JSON.parse(e.stdout).var) || {}; } catch { partial = true; envRead = false; }
         if (env.LOCATION_ID != null) vars.locationId = env.LOCATION_ID;
         if (env.MAX_RAM_PERCENTAGE != null) vars.maxRamPercentage = String(env.MAX_RAM_PERCENTAGE);
         if (env.LOGS_TOTAL_SIZE_CAP != null) vars.logsTotalSizeCap = env.LOGS_TOTAL_SIZE_CAP;
@@ -3121,6 +3171,20 @@ function createOrchestrator({ host, send, audit }) {
           const bare = String(env.BTP_APP_ROUTER_URL).replace(/^https?:\/\//, "");
           const prefix = `${deployId}.`;
           vars.domain = bare.startsWith(prefix) ? bare.slice(prefix.length) : bare;
+        }
+        // Everything the deploy template does NOT own is an "additional
+        // variable": either a row somebody entered in the manager's table, or
+        // a `cf set-env` run by hand, which had no way of being seen before
+        // (gap G1, 2026-09-14). The Update form shows and edits them.
+        // Only when the response really parsed: an EMPTY additionalEnv means
+        // "the app has none", which makes update:writeVars unset every extra
+        // variable it finds. An unreadable response must leave it undefined.
+        if (envRead) {
+          vars.additionalEnv = {};
+          for (const key of Object.keys(env)) {
+            if (figafToolTemplates.TEMPLATE_ENV_KEYS.includes(key)) continue;
+            vars.additionalEnv[key] = env[key] == null ? "" : String(env[key]);
+          }
         }
       } else {
         partial = true;
@@ -3216,8 +3280,9 @@ function createOrchestrator({ host, send, audit }) {
       };
       const r = await handlers["config:writeVars"](merged);
       if (!r.ok) return r;
+      const unset = await unsetRemovedEnv(deployId, merged.additionalEnv);
       writeUpdateState({ deployId, targetImageTag: dockerTag, phase: "vars-written" });
-      return { ok: true, path: file };
+      return { ok: true, path: file, unsetEnv: unset };
     },
 
     async "update:updateXsuaa"({ deployId, skip, xsuaaServiceName } = {}) {

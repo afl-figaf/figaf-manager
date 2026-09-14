@@ -101,6 +101,8 @@ Binary resolved via `host.resolveBinary("cf")`.
 | 16 | `cf push --vars-file vars.yml` | `cf:push` | both | Main Figaf Tool deploy (figaf-app + approuter) |
 | 17 | `cf push figaf-manager-approuter -p <approuterDir> -m 128M -k 256M --no-route --no-start --no-manifest` | `cf:pushManagerApprouter` | cloud | XSUAA v2 upgrade |
 | 18 | `cf push <deployId>-<role> [--strategy rolling] --vars-file vars.yml -f manifest.yml` | `update:pushApp` | cloud | Update flow; role is `app` or `router` |
+| 18a | `cf unset-env <deployId>-app <KEY>` | `update:writeVars` (`unsetRemovedEnv`) | cloud | One call per row the operator removed from the "Additional environment variables" table (gap G1, 2026-09-14). `cf push` with a manifest never removes a variable the manifest stopped naming, so without this a deleted row would stay set on the app forever. Only keys that are live AND outside `TEMPLATE_ENV_KEYS` (`figaf-tool-templates.js`) are touched; a run where the form never received a live environment unsets nothing. No value on the command line. Best effort: a failure is logged and the update continues |
+| 18b | `cf app --guid <deployId>-app` + `cf curl /v3/apps/<guid>/environment_variables` | `update:writeVars` (`unsetRemovedEnv`) | cloud | `quiet`, read-only: the live environment the table above is compared against, read again right before the push |
 | 19 | `cf delete <appName> -f` | `cf:deleteApp`, `update:deleteApps` | both/cloud | `cf:deleteApp` is both; `update:deleteApps` is cloud |
 | 20 | `cf delete <name> -r -f` | `cf:uninstallManager` | cloud | Delete with routes (`-r`) |
 | 21 | `cf app <name>` | `update:detectDeployment`, `update:verify`, `xsuaa:upgradeStatus` | cloud | |
@@ -130,7 +132,7 @@ Binary resolved via `host.resolveBinary("cf")`.
 | 34 | `cf curl /v3/service_credential_bindings?service_instance_names=figaf-manager-xsuaa&app_names=<appName>` | `cf:restage` (skipIfBound) | cloud | Short-circuit if already bound |
 | 35 | `cf curl /v3/apps?per_page=500` | `update:detectDeployment` | cloud | Enumerate all apps in the space |
 | 36 | `cf curl /v3/apps/<guid>/droplets/current` | `update:detectDeployment`, `update:verify` | cloud | Read current Docker image tag |
-| 37 | `cf curl /v3/apps/<guid>/environment_variables` | `update:readCurrentConfig` | cloud | Read live config to pre-fill update form |
+| 37 | `cf curl /v3/apps/<guid>/environment_variables` | `update:readCurrentConfig` | cloud | Read live config to pre-fill update form. Since 2026-09-14 every key outside `TEMPLATE_ENV_KEYS` is returned as `additionalEnv`, so a variable somebody set with `cf set-env` by hand is visible and editable in the manager |
 | 38 | `cf curl /v3/apps/<guid>/processes/web` | `update:readCurrentConfig` | cloud | Read memory / instances |
 | 39 | `cf curl /v3/service_credential_bindings?app_guids=<guid>&include=service_instance` | `update:readCurrentConfig` | cloud | Read service bindings |
 | 39a | `cf curl /v3/service_credential_bindings?type=app&service_instance_names=<instance>&app_names=<app>` | `faid:services` | cloud | `boundToManager` (Credential Store ↔ manager) and, catalog v4, `boundToBackend` (optional PI/PO instance ↔ shared backend); one call per instance |

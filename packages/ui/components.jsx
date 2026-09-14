@@ -349,6 +349,70 @@ function ScrollReveal({ children }) {
   return <div ref={ref}>{children}</div>;
 }
 
+// ───────────── Additional environment variables (gap G1, 2026-09-14) ─────────
+// The Figaf image reads many more variables than the deploy template names
+// (ADDITIONAL_IRT_PARAMETERS, IRT_ROOT_LOGGING_LEVEL, the keystore group, …).
+// Rather than a field per variable, both the Configuration screen and the
+// Update form carry this free-form table; the rows are written into the app's
+// `env:` block by config:writeVars. Rows stay an ORDERED ARRAY here so a
+// half-typed row (empty key) can exist without colliding; the orchestrator
+// drops empty keys and rejects the names the template already owns.
+function envObjectToRows(env) {
+  return Object.keys(env || {}).map((key) => ({ key, value: env[key] == null ? "" : String(env[key]) }));
+}
+function envRowsToObject(rows) {
+  const out = {};
+  for (const r of rows || []) {
+    const key = (r && r.key ? String(r.key) : "").trim();
+    if (key) out[key] = r.value == null ? "" : String(r.value);
+  }
+  return out;
+}
+
+function EnvVarTable({ rows, onChange, note }) {
+  const list = rows && rows.length ? rows : [];
+  const set = (i, patch) => onChange(list.map((r, n) => (n === i ? { ...r, ...patch } : r)));
+  const remove = (i) => onChange(list.filter((_, n) => n !== i));
+  const add = () => onChange([...list, { key: "", value: "" }]);
+  return (
+    <div>
+      {list.map((r, i) => (
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 32px", gap: 8, marginBottom: 8, alignItems: "center" }}>
+          <input
+            className="input is-mono"
+            value={r.key}
+            onChange={(e) => set(i, { key: e.target.value.trim() })}
+            placeholder="IRT_ROOT_LOGGING_LEVEL"
+            aria-label="Variable name"
+          />
+          <input
+            className="input is-mono"
+            value={r.value}
+            onChange={(e) => set(i, { value: e.target.value })}
+            placeholder="value"
+            aria-label="Variable value"
+          />
+          <button
+            type="button"
+            className="btn"
+            onClick={() => remove(i)}
+            title="Remove this variable"
+            aria-label={`Remove ${r.key || "this variable"}`}
+            style={{ padding: "6px 0", justifyContent: "center" }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <button type="button" className="btn" onClick={add} style={{ fontSize: 12 }}>
+        + Add variable
+      </button>
+      {note && <div className="field-hint" style={{ marginTop: 8 }}>{note}</div>}
+    </div>
+  );
+}
+
 Object.assign(window, {
   Ico, FigafMark, WinFrame, StepperRail, WizardFooter, TerminalDrawer, CheckRow, ScrollReveal,
+  EnvVarTable, envObjectToRows, envRowsToObject,
 });

@@ -5,6 +5,10 @@
 //   cf:createService   "already exists" counts only when the instance is in
 //                      this space
 //   cf:services        the parsed listing the Configuration screen reads
+// and the additional environment variables (gap G1, 2026-09-14):
+//   config:writeVars          the free-form rows land in the manifest's env block
+//   update:readCurrentConfig  what is live, minus the keys the template owns
+//   update:writeVars          a removed row is unset on the app
 //
 // Harness: patch child_process.spawn BEFORE requiring the orchestrator (repo
 // pattern); the deploy templates are the bundled copy in
@@ -179,4 +183,112 @@ test("cf:services parses the listing of the space", async () => {
   const bad = await handlers["cf:services"]();
   assert.equal(bad.ok, false);
   assert.deepEqual(bad.services, []);
+});
+
+// ─── Additional environment variables (gap G1, 2026-09-14) ──────────────────
+// The round trip the gap asks for: deploy writes the rows into the manifest,
+// an update reads back what is LIVE (including a `cf set-env` run by hand),
+// and a row the operator removed is unset instead of lingering on the app.
+
+const APP_GUID = "0e4c7a10-1111-2222-3333-444455556666";
+const guidReply = { match: (a) => a[0] === "app" && a[1] === "--guid", stdout: `${APP_GUID}\n`, code: 0 };
+const envReply = (v) => ({
+  match: (a) => a[0] === "curl" && a[1].includes("environment_variables"),
+  stdout: JSON.stringify({ var: v }),
+  code: 0,
+});
+
+test("writeVars writes the additional environment rows into the app block of the manifest", async () => {
+  const { handlers, read, lines } = fresh();
+  const r = await handlers["config:writeVars"]({
+    ...BASE_VARS,
+    additionalEnv: { IRT_ROOT_LOGGING_LEVEL: "DEBUG", ADDITIONAL_IRT_PARAMETERS: "-Dfoo=bar baz" },
+  });
+  assert.equal(r.ok, true);
+  assert.deepEqual(lines("manifest.yml", /IRT_ROOT_LOGGING_LEVEL|ADDITIONAL_IRT_PARAMETERS/), [
+    "    IRT_ROOT_LOGGING_LEVEL: 'DEBUG'",
+    "    ADDITIONAL_IRT_PARAMETERS: '-Dfoo=bar baz'",
+  ]);
+  // The router's block and the template's own keys are untouched.
+  assert.match(read("manifest.yml"), /^    httpHeaders: >$/m);
+  assert.match(read("manifest.yml"), /^    LOCATION_ID: \(\(LOCATION_ID\)\)$/m);
+
+  // A later deployment without extras starts from the pristine copy again.
+  const r2 = await handlers["config:writeVars"]({ ...BASE_VARS });
+  assert.equal(r2.ok, true);
+  assert.deepEqual(lines("manifest.yml", /IRT_ROOT_LOGGING_LEVEL/), []);
+});
+
+test("writeVars refuses a bad environment row before touching any file", async () => {
+  const { handlers, deployDir } = fresh();
+  const r = await handlers["config:writeVars"]({ ...BASE_VARS, additionalEnv: { MAX_RAM_PERCENTAGE: "70" } });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /set by the deployment template/);
+  assert.ok(!fs.existsSync(path.join(deployDir, "manifest.yml.template")), "nothing was patched");
+});
+
+test("readCurrentConfig reports every live variable the template does not own, including a hand-run cf set-env", async () => {
+  const { handlers } = fresh();
+  responses = [
+    guidReply,
+    envReply({
+      LOCATION_ID: "loc-1",
+      MAX_RAM_PERCENTAGE: "50",
+      BTP_APP_ROUTER_URL: "https://figaf-tool.cfapps.eu10-004.hana.ondemand.com",
+      IRT_ROOT_LOGGING_LEVEL: "DEBUG",
+      SOMETHING_BY_HAND: "yes",
+    }),
+  ];
+  const r = await handlers["update:readCurrentConfig"]({ deployId: "figaf-tool" });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.vars.additionalEnv, { IRT_ROOT_LOGGING_LEVEL: "DEBUG", SOMETHING_BY_HAND: "yes" });
+  // The named fields still come from the same read.
+  assert.equal(r.vars.locationId, "loc-1");
+  assert.equal(r.vars.domain, "cfapps.eu10-004.hana.ondemand.com");
+});
+
+test("update:writeVars unsets exactly the additional variables the operator removed", async () => {
+  const { handlers, lines } = fresh();
+  spawnCalls.length = 0;
+  responses = [
+    guidReply,
+    envReply({ LOCATION_ID: "loc-1", IRT_ROOT_LOGGING_LEVEL: "DEBUG", SOMETHING_BY_HAND: "yes" }),
+  ];
+  const r = await handlers["update:writeVars"]({
+    deployId: "figaf-tool",
+    dockerTag: "2409-btp",
+    vars: { ...BASE_VARS, additionalEnv: { IRT_ROOT_LOGGING_LEVEL: "INFO" } },
+  });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.unsetEnv, ["SOMETHING_BY_HAND"]);
+  const unsets = spawnCalls.filter((c) => c.args[0] === "unset-env").map((c) => c.args);
+  assert.deepEqual(unsets, [["unset-env", "figaf-tool-app", "SOMETHING_BY_HAND"]]);
+  // The kept row is written with its new value, not unset.
+  assert.deepEqual(lines("manifest.yml", /IRT_ROOT_LOGGING_LEVEL/), ["    IRT_ROOT_LOGGING_LEVEL: 'INFO'"]);
+});
+
+test("update:writeVars unsets nothing when the Update form never received a live environment", async () => {
+  const { handlers } = fresh();
+  spawnCalls.length = 0;
+  responses = [guidReply, envReply({ SOMETHING_BY_HAND: "yes" })];
+  // No `additionalEnv` at all: readCurrentConfig could not read the environment,
+  // so the table was never shown. Silence must not mean "remove them all".
+  const r = await handlers["update:writeVars"]({ deployId: "figaf-tool", dockerTag: "2409-btp", vars: { ...BASE_VARS } });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.unsetEnv, []);
+  assert.equal(spawnCalls.filter((c) => c.args[0] === "unset-env").length, 0);
+});
+
+test("readCurrentConfig leaves additionalEnv unset when the environment response is unreadable", async () => {
+  // An empty object would mean "the app has no extra variables" and would make
+  // update:writeVars unset every one of them. Unreadable must stay silent.
+  const { handlers } = fresh();
+  responses = [
+    guidReply,
+    { match: (a) => a[0] === "curl" && a[1].includes("environment_variables"), stdout: "not json", code: 0 },
+  ];
+  const r = await handlers["update:readCurrentConfig"]({ deployId: "figaf-tool" });
+  assert.equal(r.ok, true);
+  assert.equal(r.partial, true);
+  assert.equal("additionalEnv" in r.vars, false);
 });

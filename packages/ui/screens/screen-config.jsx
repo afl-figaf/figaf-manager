@@ -1,4 +1,4 @@
-/* global React, Ico, WizardFooter, ScrollReveal */
+/* global React, Ico, WizardFooter, ScrollReveal, EnvVarTable, envRowsToObject */
 
 const fg = () => (typeof window !== "undefined" && window.figaf) || null;
 
@@ -228,6 +228,7 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
       enableInstanceMonitoring: cfg.enableInstanceMonitoring,
       useCloudConnectorForSmtpIntegration: cfg.useCloudConnectorForSmtpIntegration,
       cloudConnectorDestinationNameForSmtpIntegration: cfg.cloudConnectorDestinationNameForSmtpIntegration,
+      additionalEnv: envRowsToObject(cfg.additionalEnvRows),
       enableConnectivity: cfg.enableConnectivity,
       enableDestination: cfg.enableDestination,
       dbServiceName: svc.db.name,
@@ -406,6 +407,23 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
             <div className="field-hint">Adds Glowroot agent for instance monitoring endpoint</div>
           </div>
         </div>
+
+        <div className="divider" />
+
+        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--ink-3)", margin: "0 0 12px" }}>Additional environment variables</div>
+
+        <div style={{ fontSize: 12, color: "var(--ink-2)", marginBottom: 12 }}>
+          Anything else the Figaf Tool should read from its environment — for example <span className="kbd">ADDITIONAL_IRT_PARAMETERS</span>,
+          {" "}<span className="kbd">ADDITIONAL_JVM_ARGUMENTS</span> or <span className="kbd">IRT_ROOT_LOGGING_LEVEL</span>. The names come from the
+          Figaf documentation; the rows are written into the app's <span className="kbd">env</span> block in <span className="kbd">manifest.yml</span>.
+          The variables the fields above set cannot be repeated here.
+        </div>
+
+        <EnvVarTable
+          rows={cfg.additionalEnvRows || []}
+          onChange={(rows) => setCfg({ additionalEnvRows: rows })}
+          note="Environment variables are readable by anyone with Space Developer rights on this space (cf env). Avoid putting secrets here when the Figaf Tool offers another way."
+        />
 
         <div className="divider" />
 

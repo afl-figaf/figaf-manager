@@ -1,4 +1,4 @@
-/* global React, Ico, CheckRow, WizardFooter */
+/* global React, Ico, CheckRow, WizardFooter, EnvVarTable, envObjectToRows, envRowsToObject */
 
 // ═══════════════════════════════════════════════════════════
 // Update Figaf Tool — hosted-only branch.
@@ -54,6 +54,13 @@ function ScreenUpdateConfig({ ctx, setCtx, onNext, onBack }) {
   const [error, setError] = React.useState(null);
   const [showAdvanced, setShowAdvanced] = React.useState(false);
   const setVar = (patch) => setVars(v => ({ ...v, ...patch }));
+  // The additional-variables table (gap G1). `vars.additionalEnv` is the object
+  // the orchestrator consumes; `envRows` is the ordered, editable view of it,
+  // so a half-typed row can exist. It stays UNSET until readCurrentConfig
+  // delivered a live environment — sending an empty object when the read failed
+  // would tell update:writeVars to unset every variable on the app.
+  const [envRows, setEnvRows] = React.useState(() => envObjectToRows(upd.vars && upd.vars.additionalEnv));
+  const changeEnvRows = (rows) => { setEnvRows(rows); setVar({ additionalEnv: envRowsToObject(rows) }); };
 
   // Pull the live app's current vars.yml values so the advanced form defaults
   // to what's actually running (not the template). Returns the merged vars so
@@ -67,6 +74,7 @@ function ScreenUpdateConfig({ ctx, setCtx, onNext, onBack }) {
       if (c && c.ok) {
         setVars(v => ({ ...v, ...(c.vars || {}) }));
         setVarsPartial(!!c.partial);
+        if (c.vars && c.vars.additionalEnv) setEnvRows(envObjectToRows(c.vars.additionalEnv));
         return c.vars || {};
       }
     } catch {}
@@ -434,6 +442,22 @@ function ScreenUpdateConfig({ ctx, setCtx, onNext, onBack }) {
                   <input className="input is-mono" value={vars.cloudConnectorDestinationNameForSmtpIntegration ?? ""} onChange={(e) => setVar({ cloudConnectorDestinationNameForSmtpIntegration: e.target.value })} placeholder="smtp-destination" />
                 </div>
               )}
+
+              <div className="field" style={{ marginTop: 14 }}>
+                <label className="field-label">Additional environment variables</label>
+                <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginBottom: 10 }}>
+                  Every variable on <span className="kbd">{deployId}-app</span> that the deploy template does not set — including any
+                  {" "}<span className="kbd">cf set-env</span> run by hand. Edit a value to change it; remove a row to unset the variable on the app.
+                  {" "}Names such as <span className="kbd">ADDITIONAL_IRT_PARAMETERS</span> or <span className="kbd">IRT_ROOT_LOGGING_LEVEL</span> come from the Figaf documentation.
+                </div>
+                <EnvVarTable
+                  rows={envRows}
+                  onChange={changeEnvRows}
+                  note={varsPartial && !(vars.additionalEnv)
+                    ? "The live environment could not be read, so nothing is listed. Adding a row here still works; existing variables are left as they are."
+                    : "Environment variables are readable by anyone with Space Developer rights on this space (cf env)."}
+                />
+              </div>
 
               <div className="field" style={{ marginTop: 14 }}>
                 <label className="field-label">Database service name</label>
