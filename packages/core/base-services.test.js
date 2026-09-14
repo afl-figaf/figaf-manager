@@ -42,8 +42,15 @@ test("the list: five base services, frozen names, the database editable and own-
   assert.equal(by.database.offering, "postgresql-db");
   assert.equal(by.database.nameEditable, true);
   assert.equal(by.database.access, "own-role");
-  assert.deepEqual([...by.database.plans], ["free", "standard"]);
+  assert.deepEqual([...by.database.plans], ["free", "trial", "standard"]);
   assert.equal(by.database.plan, "free", "the default plan is first and free");
+  // `plans` is also the order of preference when a landscape lacks the
+  // default (BTP trial, 2026-09-14): a paid plan must never come before a
+  // free one, or the fallback would spend the customer's money.
+  for (const s of list) {
+    assert.ok(!s.plans.includes("standard") || s.plans.indexOf("standard") === s.plans.length - 1,
+      `${s.name}: the paid plan must be last in the preference order`);
+  }
   assert.equal(by.xsuaa.plan, "application");
   assert.equal(by.xsuaa.configFile, "xs-security.json");
   assert.equal(by.credstore.bindToManager, true);

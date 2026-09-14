@@ -53,9 +53,10 @@
     // catalog older than v7, or the store unreachable): the instances cannot
     // be listed, so step 3 cannot be computed. Say so on step 1 instead of
     // showing a shorter list without a word (seen 2026-09-08 with store 0.6.1).
+    var servicesKnown = !!(data.services && data.services.ok === true);
     var servicesError = data.services && data.services.ok === false
       ? String(data.services.error || "the release could not be read") : "";
-    var allSvc = data.services && data.services.ok ? (data.services.services || []) : null;
+    var allSvc = servicesKnown ? (data.services.services || []) : null;
     var svc = allSvc ? allSvc.filter(function (s) { return !s.optional; }) : null;
     var hasServices = !!(svc && svc.length > 0);
     var allReady = hasServices && svc.every(function (s) { return s.status === "ready"; });
@@ -144,9 +145,17 @@
       title: "Shared backend and first app",
       why: "Install the first app on FAID Apps. The shared backend connector every app uses is " +
         "deployed with it, automatically.",
-      when: hasServices ? "Waits until every base service is ready and the database access is prepared." : "",
+      when: !servicesKnown ? "The base services could not be confirmed yet - treated as not ready." :
+        (hasServices ? "Waits until every base service is ready and the database access is prepared." : ""),
       done: platformDone,
-      blocked: platformDone ? "" : (!ssoDone ? afterPrepare : (hasServices && (!allReady || !dbReady) ? "after step " + servicesStepN : "")),
+      // Fail closed: a services read that has not happened yet or errored is
+      // never treated as "nothing required" - that silently unblocked this
+      // step on a trial account whose Credential Store never got created
+      // (2026-09-14) because the release's required services could not be
+      // read at that moment.
+      blocked: platformDone ? "" : (!ssoDone ? afterPrepare :
+        (!servicesKnown ? "base services not confirmed yet" :
+        (hasServices && (!allReady || !dbReady) ? "after step " + servicesStepN : ""))),
       cta: "Open FAID Apps",
     });
 

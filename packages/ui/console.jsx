@@ -92,7 +92,14 @@ async function runConsoleChecks(setCtx) {
   }
 }
 
-function ConsoleRail({ activeRoute, onNavigate, flowActive, aboutBadge, ctx, version, setupSub, setupDot, xsuaaMode }) {
+// A route with `afterPrepare` unlocks once out of token mode (xsuaaMode), but
+// some of them track a LATER Setup step that can still be blocked then (seen
+// 2026-09-14: a trial space whose Credential Store never got created still
+// showed FAID Apps as available, because only xsuaaMode gated the rail - the
+// Setup page itself already knew step 4 was blocked). Route -> that step id.
+const ROUTE_SETUP_STEP = { apps: "platform", connections: "figaf-connection" };
+
+function ConsoleRail({ activeRoute, onNavigate, flowActive, aboutBadge, ctx, version, setupSub, setupDot, xsuaaMode, setup }) {
   return (
     <aside className="rail">
       <div className="rail-brand">
@@ -105,7 +112,15 @@ function ConsoleRail({ activeRoute, onNavigate, flowActive, aboutBadge, ctx, ver
 
       <nav className="cnav">
         {CONSOLE_ROUTES.map((r) => {
-          const locked = !!r.afterPrepare && !xsuaaMode;
+          const stepId = ROUTE_SETUP_STEP[r.id];
+          const step = stepId && setup ? setup.steps.find((s) => s.id === stepId) : null;
+          // Fail closed: without the step model (script not loaded yet) a
+          // tracked route stays locked rather than defaulting to open.
+          const stepBlocked = !!stepId && !!(step ? step.blocked && !step.done : true);
+          const tokenLocked = !xsuaaMode;
+          const locked = !!r.afterPrepare && (tokenLocked || stepBlocked);
+          const lockedSub = tokenLocked ? "after step 1 (Setup)" : ((step && step.blocked) || LOCKED_HINT);
+          const lockedTitle = tokenLocked ? LOCKED_HINT : ((step && step.blocked) || LOCKED_HINT);
           const go = () => onNavigate(locked ? "setup" : r.id);
           return (
             <div
@@ -116,7 +131,7 @@ function ConsoleRail({ activeRoute, onNavigate, flowActive, aboutBadge, ctx, ver
               onClick={go}
               role="link"
               aria-disabled={locked || undefined}
-              title={locked ? LOCKED_HINT : undefined}
+              title={locked ? lockedTitle : undefined}
               tabIndex={0}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") go(); }}
             >
@@ -126,7 +141,7 @@ function ConsoleRail({ activeRoute, onNavigate, flowActive, aboutBadge, ctx, ver
                 {r.id === "setup" && setupDot && <span className="cnav-dot blue" title="The setup is not finished" />}
                 {r.id === "about" && aboutBadge && <span className="cnav-dot red" title={aboutBadge} />}
               </div>
-              <div className="cnav-sub">{r.id === "setup" && setupSub ? setupSub : locked ? "after step 1 (Setup)" : r.sub}</div>
+              <div className="cnav-sub">{r.id === "setup" && setupSub ? setupSub : locked ? lockedSub : r.sub}</div>
             </div>
           );
         })}
@@ -244,6 +259,15 @@ function ConsoleFrame({ app }) {
     if (route === "setup" || route === "connections") readCf();
     // eslint-disable-next-line
   }, [signedIn, route]);
+  // The rail locks FAID Apps / Connections until their Setup step is
+  // confirmed ready (fail closed, see ROUTE_SETUP_STEP in ConsoleRail) - so
+  // that confirmation must not wait for a visit to Setup or Connections
+  // first, e.g. when a rail click is the very first thing done after signing
+  // in this session.
+  React.useEffect(() => {
+    if (signedIn && xsuaaMode) readCf();
+    // eslint-disable-next-line
+  }, [signedIn, xsuaaMode]);
   React.useEffect(() => {
     const api = window.figaf;
     if (!api || !api.faid || releaseVersion !== null) return;
@@ -398,6 +422,7 @@ function ConsoleFrame({ app }) {
         aboutBadge={aboutBadge}
         ctx={ctx}
         xsuaaMode={xsuaaMode}
+        setup={setup}
         setupSub={setupSub}
         setupDot={!!(dataLoaded && setup && !setup.complete)}
         version={

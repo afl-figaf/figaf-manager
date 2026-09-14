@@ -123,6 +123,31 @@ function serviceStatusFromCf(exitCode, stdout) {
 }
 
 /**
+ * The plans an offering actually has in this landscape, from
+ * `cf marketplace -e <offering>` (a "plan / description / free or paid"
+ * table). Empty when the output carries no such table (the command failed,
+ * or an older cf CLI without the "free or paid" column) - callers then trust
+ * the module's own plan list, as before this existed.
+ */
+function parseMarketplacePlans(stdout) {
+  const lines = String(stdout || "").split(/\r?\n/);
+  const headerIdx = lines.findIndex((l) => /^\s*plan\s+description\b/i.test(l));
+  if (headerIdx < 0) return [];
+  const rows = [];
+  for (const line of lines.slice(headerIdx + 1)) {
+    // The table ends at the first blank line; anything after it (a TIP line,
+    // a second broker's block) is not a plan of this offering.
+    if (!line.trim()) break;
+    const cells = line.trim().split(/\s{2,}/);
+    const name = cells[0];
+    if (!name) continue;
+    const cost = (cells[cells.length - 1] || "").toLowerCase();
+    rows.push({ name, free: cost.includes("free") ? true : cost.includes("paid") ? false : null });
+  }
+  return rows;
+}
+
+/**
  * The base services a release needs (catalog v7): the module's list filtered
  * by what the release's CF apps require. The release store has validated the
  * catalog, so a refusal here is a programming error, reported as one.
@@ -1191,10 +1216,39 @@ function createFaidHandlers(ctx) {
           }
         }
         const allowed = s.plans || [s.plan];
-        const plan = (plans && plans[s.name]) || s.plan;
-        if (!allowed.includes(plan)) {
-          failed.push({ name: s.name, instanceName: inst, error: `plan '${plan}' is not allowed for ${s.name} (allowed: ${allowed.join(", ")})` });
+        const requestedPlan = (plans && plans[s.name]) || s.plan;
+        if (!allowed.includes(requestedPlan)) {
+          failed.push({ name: s.name, instanceName: inst, error: `plan '${requestedPlan}' is not allowed for ${s.name} (allowed: ${allowed.join(", ")})` });
           continue;
+        }
+        // A landscape may not offer the plan the module prefers: a BTP trial
+        // subaccount calls the Credential Store's plans `trial` and `proxy`,
+        // so the default `free` failed there and the instance was silently
+        // never created (2026-09-14). `cf marketplace -e` says what this
+        // landscape really has; the fallback is the FIRST plan of the
+        // module's own allow-list that it offers and does not mark paid, so
+        // the choice stays curated (a trial's `proxy` plan is not a store and
+        // is not in the list) and never costs money by itself. A plan the
+        // person picked ON PURPOSE is never swapped - that would trade the
+        // plan they chose for a smaller one behind their back.
+        let plan = requestedPlan;
+        const mp = await run(resolveCf(), ["marketplace", "-e", s.offering], { source: "cf", quiet: true });
+        const offered = mp.code === 0 ? parseMarketplacePlans(mp.stdout) : [];
+        if (offered.length && !offered.some((p) => p.name === plan)) {
+          const names = offered.map((p) => p.name).join(", ");
+          const fallback = plan === s.plan
+            ? allowed.find((a) => offered.some((p) => p.name === a && p.free !== false))
+            : null;
+          if (fallback) {
+            log("faid", "line", `${s.offering}: this landscape does not offer plan '${plan}'; using '${fallback}' instead (it offers: ${names}).`);
+            plan = fallback;
+          } else if (plan !== s.plan) {
+            failed.push({ name: s.name, instanceName: inst, error: `${s.offering} does not offer the plan '${plan}' you picked for ${s.name} in this landscape (it offers: ${names}) - pick one this landscape has` });
+            continue;
+          } else {
+            failed.push({ name: s.name, instanceName: inst, error: `${s.offering} offers no plan the manager can use for ${s.name} in this landscape (it offers: ${names}; the manager knows: ${allowed.join(", ")}) - ask Figaf to support one of these` });
+            continue;
+          }
         }
         const args = ["create-service", s.offering, plan, inst];
         if (s.kind === "xsuaa") {
@@ -1438,6 +1492,17 @@ function createFaidHandlers(ctx) {
         if (s.bindToManager && self && status !== "missing") {
           boundToManager = await bindingExists(instanceName, self);
         }
+        // Which of the module's plans this landscape really offers, so the
+        // Setup step 1 dropdown cannot show a plan that does not exist here
+        // (a BTP trial has no `free` - the bug of 2026-09-14). Only asked for
+        // an instance that still has to be created; `null` means not asked or
+        // the marketplace could not be read, and the module's list is used.
+        let availablePlans = null;
+        if (status === "missing") {
+          const mp = await run(resolveCf(), ["marketplace", "-e", s.offering], { source: "cf", quiet: true });
+          const offered = mp.code === 0 ? parseMarketplacePlans(mp.stdout) : [];
+          if (offered.length) availablePlans = s.plans.filter((p) => offered.some((o) => o.name === p));
+        }
         let boundToBackend = null;
         if (s.optional && backendDeployed === true && status !== "missing") {
           boundToBackend = await bindingExists(instanceName, backend);
@@ -1448,6 +1513,7 @@ function createFaidHandlers(ctx) {
           // `name` is the module's default name (the key of plans, only, names);
           // `instanceName` is what exists (or will be created) in the space.
           name: s.name, kind: s.kind, instanceName, offering: s.offering, plan: s.plan, plans: [...s.plans],
+          availablePlans,
           actualPlan: inst.plan || null,
           purpose: s.purpose || "", bindToManager: !!s.bindToManager,
           optional: !!s.optional, group: s.group || "", sharedWith: s.sharedWith || "",
@@ -1906,6 +1972,7 @@ module.exports = {
   cliFailureDetail,
   validateConfigEnv,
   serviceStatusFromCf,
+  parseMarketplacePlans,
   releaseServices,
   chooseDatabaseInstance,
   createFaidHandlers,

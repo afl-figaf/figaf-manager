@@ -17,8 +17,8 @@ const setupXsuaaMode = () => typeof window !== "undefined" && window.figafXsuaaM
 // Short, factual notes per plan. The catalog names the plans; the manager
 // never picks a paid plan by itself.
 const PLAN_NOTES = {
-  "postgresql-db": { free: "for trials and demos, small limits", standard: "paid plan, for real use" },
-  credstore:       { free: "one instance per subaccount, small limits", standard: "paid plan, for real use" },
+  "postgresql-db": { free: "for trials and demos, small limits", trial: "the plan of a BTP trial account, small limits", standard: "paid plan, for real use" },
+  credstore:       { free: "one instance per subaccount, small limits", trial: "the plan of a BTP trial account, small limits", standard: "paid plan, for real use" },
   connectivity:    { lite: "free" },
   destination:     { lite: "free" },
 };
@@ -37,6 +37,20 @@ const SERVICE_GROUPS = {
 };
 function groupInfo(key) {
   return SERVICE_GROUPS[key] || { title: `Also create the optional services (${key})`, text: "" };
+}
+// The plans to offer for an instance that does not exist yet: the ones this
+// LANDSCAPE really has (faid:services asks `cf marketplace -e`), else the
+// module's full list when it could not be read. A BTP trial has no `free`
+// plan, so showing the module's list there offered a plan that cannot be
+// created (2026-09-14).
+function offeredPlans(s) {
+  const avail = s && s.availablePlans;
+  return avail && avail.length ? avail : ((s && s.plans) || []);
+}
+// The plan a row will be created with unless the person picks another one.
+function defaultPlan(s) {
+  const list = offeredPlans(s);
+  return list.includes(s.plan) ? s.plan : (list[0] || s.plan);
 }
 function planNote(offering, plan) {
   const o = PLAN_NOTES[offering];
@@ -77,7 +91,7 @@ function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, names
   for (const s of services) {
     if (s.optional && s.group && !optionalGroups.includes(s.group)) optionalGroups.push(s.group);
   }
-  const choosable = required.filter((s) => s.status === "missing" && (s.plans || []).length > 1);
+  const choosable = required.filter((s) => s.status === "missing" && offeredPlans(s).length > 1);
   const toggleGroup = (key, on) => setGroups((prev) => {
     const next = (prev || []).filter((g) => g !== key);
     if (on) next.push(key);
@@ -93,8 +107,8 @@ function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, names
       </p>
       {required.map((s) => {
         const exists = s.status !== "missing";
-        const plan = plans[s.name] || s.plan;
-        const canChoose = !exists && (s.plans || []).length > 1;
+        const plan = plans[s.name] || defaultPlan(s);
+        const canChoose = !exists && offeredPlans(s).length > 1;
         const editable = !!s.nameEditable;
         const instanceName = s.instanceName || s.name;
         const typed = names && names[s.name] != null ? names[s.name] : instanceName;
@@ -120,7 +134,7 @@ function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, names
             <span style={{ fontSize: 12, color: "var(--ink-3)", flex: 1, minWidth: 160 }}>{s.purpose || s.offering}</span>
             {exists && <span className="pill green">exists</span>}
             {exists && <span style={{ fontSize: 12, color: "var(--ink-3)" }}>plan {s.actualPlan || s.plan}</span>}
-            {!exists && !canChoose && <span style={{ fontSize: 12, color: "var(--ink-3)" }}>plan {s.plan}</span>}
+            {!exists && !canChoose && <span style={{ fontSize: 12, color: "var(--ink-3)" }}>plan {defaultPlan(s)}</span>}
             {canChoose && (
               <>
                 <select
@@ -130,7 +144,7 @@ function ServicePlansPanel({ services, plans, setPlans, groups, setGroups, names
                   style={{ width: "auto" }}
                   onChange={(e) => setPlans((p) => ({ ...p, [s.name]: e.target.value }))}
                 >
-                  {s.plans.map((p) => <option key={p} value={p}>{p}</option>)}
+                  {offeredPlans(s).map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
                 <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{planNote(s.offering, plan)}</span>
               </>
@@ -356,10 +370,12 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, servicesError, onS
     setStarted(true);
     setError(null);
     setCtx((c) => ({ ...c, setupRunning: true }));
-    // Only the plans of instances that do not exist yet are sent.
+    // Only the plans of instances that do not exist yet are sent, and only
+    // the ones this landscape offers a choice of (a single-plan landscape
+    // sends nothing and lets the manager pick that plan).
     const chosen = {};
     for (const s of shownServices || []) {
-      if (s.status === "missing" && (s.plans || []).length > 1) chosen[s.name] = plans[s.name] || s.plan;
+      if (s.status === "missing" && offeredPlans(s).length > 1) chosen[s.name] = plans[s.name] || defaultPlan(s);
     }
     // The typed instance names (catalog v6); empty = the default.
     const sentNames = {};

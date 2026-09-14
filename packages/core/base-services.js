@@ -56,7 +56,11 @@ const BASE_SERVICES = Object.freeze([
     name: "figaf-db",
     nameEditable: true,
     plan: "free",
-    plans: Object.freeze(["free", "standard"]),
+    // `plans` is the ALLOW-LIST and the order of preference: the first entry a
+    // landscape actually offers is what a run falls back to when the default
+    // is not on its marketplace (`trial` exists only on BTP trial accounts;
+    // 2026-09-14). Never put a plan that costs money before a free one.
+    plans: Object.freeze(["free", "trial", "standard"]),
     access: "own-role",
     bindToManager: false,
     optional: false,
@@ -88,7 +92,10 @@ const BASE_SERVICES = Object.freeze([
     name: "figaf-faid-credstore",
     nameEditable: false,
     plan: "free",
-    plans: Object.freeze(["free", "standard"]),
+    // See the database's note on the order. A BTP trial subaccount offers
+    // `trial` and `proxy` here; `proxy` is the Credential Store proxy, not a
+    // store, so it is deliberately NOT in this list.
+    plans: Object.freeze(["free", "trial", "standard"]),
     access: "binding",
     bindToManager: true,
     optional: false,

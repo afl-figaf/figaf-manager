@@ -40,6 +40,7 @@ const {
   buildPushArgs,
   validateConfigEnv,
   serviceStatusFromCf,
+  parseMarketplacePlans,
   createFaidHandlers,
 } = require("./faid-apps");
 const { baseServices, wantedService } = require("./base-services");
@@ -580,7 +581,7 @@ test("faid:services: the module's rows for the kinds the release requires, with 
   assert.equal(by["figaf-faid-credstore"].boundToManager, true);
   assert.equal(by["figaf-faid-credstore"].bindToManager, true);
   assert.equal(by["figaf-db"].boundToManager, null); // not a bindToManager entry
-  assert.deepEqual(by["figaf-db"].plans, ["free", "standard"]);
+  assert.deepEqual(by["figaf-db"].plans, ["free", "trial", "standard"]);
   assert.deepEqual(by["figaf-faid-xsuaa"].plans, ["application"]);
 });
 
@@ -635,12 +636,134 @@ test("faid:provisionServices: rejects a plan the module does not allow; inline c
   const handlers = createFaidHandlers(ctx);
   const r = await handlers["faid:provisionServices"]({ plans: { "figaf-db": "enterprise" } });
   assert.equal(r.ok, false);
-  assert.match(r.error, /plan 'enterprise' is not allowed for figaf-db \(allowed: free, standard\)/);
+  assert.match(r.error, /plan 'enterprise' is not allowed for figaf-db \(allowed: free, trial, standard\)/);
   // the other two were still created
   assert.deepEqual(r.created.sort(), ["figaf-faid-credstore", "figaf-faid-xsuaa"]);
   const cs = calls.find((c) => c.args[0] === "create-service" && c.args[3] === "figaf-faid-credstore");
   assert.equal(cs.args[4], "-c");
   assert.deepEqual(JSON.parse(fs.readFileSync(cs.args[5], "utf8")), { authentication: { type: "basic" } });
+});
+
+test("parseMarketplacePlans: the plan table of `cf marketplace -e`, the free/paid column, and where the table ends", () => {
+  // The real shape: a preamble, the broker line, an indented table.
+  const real = [
+    "Getting service plan information for service offering credstore in org Figaf / space faid as afl@figaf.com...",
+    "",
+    "broker: credstore-broker",
+    "   plan     description                                     free or paid",
+    "   trial    Trial plan for SAP Credential Store service      free",
+    "   proxy    Proxy plan for SAP Credential Store service      free",
+    "",
+    "TIP: Use 'cf marketplace -e SERVICE' to view descriptions of individual plans.",
+  ].join("\n");
+  assert.deepEqual(parseMarketplacePlans(real), [
+    { name: "trial", free: true },
+    { name: "proxy", free: true },
+  ]);
+  // paid is recognized, and the table stops at the blank line (no TIP row)
+  const paid = "   plan      description   free or paid\n   free      Free plan     free\n   standard  Standard      paid\n\nTIP: something\n";
+  assert.deepEqual(parseMarketplacePlans(paid), [
+    { name: "free", free: true },
+    { name: "standard", free: false },
+  ]);
+  // no table (a failed call, or an older cf CLI without the column) -> empty,
+  // and every caller then trusts the module's own plan list
+  assert.deepEqual(parseMarketplacePlans(""), []);
+  assert.deepEqual(parseMarketplacePlans("FAILED\nService offering 'nope' not found"), []);
+  // a cost column that says neither -> free is unknown (null), never assumed paid
+  assert.deepEqual(parseMarketplacePlans("plan  description\nlite  Lite plan\n"), [{ name: "lite", free: null }]);
+});
+
+// A BTP trial subaccount, live on 2026-09-14: `cf marketplace -e credstore`
+// there offers `trial` and `proxy`, not `free` / `standard`, so every
+// create-service of the Credential Store failed and the instance was never
+// created - while Setup step 1 still reported success.
+const TRIAL_MARKETPLACE = "plan    description                       free or paid\ntrial   Trial plan for Credential Store   free\nproxy   Proxy plan for Credential Store   free\n";
+
+test("faid:provisionServices: a BTP trial landscape (plans 'trial' and 'proxy', no 'free') creates the Credential Store with 'trial' - the first plan of the module's list it offers; 'proxy' is never chosen", async () => {
+  const dir = makeBaseDir();
+  const state = { "figaf-faid-xsuaa": "create succeeded" }; // db + credstore missing
+  const { ctx, calls } = makeCtx(dir, (args) => {
+    if (domainsResponder(args)) return domainsResponder(args);
+    if (args[0] === "marketplace" && args[2] === "credstore") return { code: 0, stdout: TRIAL_MARKETPLACE };
+    if (args[0] === "marketplace") return { code: 0, stdout: "" }; // database, xsuaa: marketplace unreadable
+    if (args[0] === "create-service") { state[args[3]] = "create succeeded"; return { code: 0, stdout: "" }; }
+    if (args[0] === "service") return state[args[1]] ? { code: 0, stdout: `status: ${state[args[1]]}` } : { code: 1, stdout: "" };
+    return null;
+  });
+  ctx.sleep = async () => {};
+  const handlers = createFaidHandlers(ctx);
+  const r = await handlers["faid:provisionServices"]({});
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const credCreate = calls.find((c) => c.args[0] === "create-service" && c.args[3] === "figaf-faid-credstore");
+  assert.deepEqual(credCreate.args.slice(0, 4), ["create-service", "credstore", "trial", "figaf-faid-credstore"]);
+  // an unreadable marketplace keeps the module's default - unchanged behavior
+  const dbCreate = calls.find((c) => c.args[0] === "create-service" && c.args[3] === "figaf-db");
+  assert.equal(dbCreate.args[2], "free");
+});
+
+test("faid:provisionServices: the fallback never picks a PAID plan, and never a plan outside the module's list", async () => {
+  const dir = makeBaseDir();
+  const state = { "figaf-faid-xsuaa": "create succeeded", "figaf-db": "create succeeded" };
+  const { ctx, calls } = makeCtx(dir, (args) => {
+    if (domainsResponder(args)) return domainsResponder(args);
+    if (args[0] === "marketplace" && args[2] === "credstore") {
+      // `standard` is in the module's list but costs money here; `enterprise` is not in it at all.
+      return { code: 0, stdout: "plan        description   free or paid\nstandard    Standard      paid\nenterprise  Enterprise    free\n" };
+    }
+    if (args[0] === "marketplace") return { code: 0, stdout: "" };
+    if (args[0] === "create-service") { state[args[3]] = "create succeeded"; return { code: 0, stdout: "" }; }
+    if (args[0] === "service") return state[args[1]] ? { code: 0, stdout: `status: ${state[args[1]]}` } : { code: 1, stdout: "" };
+    return null;
+  });
+  ctx.sleep = async () => {};
+  const r = await createFaidHandlers(ctx)["faid:provisionServices"]({});
+  assert.equal(r.ok, false);
+  assert.match(r.error, /credstore offers no plan the manager can use.*offers: standard, enterprise.*knows: free, trial, standard/);
+  assert.ok(!calls.some((c) => c.args[0] === "create-service" && c.args[3] === "figaf-faid-credstore"));
+  assert.deepEqual(r.failed.map((f) => f.name), ["figaf-faid-credstore"]);
+});
+
+test("faid:provisionServices: a plan the person picked on purpose is never swapped for another one - it is refused with what the landscape offers", async () => {
+  const dir = makeBaseDir();
+  const state = { "figaf-faid-xsuaa": "create succeeded", "figaf-db": "create succeeded" };
+  const { ctx, calls } = makeCtx(dir, (args) => {
+    if (domainsResponder(args)) return domainsResponder(args);
+    if (args[0] === "marketplace" && args[2] === "credstore") return { code: 0, stdout: TRIAL_MARKETPLACE };
+    if (args[0] === "marketplace") return { code: 0, stdout: "" };
+    if (args[0] === "create-service") { state[args[3]] = "create succeeded"; return { code: 0, stdout: "" }; }
+    if (args[0] === "service") return state[args[1]] ? { code: 0, stdout: `status: ${state[args[1]]}` } : { code: 1, stdout: "" };
+    return null;
+  });
+  ctx.sleep = async () => {};
+  const r = await createFaidHandlers(ctx)["faid:provisionServices"]({ plans: { "figaf-faid-credstore": "standard" } });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /does not offer the plan 'standard' you picked.*offers: trial, proxy/);
+  assert.ok(!calls.some((c) => c.args[0] === "create-service" && c.args[3] === "figaf-faid-credstore"));
+});
+
+test("faid:services: a MISSING instance reports the plans this landscape really offers (availablePlans), so the Setup dropdown cannot offer one that does not exist; an existing instance is not asked", async () => {
+  const dir = makeBaseDir();
+  const state = { "figaf-db": "create succeeded" }; // db exists, credstore + xsuaa missing
+  const { ctx, calls } = makeCtx(dir, (args) => {
+    if (domainsResponder(args)) return domainsResponder(args);
+    if (args[0] === "marketplace" && args[2] === "credstore") return { code: 0, stdout: TRIAL_MARKETPLACE };
+    if (args[0] === "marketplace") return { code: 0, stdout: "" };
+    if (args[0] === "service") return state[args[1]] ? { code: 0, stdout: `name: ${args[1]}\nstatus: ${state[args[1]]}\nplan: free\n` } : { code: 1, stdout: "" };
+    return null;
+  });
+  const r = await createFaidHandlers(ctx)["faid:services"]({});
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const by = Object.fromEntries(r.services.map((s) => [s.name, s]));
+  // only `trial` is both in the module's list and on this landscape ('proxy' is not ours)
+  assert.deepEqual(by["figaf-faid-credstore"].availablePlans, ["trial"]);
+  // the module's full list is still reported, so nothing that reads `plans` changes
+  assert.deepEqual(by["figaf-faid-credstore"].plans, ["free", "trial", "standard"]);
+  // an instance that exists needs no plan choice -> no marketplace call for it
+  assert.equal(by["figaf-db"].availablePlans, null);
+  assert.ok(!calls.some((c) => c.args[0] === "marketplace" && c.args[2] === "postgresql-db"));
+  // an unreadable marketplace falls back to the module's list (availablePlans null)
+  assert.equal(by["figaf-faid-xsuaa"].availablePlans, null);
 });
 
 test("faid:provisionServices: a failed creation is reported, the deadline stops the wait", async () => {

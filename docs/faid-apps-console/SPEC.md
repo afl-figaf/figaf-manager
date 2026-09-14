@@ -8,7 +8,12 @@ are in the figaf-faid repo (`decisions/`); the human install procedure is
 figaf-faid `docs/d1/MANUAL-RUNBOOK.md`; run records are figaf-faid
 `docs/d1/RUNBOOK-VIRGIN.md`; what to do when an action fails is
 `TROUBLESHOOTING.md` and what is still open is `OPEN-ITEMS.md` (this folder).
-Last edited 2026-09-10 (the FAID Apps page shows cards in sections and
+Last edited 2026-09-14 (a landscape whose marketplace does not offer the
+module's plan names - seen on a BTP trial account, the Credential Store was
+never created - now falls back to the landscape's own free plan when there is
+exactly one, section 3; the rail no longer opens FAID Apps / Connections
+before their own Setup step is confirmed ready, section 6); before,
+2026-09-10: the FAID Apps page shows cards in sections and
 stops or starts several apps in one go, section 3.1; before, 2026-09-08:
 catalog v7, the manager owns the base service instances,
 `packages/core/base-services.js`, sections 2 and 4; the backend's own database
@@ -297,7 +302,7 @@ renders them.
 | `faid:catalog({version?})`, `faid:status` | the catalog of the installation's version (installed, else latest; section 2.3) with `source`, `installed`, `latest`; live state per CF app from `cf curl /v3/apps` (scoped to the targeted space), installed version from the env var `FIGAF_APP_VERSION`, the in-flight action (`running`), per part `staging` (a STOPPED part with a build in `STAGING`, one `cf curl /v3/builds`), and `release` (the version the rows were computed against) |
 | `faid:releases({refresh?})` | the release store: `source`, `installed`, `latest`, `current`, `updateAvailable`, `versions[]` with `selectable` / `reason` (section 2.3). `refresh` re-reads `index.json` now. No cf call beyond the installed-version probe |
 | `faid:running` | the lifecycle action running now, or null. No cf call. For a page that did not start it (reload, second tab, second session) |
-| `faid:services({names?})`, `faid:provisionServices({plans, only, waitOnly, names?})` | the rows are the base services of `base-services.js` that the release's CF apps require (section 4); `cf service <instance>`; `cf create-service` for missing instances, poll every 10 s until `succeeded` (15 min limit); a `failed` instance is deleted and created again (never the `own-role` database: it is reported and left alone). With `waitOnly`, only those names are awaited; the others are started and reported as `pending`. `names` = `{ defaultName: instanceName }` for `nameEditable` services; `plans`, `only` and `waitOnly` stay keyed by the module's DEFAULT name. Per row `name` (default), `kind`, `instanceName` (actual, section 4.2), `nameSource`, `candidates`, `boundApps`, `actualPlan`, `access`, `nameEditable`, `databaseAccess` (own-role rows), `boundToManager` (Credential Store, one `cf curl /v3/service_credential_bindings`); for optional instances also `backendDeployed` (from the same `cf app <backend> --guid` probe that reads the installed version, no extra call) and `boundToBackend` (the same curl against the shared backend, one per instance), so the panel offers the bind only when it is needed (section 4.1) |
+| `faid:services({names?})`, `faid:provisionServices({plans, only, waitOnly, names?})` | the rows are the base services of `base-services.js` that the release's CF apps require (section 4); `cf service <instance>`; `cf create-service` for missing instances, poll every 10 s until `succeeded` (15 min limit); a `failed` instance is deleted and created again (never the `own-role` database: it is reported and left alone). Before each creation, `cf marketplace -e <offering>` checks that the landscape actually offers the plan: a landscape that names its plans differently (a BTP trial offers `trial` and `proxy` for `credstore`, not `free`/`standard`; 2026-09-14 the Credential Store was silently never created there) falls back to the FIRST plan of the module's own `plans` list that the marketplace offers and does not mark `paid` (section 4). So `trial` is chosen and `proxy` never is - it is not a store and is not in the list. A plan the person picked themselves is never swapped: it is refused, naming what the landscape offers. A marketplace that cannot be read leaves the module's default in place, as before. With `waitOnly`, only those names are awaited; the others are started and reported as `pending`. `names` = `{ defaultName: instanceName }` for `nameEditable` services; `plans`, `only` and `waitOnly` stay keyed by the module's DEFAULT name. Per row `name` (default), `kind`, `instanceName` (actual, section 4.2), `nameSource`, `candidates`, `boundApps`, `actualPlan`, `access`, `nameEditable`, `databaseAccess` (own-role rows), `boundToManager` (Credential Store, one `cf curl /v3/service_credential_bindings`); for optional instances also `backendDeployed` (from the same `cf app <backend> --guid` probe that reads the installed version, no extra call) and `boundToBackend` (the same curl against the shared backend, one per instance), so the panel offers the bind only when it is needed (section 4.1) |
 | `faid:databaseStatus`, `faid:databasePrepare({instanceName})`, `faid:databaseRotate`, `faid:databaseDrop({confirm:true})` | the backend's database access (section 4.2, `packages/core/faid-database.js`): status without a database connection; prepare = temporary service key, SQL as the owner, verification as `faid_app`, Credential Store entry, key deleted; rotate = new password, entry updated, `cf restart <backend>` when deployed; drop = `DROP SCHEMA faid CASCADE`, `DROP ROLE faid_app`, entry deleted. Prepare, rotate and drop take the lifecycle lock. Hosted only |
 | `faid:bindManagerService`, `faid:restartSelf` | `cf bind-service <manager> <name>`; `cf restart <manager>` (fire-and-forget) |
 | `faid:ensureXsuaa({updateOnly})` | create or `cf update-service figaf-faid-xsuaa` with the composed document (section 5) |
@@ -373,10 +378,18 @@ and every `cf create-service` / `cf bind-service` come from the module.
 
 | kind | offering | default name | name editable | plans | bound to | note |
 |---|---|---|---|---|---|---|
-| `database` | `postgresql-db` | `figaf-db` | yes | `free`, `standard` | nobody: the backend's own role (section 4.2) | may be the Figaf Tool's instance; the row states the bound apps and the consequence |
+| `database` | `postgresql-db` | `figaf-db` | yes | `free`, `trial`, `standard` | nobody: the backend's own role (section 4.2) | may be the Figaf Tool's instance; the row states the bound apps and the consequence |
 | `xsuaa` | `xsuaa` | `figaf-faid-xsuaa` | no | `application` | manager, backend, every app | composed document (release part `xs-security.json` + manager part), section 5.1 |
-| `credstore` | `credstore` | `figaf-faid-credstore` | no | `free`, `standard` | manager (`bindToManager`), backend | basic authentication on the instance; the free plan allows one instance per subaccount |
+| `credstore` | `credstore` | `figaf-faid-credstore` | no | `free`, `trial`, `standard` | manager (`bindToManager`), backend | basic authentication on the instance; the free plan allows one instance per subaccount |
 | group `pipo` | `connectivity` / `destination` | `figaf-connectivity`, `figaf-destination` | no (later) | `lite` | backend, when present | shared with the Figaf Tool: reused, never replaced, configured or deleted by the manager (section 4.1) |
+
+`plans` is the ALLOW-LIST and the ORDER OF PREFERENCE in one: the first entry
+a landscape offers is what a run falls back to when the default is not on its
+marketplace (section 3). So a paid plan must always come last, or the
+fallback would spend the customer's money (`base-services.test.js` asserts
+it). `trial` exists only on BTP trial subaccounts; `proxy`, which a trial
+also offers for `credstore`, is deliberately absent - it is the Credential
+Store proxy, not a store.
 
 Frozen names: decision 0008 is the record, the module is the code. Extending
 the editable name to another instance is one column change plus a discovery
@@ -557,7 +570,7 @@ everything it needs; the run itself needs no input.
 | Part | Handler | Effect |
 |---|---|---|
 | Sign in to Cloud Foundry | `ScreenLogin` embedded in step 1 | one-time passcode, once; the BTP login stays optional |
-| Service plans | `faid:services({names})` | the base instances the release requires (section 4): one dropdown per instance that is missing and has more than one plan (PostgreSQL, Credential Store: `free` / `standard`, each with a one-line note); existing instances are shown as "exists" with their plan. The database row has a text field for the instance name (default `figaf-db`, prefilled with the space's PostgreSQL instance when there is one); leaving the field asks `faid:services` again for the typed name, so the row shows whether it exists, its plan and bound apps, and the consequence line (section 4.2) |
+| Service plans | `faid:services({names})` | the base instances the release requires (section 4): one dropdown per instance that is missing and has more than one plan THIS LANDSCAPE offers (`availablePlans`: the module's list narrowed by `cf marketplace -e`, section 3; on a BTP trial that is `trial` alone, so no dropdown and no plan that cannot be created), each with a one-line note; existing instances are shown as "exists" with their plan. The database row has a text field for the instance name (default `figaf-db`, prefilled with the space's PostgreSQL instance when there is one); leaving the field asks `faid:services` again for the typed name, so the row shows whether it exists, its plan and bound apps, and the consequence line (section 4.2) |
 | Role assignment | `xsuaa:roleAssignmentPrecheck` | as before: with a BTP login the collection is assigned automatically to the named person; without it the button says so ("... without role assignment") |
 | Prepare the XSUAA instance | `cf:createXsuaa` -> `faid:ensureXsuaa` | create or update `figaf-faid-xsuaa`, composed document; always runs |
 | Assign role collection (optional) | `xsuaa:assignRoleCollection` | `btp assign security/role-collection FAID-Manager-Admin --to-user <e-mail>`; needs a BTP login in THIS session (a restart forgets it); subaccount GUID from the BTP login or from a throw-away service key of the instance |
@@ -662,6 +675,16 @@ Order enforcement, seen by a new person on a fresh space:
   (bookmark) still opens the page, with a notice "Setup not finished - N of M
   done, next: <step>" and a button **Open Setup**. (The e2e harness runs in
   token mode and reaches the pages this way.)
+- Past step 1 (XSUAA mode), FAID Apps and Connections stay disabled in the
+  rail (title and sub-label carry the reason) until THEIR OWN Setup step is
+  no longer blocked - step 4 (Shared backend and first app) and step 5 (Figaf
+  tool connection) respectively - not merely until step 1 is done (fixed
+  2026-09-14: before, the rail only checked the mode, so a space whose base
+  services failed to be created still showed FAID Apps as available; a deep
+  link still reaches the page, unchanged). While the console has not yet
+  confirmed the step's inputs (a fresh boot that hasn't read `faid:services`
+  or the stored-user status yet) the entry stays locked - fail closed, never
+  open on missing information.
 - FAID Apps has no setup banner and no service-creation button any more;
   Session & access has no "Secure access" card any more.
 - The legacy route `#/session/sso-upgrade` opens `#/setup`.

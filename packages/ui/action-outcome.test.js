@@ -100,6 +100,9 @@ test("hints: session lost, quota, bind, start, checksum, no route; unknown text 
   assert.equal(hintFor("could not resolve the route of figaf-faid-backend — is the platform base deployed and started?"), "no-route");
   // Refused because another action is running (one action at a time, 2026-09-04)
   assert.equal(hintFor("install of arch is already running (started 2 min ago) — wait until it finishes."), "busy");
+  // A landscape that does not offer the service plan (BTP trial, 2026-09-14)
+  assert.equal(hintFor("figaf-faid-credstore: credstore offers no plan the manager can use for figaf-faid-credstore in this landscape (it offers: standard, enterprise; the manager knows: free, trial, standard) - ask Figaf to support one of these"), "plan-not-offered");
+  assert.equal(hintFor("figaf-faid-credstore: credstore does not offer the plan 'standard' you picked for figaf-faid-credstore in this landscape (it offers: trial, proxy) - pick one this landscape has"), "plan-not-offered");
   const d = f({ action: "remove", appName: "X", result: { ok: false, error: "something nobody expected" } });
   assert.equal(d.hintId, "default");
   assert.match(d.hint, /terminal drawer/);

@@ -132,6 +132,16 @@ test("services fetch failed: treated like v2 (no false 'to do' for unknown insta
   assert.equal(byId(r, "mgmt-user").current, true);
 });
 
+test("step 1 done but the services read failed or never happened: step 4 stays blocked, fail closed (2026-09-14: a trial space whose Credential Store never got created still showed Shared backend and first app as available)", () => {
+  const failed = load()({ services: { ok: false, error: "boom" }, stored: { available: false, bindingPresent: true } }, { ssoDone: true });
+  assert.notEqual(byId(failed, "platform").blocked, "");
+  assert.equal(byId(failed, "platform").current, false);
+
+  const notFetchedYet = load()({ stored: { available: false, bindingPresent: true } }, { ssoDone: true });
+  assert.notEqual(byId(notFetchedYet, "platform").blocked, "");
+  assert.equal(byId(notFetchedYet, "platform").current, false);
+});
+
 test("missing inputs: nothing throws, Prepare the space is the only actionable step", () => {
   const r = load()(undefined);
   assert.equal(r.done, 0);

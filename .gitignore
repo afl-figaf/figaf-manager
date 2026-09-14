@@ -35,3 +35,5 @@ e2e/.tmp/
 test-results/
 test-results-mutating/
 playwright-report/
+
+graphify-out/

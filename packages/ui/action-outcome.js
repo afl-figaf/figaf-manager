@@ -61,6 +61,11 @@
       hint: "Create the base services first (Setup page, step 3), wait until every instance is Ready, then try again.",
     },
     {
+      id: "plan-not-offered",
+      re: /offers no plan the manager can use|does not offer the plan '.*' you picked/i,
+      hint: "This landscape does not offer the service plan the instance would be created with. `cf marketplace -e <offering>` lists the plans it really has. Pick one of the plans named above in Setup step 1, or - when none of them fits - ask Figaf to support that plan name. Nothing was created.",
+    },
+    {
       id: "stack-missing",
       re: /needs the Cloud Foundry stack/i,
       hint: "The release names a Cloud Foundry stack (the container's Ubuntu version) that this landscape does not offer yet. Nothing was deployed. Ask SAP when the stack arrives on this landscape, or ask Figaf for a release built for a stack the landscape has (cf stacks lists them).",
