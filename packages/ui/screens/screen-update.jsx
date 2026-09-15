@@ -443,6 +443,19 @@ function ScreenUpdateConfig({ ctx, setCtx, onNext, onBack }) {
                 </div>
               )}
 
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14, marginBottom: 10 }}>
+                <div className="field">
+                  <label className="field-label">Additional IRT parameters</label>
+                  <input className="input is-mono" value={vars.additionalIrtParameters ?? ""} onChange={(e) => setVar({ additionalIrtParameters: e.target.value })} placeholder="--irt.some.property=value" />
+                  <div className="field-hint">Each in the form <span className="kbd">--irt.&lt;property&gt;=value</span>, separated by spaces. Emptying the field removes the variable from the app.</div>
+                </div>
+                <div className="field">
+                  <label className="field-label">Additional JVM arguments</label>
+                  <input className="input is-mono" value={vars.additionalJvmArguments ?? ""} onChange={(e) => setVar({ additionalJvmArguments: e.target.value })} placeholder="-Xss2m" />
+                  <div className="field-hint">The heap comes from Max RAM percentage above — an <span className="kbd">-Xmx</span> here would override it.</div>
+                </div>
+              </div>
+
               <div className="field" style={{ marginTop: 14 }}>
                 <label className="field-label">Additional environment variables</label>
                 <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginBottom: 10 }}>

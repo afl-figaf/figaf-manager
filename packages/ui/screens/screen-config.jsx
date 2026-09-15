@@ -228,6 +228,8 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
       enableInstanceMonitoring: cfg.enableInstanceMonitoring,
       useCloudConnectorForSmtpIntegration: cfg.useCloudConnectorForSmtpIntegration,
       cloudConnectorDestinationNameForSmtpIntegration: cfg.cloudConnectorDestinationNameForSmtpIntegration,
+      additionalIrtParameters: cfg.additionalIrtParameters,
+      additionalJvmArguments: cfg.additionalJvmArguments,
       additionalEnv: envRowsToObject(cfg.additionalEnvRows),
       enableConnectivity: cfg.enableConnectivity,
       enableDestination: cfg.enableDestination,
@@ -405,6 +407,32 @@ function ScreenConfig({ ctx, setCtx, onNext, onBack, appendLog }) {
               </label>
             </div>
             <div className="field-hint">Adds Glowroot agent for instance monitoring endpoint</div>
+          </div>
+        </div>
+
+        <div className="field" style={{ marginBottom: 8 }}>
+          <label className="field-label">Additional IRT parameters</label>
+          <input
+            className="input is-mono"
+            value={cfg.additionalIrtParameters || ""}
+            onChange={(e) => setCfg({ additionalIrtParameters: e.target.value })}
+            placeholder="--irt.some.property=value"
+          />
+          <div className="field-hint">
+            Extra Figaf Tool properties, each in the form <span className="kbd">--irt.&lt;property&gt;=value</span>, separated by spaces. Leave empty when there are none.
+          </div>
+        </div>
+
+        <div className="field" style={{ marginBottom: 8 }}>
+          <label className="field-label">Additional JVM arguments</label>
+          <input
+            className="input is-mono"
+            value={cfg.additionalJvmArguments || ""}
+            onChange={(e) => setCfg({ additionalJvmArguments: e.target.value })}
+            placeholder="-Xss2m"
+          />
+          <div className="field-hint">
+            Extra arguments for the Java process. The heap comes from Max RAM percentage above — an <span className="kbd">-Xmx</span> here would override it.
           </div>
         </div>
 

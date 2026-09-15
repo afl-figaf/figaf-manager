@@ -50,6 +50,22 @@ const TEMPLATE_ENV_KEYS = Object.freeze([
   "INSTANCE_MEMORY",
 ]);
 
+// Variables with a field of their own on the Configuration screen and in the
+// Update form (2026-09-15), because they are the two customers reach for
+// first. `vars.<field>` -> env key. They are written the same way as a table
+// row; the field is only a nicer door. An empty field writes NOTHING, so the
+// variable stays absent rather than being set to "".
+const NAMED_ENV_FIELDS = Object.freeze({
+  additionalIrtParameters: "ADDITIONAL_IRT_PARAMETERS",
+  additionalJvmArguments: "ADDITIONAL_JVM_ARGUMENTS",
+});
+
+// Everything the manager itself sets: the table must offer none of these (one
+// door per variable), and update:readCurrentConfig subtracts them from the
+// live environment to find what is left over - a row somebody typed in the
+// table, or a `cf set-env` run by hand.
+const MANAGED_ENV_KEYS = Object.freeze([...TEMPLATE_ENV_KEYS, ...Object.values(NAMED_ENV_FIELDS)]);
+
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function escapeRe(s) {
@@ -99,7 +115,8 @@ function applyManifestServices(text, opts) {
  * are dropped, so a half-typed row never reaches the manifest.
  * Returns { ok, env } or { ok:false, error }.
  */
-function validateEnvRows(rows) {
+function validateEnvRows(rows, opts) {
+  const allow = (opts && opts.allow) || [];
   const list = Array.isArray(rows)
     ? rows.map((r) => [r && r.key, r && r.value])
     : Object.entries(rows || {});
@@ -111,8 +128,8 @@ function validateEnvRows(rows) {
     if (!ENV_KEY_RE.test(key)) {
       return { ok: false, error: `"${key}" is not a valid environment variable name - letters, digits and _, not starting with a digit` };
     }
-    if (TEMPLATE_ENV_KEYS.includes(key)) {
-      return { ok: false, error: `${key} is set by the deployment template - use its own field on this screen instead of an additional variable` };
+    if (MANAGED_ENV_KEYS.includes(key) && !allow.includes(key)) {
+      return { ok: false, error: `${key} has its own field on this screen - set it there, not as an additional variable` };
     }
     if (Object.prototype.hasOwnProperty.call(env, key)) {
       return { ok: false, error: `${key} is listed twice` };
@@ -128,6 +145,29 @@ function validateEnvRows(rows) {
     env[key] = value;
   }
   return { ok: true, env };
+}
+
+/**
+ * The whole `env:` the app is pushed with beyond the template's own keys: the
+ * named fields (ADDITIONAL_IRT_PARAMETERS, ADDITIONAL_JVM_ARGUMENTS) first,
+ * then the free-form table. An EMPTY named field contributes nothing, so
+ * clearing it removes the variable from the app rather than setting it to "".
+ * The named keys go through the same checks as a table row - they are only
+ * exempt from "this key has its own field".
+ * Returns { ok, env } or { ok:false, error }.
+ */
+function buildAppEnv(vars) {
+  const v = vars || {};
+  const rows = validateEnvRows(v.additionalEnv);
+  if (!rows.ok) return rows;
+  const named = [];
+  for (const field of Object.keys(NAMED_ENV_FIELDS)) {
+    const value = v[field] == null ? "" : String(v[field]).trim();
+    if (value) named.push({ key: NAMED_ENV_FIELDS[field], value });
+  }
+  if (!named.length) return rows;
+  const all = named.concat(Object.keys(rows.env).map((key) => ({ key, value: rows.env[key] })));
+  return validateEnvRows(all, { allow: Object.values(NAMED_ENV_FIELDS) });
 }
 
 const ENV_BLOCK_RE = /^(\s*)env:\s*$/;
@@ -188,10 +228,13 @@ module.exports = {
   DEFAULT_DB_SERVICE,
   DEFAULT_XSUAA_SERVICE,
   TEMPLATE_ENV_KEYS,
+  NAMED_ENV_FIELDS,
+  MANAGED_ENV_KEYS,
   patchManifestService,
   renameManifestService,
   applyManifestServices,
   validateEnvRows,
+  buildAppEnv,
   applyManifestEnv,
   setXsappname,
 };

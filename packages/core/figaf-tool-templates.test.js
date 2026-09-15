@@ -131,11 +131,28 @@ test("validateEnvRows takes both shapes, drops half-typed rows, keeps order", ()
 test("validateEnvRows refuses bad names, the template's own keys, duplicates and values cf would rewrite", () => {
   assert.match(t.validateEnvRows({ "A B": "1" }).error, /not a valid environment variable name/);
   assert.match(t.validateEnvRows({ "1A": "1" }).error, /not a valid environment variable name/);
-  assert.match(t.validateEnvRows({ LOCATION_ID: "x" }).error, /set by the deployment template/);
-  assert.match(t.validateEnvRows({ DOCKER_USERNAME: "x" }).error, /set by the deployment template/);
+  assert.match(t.validateEnvRows({ LOCATION_ID: "x" }).error, /has its own field/);
+  assert.match(t.validateEnvRows({ DOCKER_USERNAME: "x" }).error, /has its own field/);
+  // The two named fields are managed keys too - one door per variable.
+  assert.match(t.validateEnvRows({ ADDITIONAL_IRT_PARAMETERS: "x" }).error, /has its own field/);
+  assert.match(t.validateEnvRows({ ADDITIONAL_JVM_ARGUMENTS: "x" }).error, /has its own field/);
   assert.match(t.validateEnvRows([{ key: "A", value: "1" }, { key: "A", value: "2" }]).error, /listed twice/);
   // ((NAME)) is substituted from vars.yml ANYWHERE in the manifest.
   assert.match(t.validateEnvRows({ A: "x((ID))y" }).error, /\(\(/);
   assert.match(t.validateEnvRows({ A: "one\ntwo" }).error, /line breaks or control characters/);
   assert.equal(t.validateEnvRows({ A: "plain-((-not-a-var" }).ok, false);
+});
+
+test("buildAppEnv puts the named fields before the table and refuses a value cf would rewrite", () => {
+  assert.deepEqual(
+    t.buildAppEnv({ additionalJvmArguments: "-Xss2m", additionalEnv: { Z: "1" }, additionalIrtParameters: "--irt.a=1" }).env,
+    { ADDITIONAL_IRT_PARAMETERS: "--irt.a=1", ADDITIONAL_JVM_ARGUMENTS: "-Xss2m", Z: "1" }
+  );
+  assert.deepEqual(t.buildAppEnv({}).env, {});
+  assert.deepEqual(t.buildAppEnv(null).env, {});
+  // Blank or whitespace-only: the variable is not written at all.
+  assert.deepEqual(t.buildAppEnv({ additionalIrtParameters: "  ", additionalJvmArguments: null }).env, {});
+  assert.match(t.buildAppEnv({ additionalIrtParameters: "--irt.a=((ID))" }).error, /\(\(/);
+  // A bad table row still fails even when the named fields are fine.
+  assert.match(t.buildAppEnv({ additionalJvmArguments: "-Xss2m", additionalEnv: { "1BAD": "x" } }).error, /not a valid/);
 });

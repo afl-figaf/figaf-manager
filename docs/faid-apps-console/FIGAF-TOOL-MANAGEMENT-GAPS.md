@@ -23,21 +23,28 @@ it installs the FAID Apps? Facts come from the code on branch
   domain derived from `BTP_APP_ROUTER_URL`. Values that are not in the
   environment (Docker Hub user name, instance memory, the PostgreSQL plan) are
   not recoverable this way.
-- **Additional environment variables** (since 2026-09-14, `TEMPLATE_ENV_KEYS`,
+- **Application properties** (since 2026-09-14, `buildAppEnv`,
   `validateEnvRows` and `applyManifestEnv` in
   `packages/core/figaf-tool-templates.js`): the Configuration screen and the
-  Update form carry a free-form key/value table. `config:writeVars` writes the
-  rows into the app block of `manifest.yml` (from the pristine copy, so a
-  second deployment in one container starts clean), which covers the fresh
-  deploy and the update through the one push both already use.
-  `update:readCurrentConfig` returns every live variable outside
-  `TEMPLATE_ENV_KEYS` as `additionalEnv`, so a variable somebody set with
-  `cf set-env` by hand is visible for the first time; `update:writeVars` runs
-  `cf unset-env` for a row the operator removed, because `cf push` with a
-  manifest never removes a variable the manifest stopped naming. The names
-  themselves (`ADDITIONAL_IRT_PARAMETERS`, `IRT_ROOT_LOGGING_LEVEL`, the
-  keystore group, …) are documentation, not a list in the manager; the table
-  refuses only the keys the template already owns. Secret-looking values are
+  Update form carry two named fields — **Additional IRT parameters**
+  (`ADDITIONAL_IRT_PARAMETERS`, Figaf Tool properties in the form
+  `--irt.<property>=value`) and **Additional JVM arguments**
+  (`ADDITIONAL_JVM_ARGUMENTS`) — plus a free-form key/value table for
+  everything else. `config:writeVars` writes all of it into the app block of
+  `manifest.yml` (from the pristine copy, so a second deployment in one
+  container starts clean), which covers the fresh deploy and the update
+  through the one push both already use. An EMPTY named field writes nothing,
+  so clearing it removes the variable instead of setting it to `""`.
+  `update:readCurrentConfig` fills the two fields from the live app and
+  returns every other live variable outside `MANAGED_ENV_KEYS` as
+  `additionalEnv`, so a variable somebody set with `cf set-env` by hand is
+  visible for the first time; `update:writeVars` runs `cf unset-env` for
+  anything the operator removed, because `cf push` with a manifest never
+  removes a variable the manifest stopped naming.
+  One door per variable: the table refuses every key the manager sets itself,
+  named field or template placeholder. The rest of the names
+  (`IRT_ROOT_LOGGING_LEVEL`, `IRT_DB_SSLMODE`, the keystore group, …) are
+  documentation, not a list in the manager. Secret-looking values are
   accepted: the audit log redacts them by key name
   (`packages/core/audit-log.js`) and the value travels in a file, never on a
   command line, so it does not reach the terminal drawer.
@@ -92,11 +99,23 @@ rest (Docker Hub user, memory, plan, chosen tag, half-finished update) is gone.
 Narrower since 2026-09-14: everything that IS in the app's environment now
 comes back, including variables the manager never knew about (see the
 additional environment variables above). What stays open is what the
-environment does not hold. `DOCKER_USERNAME` is the sharp edge: an update
-re-downloads `vars.yml` with the field empty and `config:writeVars` skips
-empty values, so the updated app pushes without a Docker Hub user and can hit
-the pull rate limit. It is readable from `/v3/apps/<guid>/packages`
-(`data.username`) — the same shape as option (b) below.
+environment does not hold. `DOCKER_USERNAME` is the sharp edge, and it is
+wider than "not persisted": **no screen ever sets it**. `config:writeVars`
+reads `vars.dockerUsername` (`orchestrator.js`, the mutation list), but
+neither the Configuration screen nor the Update form sends that field, so the
+line is dead and `vars.yml` keeps the template's empty value on every push.
+`manifest.yml` therefore resolves `username:` to nothing and every `figaf/app`
+pull is anonymous — exactly what the template's own comment next to
+`DOCKER_USERNAME` exists to prevent ("That helps to avoid the error 'You have
+reached your pull rate limit'"). Anonymous pulls are rated per source IP and a
+Cloud Foundry cell's egress is shared, so a customer can be rate-limited by
+other tenants' traffic with no way to fix it from the manager.
+Not a one-line fix: `cf push` only uses a Docker user when
+`CF_DOCKER_PASSWORD` is in the environment of the push, so the manager would
+have to hold a Docker Hub password — a Credential Store entry and a decision,
+the same shape as option (a) below. The user name itself (never the password)
+should come back from `/v3/apps/<guid>/packages` — worth one `cf curl` to
+confirm the field before building on it.
 The FAID Apps console does not have this problem because a release version env var
 on each app is the whole state.
 Why it matters: "update never silently changes memory, domain, location or

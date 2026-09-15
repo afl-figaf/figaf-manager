@@ -198,17 +198,26 @@ const envReply = (v) => ({
   code: 0,
 });
 
-test("writeVars writes the additional environment rows into the app block of the manifest", async () => {
+test("writeVars writes the named fields and the additional rows into the app block of the manifest", async () => {
   const { handlers, read, lines } = fresh();
   const r = await handlers["config:writeVars"]({
     ...BASE_VARS,
-    additionalEnv: { IRT_ROOT_LOGGING_LEVEL: "DEBUG", ADDITIONAL_IRT_PARAMETERS: "-Dfoo=bar baz" },
+    additionalIrtParameters: "  --irt.some.property=1 --irt.other=2  ",
+    additionalJvmArguments: "-Xss2m",
+    additionalEnv: { IRT_ROOT_LOGGING_LEVEL: "DEBUG" },
   });
   assert.equal(r.ok, true);
-  assert.deepEqual(lines("manifest.yml", /IRT_ROOT_LOGGING_LEVEL|ADDITIONAL_IRT_PARAMETERS/), [
+  // Named fields first (trimmed), then the table.
+  assert.deepEqual(lines("manifest.yml", /ADDITIONAL_|IRT_ROOT_LOGGING_LEVEL/), [
+    "    ADDITIONAL_IRT_PARAMETERS: '--irt.some.property=1 --irt.other=2'",
+    "    ADDITIONAL_JVM_ARGUMENTS: '-Xss2m'",
     "    IRT_ROOT_LOGGING_LEVEL: 'DEBUG'",
-    "    ADDITIONAL_IRT_PARAMETERS: '-Dfoo=bar baz'",
   ]);
+  // An empty named field writes nothing - the variable stays absent.
+  const r3 = await handlers["config:writeVars"]({ ...BASE_VARS, additionalIrtParameters: "   ", additionalJvmArguments: "" });
+  assert.equal(r3.ok, true);
+  assert.deepEqual(lines("manifest.yml", /ADDITIONAL_/), []);
+  assert.deepEqual(r3.env, {});
   // The router's block and the template's own keys are untouched.
   assert.match(read("manifest.yml"), /^    httpHeaders: >$/m);
   assert.match(read("manifest.yml"), /^    LOCATION_ID: \(\(LOCATION_ID\)\)$/m);
@@ -223,7 +232,7 @@ test("writeVars refuses a bad environment row before touching any file", async (
   const { handlers, deployDir } = fresh();
   const r = await handlers["config:writeVars"]({ ...BASE_VARS, additionalEnv: { MAX_RAM_PERCENTAGE: "70" } });
   assert.equal(r.ok, false);
-  assert.match(r.error, /set by the deployment template/);
+  assert.match(r.error, /has its own field/);
   assert.ok(!fs.existsSync(path.join(deployDir, "manifest.yml.template")), "nothing was patched");
 });
 
@@ -291,4 +300,40 @@ test("readCurrentConfig leaves additionalEnv unset when the environment response
   assert.equal(r.ok, true);
   assert.equal(r.partial, true);
   assert.equal("additionalEnv" in r.vars, false);
+});
+
+test("readCurrentConfig fills the named fields and leaves them out of the table", async () => {
+  const { handlers } = fresh();
+  responses = [
+    guidReply,
+    envReply({
+      LOCATION_ID: "loc-1",
+      ADDITIONAL_IRT_PARAMETERS: "--irt.a=1",
+      ADDITIONAL_JVM_ARGUMENTS: "-Xss2m",
+      SOMETHING_BY_HAND: "yes",
+    }),
+  ];
+  const r = await handlers["update:readCurrentConfig"]({ deployId: "figaf-tool" });
+  assert.equal(r.vars.additionalIrtParameters, "--irt.a=1");
+  assert.equal(r.vars.additionalJvmArguments, "-Xss2m");
+  assert.deepEqual(r.vars.additionalEnv, { SOMETHING_BY_HAND: "yes" });
+});
+
+test("update:writeVars unsets a named field the operator cleared, and keeps one that is still set", async () => {
+  const { handlers, lines } = fresh();
+  spawnCalls.length = 0;
+  responses = [
+    guidReply,
+    envReply({ LOCATION_ID: "loc-1", ADDITIONAL_IRT_PARAMETERS: "--irt.a=1", ADDITIONAL_JVM_ARGUMENTS: "-Xss2m" }),
+  ];
+  const r = await handlers["update:writeVars"]({
+    deployId: "figaf-tool",
+    dockerTag: "2409-btp",
+    // The JVM field was emptied on the Update form; the IRT one was changed.
+    vars: { ...BASE_VARS, additionalIrtParameters: "--irt.a=2", additionalJvmArguments: "", additionalEnv: {} },
+  });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.unsetEnv, ["ADDITIONAL_JVM_ARGUMENTS"]);
+  assert.deepEqual(lines("manifest.yml", /ADDITIONAL_/), ["    ADDITIONAL_IRT_PARAMETERS: '--irt.a=2'"]);
+  assert.deepEqual(spawnCalls.filter((c) => c.args[0] === "unset-env").map((c) => c.args[2]), ["ADDITIONAL_JVM_ARGUMENTS"]);
 });

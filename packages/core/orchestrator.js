@@ -570,13 +570,12 @@ function createOrchestrator({ host, send, audit }) {
   // is no longer in the table (gap G1, 2026-09-14). Template-owned keys are
   // never touched. Best effort: the app may already be gone under the
   // "recreate" strategy, and a failed unset must not stop the update.
-  async function unsetRemovedEnv(deployId, additionalEnv) {
-    // No table was sent at all (the live environment could not be read, so the
-    // Update form never showed one): nothing is known to have been removed.
-    // An EMPTY table is different - it means "remove them all".
-    if (additionalEnv == null) return [];
-    const keep = figafToolTemplates.validateEnvRows(additionalEnv);
-    if (!keep.ok) return [];
+  // `keep` is the effective env config:writeVars just wrote (named fields plus
+  // the table), or null when the Update form never received a live environment
+  // and therefore cannot know what was removed. An EMPTY object is different
+  // from null: it means "the app should have none of these left".
+  async function unsetRemovedEnv(deployId, keep) {
+    if (keep == null) return [];
     const appName = `${deployId}-app`;
     const g = await run(resolveCf(), ["app", "--guid", appName], { source: "cf", quiet: true });
     if (g.code !== 0) return [];
@@ -587,7 +586,7 @@ function createOrchestrator({ host, send, audit }) {
     let live = {};
     try { live = (JSON.parse(e.stdout).var) || {}; } catch { return []; }
     const gone = Object.keys(live).filter((k) =>
-      !figafToolTemplates.TEMPLATE_ENV_KEYS.includes(k) && !Object.prototype.hasOwnProperty.call(keep.env, k));
+      !figafToolTemplates.TEMPLATE_ENV_KEYS.includes(k) && !Object.prototype.hasOwnProperty.call(keep, k));
     const removed = [];
     for (const key of gone) {
       // The value is not on the command line, so no masking is needed here.
@@ -2381,10 +2380,11 @@ function createOrchestrator({ host, send, audit }) {
     async "config:writeVars"(vars) {
       const names = figafToolServiceNames(vars);
       if (!names.ok) return names;
-      // The free-form "Additional environment variables" table of the
-      // Configuration screen and the Update form (gap G1, 2026-09-14). Checked
-      // before anything is written, so a bad row changes no file.
-      const extraEnv = figafToolTemplates.validateEnvRows((vars || {}).additionalEnv);
+      // What the app gets beyond the template's own keys (gap G1): the named
+      // fields ADDITIONAL_IRT_PARAMETERS / ADDITIONAL_JVM_ARGUMENTS and the
+      // free-form table. Checked before anything is written, so a bad value
+      // changes no file.
+      const extraEnv = figafToolTemplates.buildAppEnv(vars);
       if (!extraEnv.ok) return { ok: false, error: extraEnv.error };
       const deployDir = await resolveDeployDir();
       const file = path.join(deployDir, "vars.yml");
@@ -2441,7 +2441,7 @@ function createOrchestrator({ host, send, audit }) {
         await fsp.writeFile(path.join(deployDir, "xs-security.json"), xs.text, "utf8");
       }
 
-      return { ok: true, path: file, dbServiceName: names.dbServiceName, xsuaaServiceName: names.xsuaaServiceName };
+      return { ok: true, path: file, dbServiceName: names.dbServiceName, xsuaaServiceName: names.xsuaaServiceName, env: extraEnv.env };
     },
 
     /**
@@ -3180,9 +3180,13 @@ function createOrchestrator({ host, send, audit }) {
         // "the app has none", which makes update:writeVars unset every extra
         // variable it finds. An unreadable response must leave it undefined.
         if (envRead) {
+          for (const field of Object.keys(figafToolTemplates.NAMED_ENV_FIELDS)) {
+            const key = figafToolTemplates.NAMED_ENV_FIELDS[field];
+            if (env[key] != null) vars[field] = String(env[key]);
+          }
           vars.additionalEnv = {};
           for (const key of Object.keys(env)) {
-            if (figafToolTemplates.TEMPLATE_ENV_KEYS.includes(key)) continue;
+            if (figafToolTemplates.MANAGED_ENV_KEYS.includes(key)) continue;
             vars.additionalEnv[key] = env[key] == null ? "" : String(env[key]);
           }
         }
@@ -3280,7 +3284,9 @@ function createOrchestrator({ host, send, audit }) {
       };
       const r = await handlers["config:writeVars"](merged);
       if (!r.ok) return r;
-      const unset = await unsetRemovedEnv(deployId, merged.additionalEnv);
+      // `additionalEnv` absent means readCurrentConfig could not read the live
+      // environment: nothing may be unset, not even a cleared named field.
+      const unset = await unsetRemovedEnv(deployId, merged.additionalEnv == null ? null : r.env);
       writeUpdateState({ deployId, targetImageTag: dockerTag, phase: "vars-written" });
       return { ok: true, path: file, unsetEnv: unset };
     },
