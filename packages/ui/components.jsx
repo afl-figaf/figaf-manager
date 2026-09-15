@@ -412,7 +412,39 @@ function EnvVarTable({ rows, onChange, note }) {
   );
 }
 
+// ───────────── InfoHint / Disclosure ─────────────
+// Two ways to keep a page short without deleting what it knows. The console's
+// pages are dense with consequences that matter exactly once (what a plan
+// costs, what a missing role does to the next sign-in): the one-line version
+// stays visible, the rest goes in here. Nothing is ever dropped.
+
+// A "?" marker that reveals one short explanation on hover or focus. Hover is
+// CSS-driven so it works without JS; the button keeps it keyboard-reachable.
+function InfoHint({ children, label = "More information", align = "start", side = "down", width }) {
+  return (
+    <span className={`infohint align-${align} side-${side}`}>
+      <button type="button" className="infohint-marker" aria-label={label}>?</button>
+      <span className="infohint-pop" role="tooltip" style={width ? { width } : undefined}>{children}</span>
+    </span>
+  );
+}
+
+// Inline reveal for secondary copy that is too long for a popover.
+function Disclosure({ label = "Details", openLabel, defaultOpen = false, children }) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  return (
+    <div className={`disclosure${open ? " is-open" : ""}`}>
+      <button type="button" className="disclosure-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="chev"><Ico.Chev width="10" height="10" /></span>
+        {open ? (openLabel || label) : label}
+      </button>
+      {open && <div className="disclosure-body">{children}</div>}
+    </div>
+  );
+}
+
 Object.assign(window, {
   Ico, FigafMark, WinFrame, StepperRail, WizardFooter, TerminalDrawer, CheckRow, ScrollReveal,
+  InfoHint, Disclosure,
   EnvVarTable, envObjectToRows, envRowsToObject,
 });

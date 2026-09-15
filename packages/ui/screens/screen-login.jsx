@@ -1,4 +1,4 @@
-/* global React, Ico, WizardFooter, ScrollReveal */
+/* global React, Ico, WizardFooter, ScrollReveal, InfoHint */
 
 const fg = () => (typeof window !== "undefined" && window.figaf) || null;
 
@@ -36,9 +36,14 @@ function isValidApiUrl(s) {
 // 2. CLI Login — SSO + passcode
 // ═══════════════════════════════════════════════════════════
 // gate: rendered as the console's auth gate (no wizard wording, no footer).
-// embedded: rendered INSIDE another page (the Setup page): only the cards,
-// no page header - the host page says why the sign-in is needed.
-function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
+// embedded: rendered INSIDE another page: only the cards, no page header -
+// the host page says why the sign-in is needed.
+// band: the Setup page's sign-in band ABOVE the checklist (2026-09-15). Same
+// state and the same card bodies, in two compact rows: a session is a
+// precondition of the installation, not one of its steps. ONE instance owns
+// both CLIs - a second ScreenLogin would subscribe to btp:ssoUrl twice and
+// open the browser twice.
+function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded, band }) {
   const { login } = ctx;
   const setLogin = (patch) => setCtx(c => ({ ...c, login: { ...c.login, ...patch } }));
   const [gaChoice, setGaChoice] = React.useState(null);
@@ -104,7 +109,7 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
   // the BTP login is optional (persistent-SSO role assignment, Figaf Tool
   // deployments). Only while NEITHER login exists - "Add BTP login" from
   // Session & access (CF already signed in) keeps the BTP-first layout.
-  const cfFirst = !!(gate && window.figafModeFlags.features && window.figafModeFlags.features.cfFirstLogin)
+  const cfFirst = !!((gate || band) && window.figafModeFlags.features && window.figafModeFlags.features.cfFirstLogin)
     && !cfLoggedIn && !btpLoggedIn;
   React.useEffect(() => {
     if (cfFirst && !cfOnly && login.btpStatus === "idle") enterCfOnly();
@@ -478,8 +483,7 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
   // The two sign-in cards. Order: BTP first in the wizard and when adding a
   // BTP login to an existing CF session; Cloud Foundry first on the console
   // gate (cfFirst) - the FAID Apps install needs only cf.
-  const btpCard = (
-        <div className="card">
+  const btpHeader = (
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: (btpLoggedIn || gaChoice || subaccountChoice) ? 10 : 14 }}>
             <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--fg-blue-soft)", color: "var(--fg-blue)", display: "grid", placeItems: "center" }}>
               <Ico.Cloud />
@@ -547,6 +551,9 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
               </>
             )}
           </div>
+  );
+  const btpBody = (
+      <>
 
           {!btpLoggedIn && gaChoice && gaChoice.accounts && gaChoice.accounts.length > 0 && (
             <ScrollReveal>
@@ -675,10 +682,15 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
             </div>
             </ScrollReveal>
           )}
+      </>
+  );
+  const btpCard = (
+        <div className="card">
+          {btpHeader}
+          {btpBody}
         </div>
   );
-  const cfCard = (
-        <div className="card" style={{ opacity: cfReady ? 1 : 0.55 }}>
+  const cfHeader = (
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
             <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--fg-blue-soft)", color: "var(--fg-blue)", display: "grid", placeItems: "center" }}>
               <Ico.Box />
@@ -706,6 +718,9 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
               </button>
             )}
           </div>
+  );
+  const cfBody = (
+      <>
 
           {cfReady && !cfLoggedIn && !cfSwitchingOrg && (
             <div className="slide-in">
@@ -971,6 +986,12 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
             </div>
             </ScrollReveal>
           )}
+      </>
+  );
+  const cfCard = (
+        <div className="card" style={{ opacity: cfReady ? 1 : 0.55 }}>
+          {cfHeader}
+          {cfBody}
         </div>
   );
 
@@ -979,6 +1000,79 @@ function ScreenLogin({ ctx, setCtx, onNext, appendLog, gate, embedded }) {
       {cfFirst ? <>{cfCard}{btpCard}</> : <>{btpCard}{cfCard}</>}
     </div>
   );
+
+  // The Setup page's sign-in band: the two CLI sessions, one row each, with
+  // the facts behind them in "?" hints instead of paragraphs. The rows are
+  // only chrome - the forms are cfBody / btpBody, the same ones the cards
+  // render, so no sign-in path is reimplemented here.
+  if (band) {
+    const btpBusy = login.btpStatus === "running";
+    const ghost = { fontSize: 12, padding: "4px 10px" };
+    return (
+      <div className={`signin-gate${cfLoggedIn ? "" : " is-blocking"}`} data-signin-gate="">
+        <div className="signin-head">
+          <span className="signin-head-title">Connect to CF and BTP</span>
+          {cfLoggedIn && <span className="pill green">session ready</span>}
+        </div>
+
+        <div className="signin-row" data-signin="cf">
+          <span className="signin-icon"><Ico.Box /></span>
+          <div className="signin-main">
+            <div className="signin-name">Cloud Foundry CLI<span className="pill blue">required</span></div>
+            {cfLoggedIn && (
+              <div className="signin-purpose">
+                Signed in as <span className="kbd">{login.user || "your user"}</span>
+                {login.org ? <> · target <span className="kbd">{login.org}</span> / <span className="kbd">{login.space}</span></> : null}
+              </div>
+            )}
+          </div>
+          <div className="signin-side">
+            {cfLoggedIn && <span className="pill green">signed in</span>}
+            {cfLoggedIn && !cfSwitchingOrg && (
+              <button className="btn btn-ghost" style={ghost} onClick={switchCfOrg}><Ico.Refresh /> Switch Org</button>
+            )}
+            {cfLoggedIn && <button className="btn btn-ghost" style={ghost} onClick={handleCfLogout}>Sign out</button>}
+          </div>
+          <div className="signin-hint">
+            <InfoHint label="About the Cloud Foundry sign-in" align="end">
+              Runs every <span className="kbd">cf</span> command in your name. A one-time passcode is enough; it
+              expires when the manager restarts — a management user (step 2) makes the sign-in permanent.
+            </InfoHint>
+          </div>
+          {(!cfLoggedIn || cfSwitchingOrg) && <div className="signin-form">{cfBody}</div>}
+        </div>
+
+        <div className="signin-row" data-signin="btp">
+          <span className={`signin-icon${btpLoggedIn ? "" : " is-optional"}`}><Ico.Cloud /></span>
+          <div className="signin-main">
+            <div className="signin-name">SAP BTP CLI<span className="pill gray">optional</span></div>
+            <div className="signin-purpose">
+              {btpLoggedIn
+                ? <>Signed in · subaccount <span className="kbd">{login.subaccountName || login.subaccount || login.subdomain}</span></>
+                : "Not signed in. Step 1 then cannot assign the role collection for you."}
+            </div>
+          </div>
+          <div className="signin-side">
+            {btpLoggedIn && <span className="pill green">signed in</span>}
+            {btpLoggedIn && <button className="btn btn-ghost" style={ghost} onClick={handleLogout}>Sign out</button>}
+            {!btpLoggedIn && btpBusy && <span className="pill blue"><Ico.Spinner /> Connecting…</span>}
+            {!btpLoggedIn && btpBusy && <button className="btn btn-ghost" style={ghost} onClick={cancelBtpLogin}>Cancel</button>}
+            {!btpLoggedIn && !btpBusy && (
+              <button className="btn" data-action="add-btp" onClick={startBtpLogin}>Add BTP login <Ico.External /></button>
+            )}
+          </div>
+          <div className="signin-hint">
+            <InfoHint label="What the BTP login is for" side="up" align="end">
+              Only the automatic role assignment in step 1 and Figaf Tool deployments need it. Without it you add
+              the role collection to your user in the BTP cockpit yourself (subaccount → Security → Users). A login
+              made before the last restart does not count — the manager forgets it on every restart.
+            </InfoHint>
+          </div>
+          {!btpLoggedIn && <div className="signin-form">{btpBody}</div>}
+        </div>
+      </div>
+    );
+  }
 
   // Embedded in another page (the Setup): the cards only.
   if (embedded) return <div className="login-embedded">{cards}</div>;

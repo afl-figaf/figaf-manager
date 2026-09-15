@@ -642,14 +642,38 @@ step model `packages/ui/setup-checklist.js` (pure, unit-tested). It is the
 landing page while the space is not prepared (token mode), the page the
 Continue button of step 1 reloads to, and the page the sign-in gate opens
 when the manager is in XSUAA mode with a Credential Store bound and no
-management user stored. The steps are listed in the install order; the
-current step is expanded with its form or action, done steps are compact and
-green, later steps are compact and gray with the reason ("after step 1").
+management user stored.
+
+The page has two parts (2026-09-15):
+
+1. **The sign-in band** (`ScreenLogin band`), ABOVE the checklist: the two CLI
+   sessions the installation runs on, one row each - Cloud Foundry (`required`)
+   and SAP BTP (`optional`, with what is lost without it). A session is a
+   precondition, not an installation step, so it is no longer inside step 1.
+   Once Cloud Foundry is signed in the band collapses to two status lines
+   (who, which org/space, **Sign out**, **Switch Org**, **Add BTP login**).
+   **Exactly one `ScreenLogin` instance may exist per page**: it owns the state
+   and the event subscriptions of both CLIs, and a second one would subscribe
+   to `btp:ssoUrl` twice and open the browser twice.
+2. **The checklist**, in the install order. Exactly one step is expanded at a
+   time (the current step by default; clicking a header moves it), so the whole
+   installation fits on a screen. A collapsed step is one line with its
+   why-line trimmed to fit; expanding it restores the full why- and when-line
+   and its body. A done step is one line with no chevron - there is nothing
+   left to reveal.
+
+Copy is tiered, never deleted: the one line that decides something stays
+visible, the rest goes into a "?" popover (`InfoHint`) or an inline reveal
+(`Disclosure`) - what a plan costs, what an existing database means for the
+FAID backend, what a missing role does to the next sign-in, which commands
+the run will execute. Both live in `packages/ui/components.jsx`. Every "?" in
+a panel or in the band sits in one reserved right-hand gutter column, so a
+marker never overlays a row's own actions and a text box never runs under one.
 
 | n | step | body when current | done when | blocked until |
 |---|------|-------------------|-----------|---------------|
-| 1 | Prepare the space | token mode without a CF login: the sign-in card (passcode). With a login: service plans, role assignment, **Prepare the space** button, progress rows, success state with **Continue** | XSUAA mode | - |
-| 2 | Management user | form: technical user + password, **Verify & store**; the manager then signs itself in. Link "sign in with a passcode instead" for the failure path (no Credential Store) | stored | step 1; Credential Store binding active |
+| 1 | Prepare the space | service plans (compact rows: name · purpose · state · "?"), role assignment (one line + **Add BTP login** + a reveal), a run-plan line ("N commands · about 4 minutes · offline 30-90 s") whose **Show the commands** reveals the phases, **Prepare the space** button, progress rows once it runs, success state with **Continue**. Without a CF login the step points at the band instead | XSUAA mode | - |
+| 2 | Management user | form: technical user + password, **Verify & store**; the manager then signs itself in. Without a CF login it points at the band for the one-time passcode (the failure path, no Credential Store) | stored | step 1; Credential Store binding active |
 | 3 | Base services | the panel of section 4 (status list, self-refresh every 10 s while creating, repair actions when missing / failed / unbound, **Prepare database access** for the database, section 4.2) | all ready; Credential Store bound and active; database access prepared | step 1 |
 | 4 | Shared backend and first app | button **Open FAID Apps** (Install deploys the shared backend before the app) | platform running | step 3 (all instances ready) |
 | 5 | Figaf tool connection | button **Open Connections** | configured | step 1; binding active |

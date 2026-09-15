@@ -59,14 +59,52 @@ test("setup page: five steps in the install order, step 1 current, the rest done
     // Blocked and done steps show no body: no buttons, no forms.
     await expect(step.locator(".setup-step-body")).toHaveCount(0);
   }
-  // Every open step explains itself (why-line); step 1 names the passcode and the restart.
-  const openSteps = list.locator(".setup-step:not(.is-done)");
-  expect(await list.locator(".setup-why").count()).toBe(await openSteps.count());
+  // 2026-09-15: exactly one step is expanded (the current one) and carries the
+  // why/when lines; every other step is one line with a trimmed summary. Nothing
+  // is dropped - opening a step brings its full why/when back (asserted below).
+  await expect(list.locator(".setup-step.is-expanded")).toHaveCount(1);
+  await expect(list.locator('.setup-step[data-step="prepare"]')).toHaveClass(/is-expanded/);
+  expect(await list.locator(".setup-why").count()).toBe(1);
+  expect(await list.locator(".setup-summary").count()).toBe(await list.locator(".setup-step.is-collapsed").count());
   const prepare = list.locator('.setup-step[data-step="prepare"]');
   await expect(prepare).toContainText("passcode");
   await expect(prepare).toContainText("30-90 s");
   // The rail's Setup entry carries the same count.
   await expect(page.locator('.cnav-item[data-route="setup"] .cnav-sub')).toHaveText(/^\d of 5 done$/);
+  // Opening a blocked step shows what it will need; opening it again closes it.
+  const mgmt = list.locator('.setup-step[data-step="mgmt-user"]');
+  if (!/\bis-done\b/.test((await mgmt.getAttribute("class")) || "")) {
+    await mgmt.locator(".setup-step-head").click();
+    await expect(mgmt).toHaveClass(/is-expanded/);
+    await expect(mgmt.locator(".setup-why")).toHaveCount(1);
+    await expect(prepare).toHaveClass(/is-collapsed/);
+    await mgmt.locator(".setup-step-head").click();
+    await expect(list.locator(".setup-step.is-expanded")).toHaveCount(0);
+  }
+});
+
+test("setup page: the two CLI sign-ins are a band ABOVE the checklist, not a step inside it", async ({ page }) => {
+  await page.goto("/#/setup");
+  // 2026-09-15: a session is a precondition of the installation, not one of its
+  // steps. One ScreenLogin owns both CLIs for the whole page - a second instance
+  // would subscribe to the login events twice and open the browser twice.
+  const band = page.locator('[data-signin-gate=""]');
+  await expect(band).toBeVisible();
+  await expect(band).toContainText("Connect to CF and BTP");
+  await expect(page.locator('[data-setup-page=""] [data-signin-gate=""]')).toHaveCount(0);
+  await expect(page.locator(".setup-step .login-cards")).toHaveCount(0);
+  await expect(page.locator(".signin-gate, .login-embedded")).toHaveCount(1);
+  await expect(band.locator('[data-signin="cf"]')).toContainText("Cloud Foundry CLI");
+  await expect(band.locator('[data-signin="cf"]')).toContainText("required");
+  await expect(band.locator('[data-signin="btp"]')).toContainText("SAP BTP CLI");
+  await expect(band.locator('[data-signin="btp"]')).toContainText("optional");
+  await expect(band.locator('[data-signin="btp"] [data-action="add-btp"]')).toBeVisible();
+  // Every "?" in the band sits in one reserved right-hand gutter, never over a
+  // row's own actions, and never under a text box.
+  const marks = band.locator(".signin-hint .infohint-marker");
+  await expect(marks).toHaveCount(2);
+  const axes = await marks.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().right)));
+  expect(Math.abs(axes[0] - axes[1])).toBeLessThanOrEqual(1);
 });
 
 test("setup step 1 (signed in): asks for the plans and the role assignment BEFORE the run; a dropdown only for a missing instance with a choice; nothing is clicked", async ({ page }) => {
@@ -83,7 +121,9 @@ test("setup step 1 (signed in): asks for the plans and the role assignment BEFOR
   // Three required instances, one row each; the optional PI/PO pair (catalog v4,
   // decision 0011) is ONE group row with a checkbox that is off by default.
   await expect(plans.locator(".setup-plan-row[data-service]")).toHaveCount(3);
-  const pipo = plans.locator('.setup-plan-row[data-service-group="pipo"]');
+  // 2026-09-15: every row is the compact name / purpose / state / "?" grid.
+  await expect(plans.locator(".setup-plan-row.is-compact[data-service]")).toHaveCount(3);
+  const pipo = plans.locator('.setup-option-row[data-service-group="pipo"]');
   await expect(pipo).toHaveCount(1);
   await expect(pipo.locator('input[type="checkbox"]')).not.toBeChecked();
   await expect(pipo).toContainText("figaf-connectivity");
@@ -112,20 +152,37 @@ test("setup step 1 (signed in): asks for the plans and the role assignment BEFOR
     } else {
       expect(dropdowns).toBe(1);                    // free / standard: the person decides
       await expect(row.locator("select")).toHaveValue("free");
-      await expect(row).toContainText(/small limits|paid plan/);
+      // 2026-09-15: what the plan costs moved into the row's "?" - still on the
+      // page, one hover away, instead of a sentence per row.
+      await expect(row.locator(".setup-plan-hint .infohint-pop")).toContainText(/small limits|paid plan|trial account/);
     }
   }
+  // Every "?" in the panel lands on one right-hand axis.
+  const panelMarks = plans.locator(".setup-plan-hint .infohint-marker, .setup-option-hint .infohint-marker");
+  const panelAxes = await panelMarks.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().right)));
+  expect(panelAxes.length).toBeGreaterThanOrEqual(4);
+  for (const x of panelAxes) expect(Math.abs(x - panelAxes[0])).toBeLessThanOrEqual(1);
   const anyChoice = (await plans.locator("select").count()) > 0;
-  await expect(plans).toContainText(anyChoice ? "Plans that cost money are your decision" : "They all exist already");
-  // Role assignment: no BTP login locally - the panel says so and offers it first.
+  await expect(plans).toContainText(anyChoice ? "plans that cost money are your decision" : "They all exist already");
+  // Role assignment: no BTP login locally - one line says so and offers it; the
+  // consequence of skipping it is one click away, not four paragraphs (2026-09-15).
   const role = body.locator('[data-panel="role-assign"]');
   await expect(role).toContainText("no BTP login");
-  await expect(role).toContainText("before the last restart does not count");
-  await expect(role.getByRole("button", { name: "Add BTP login first" })).toBeVisible();
+  await expect(role).toContainText("cannot assign");
+  await expect(role.locator('[data-action="add-btp"]')).toBeVisible();
   await expect(role.locator('input[type="checkbox"]')).toHaveCount(0);
+  await expect(role).not.toContainText("before the last restart does not count");
+  await role.getByRole("button", { name: "What you have to do instead" }).click();
+  await expect(role.locator(".disclosure-body")).toContainText("before the last restart does not count");
+  await expect(role.locator(".disclosure-body")).toContainText("403");
   // The primary button names the consequence. It is NOT clicked.
   await expect(body.getByRole("button", { name: "Prepare the space without role assignment" })).toBeVisible();
-  // The phases of the run are listed up front (no assign-role row without the BTP login).
+  // One line says what the button is about to do; the phases are behind it.
+  const runplan = body.locator('[data-runplan=""]');
+  await expect(runplan).toContainText("commands");
+  await expect(runplan).toContainText("30-90 s");
+  await expect(body.locator(".task-list")).toHaveCount(0);
+  await runplan.getByRole("button", { name: "Show the commands" }).click();
   await expect(body.locator(".task-list .check-row")).toHaveCount(6); // cf target + 5 phases
   await expect(body).toContainText("Prepare the XSUAA instance");
   await expect(body).toContainText("Create the base services");
@@ -274,7 +331,7 @@ test("deep link #/connections opens directly after auto sign-in, with the setup 
   await expect(page.locator('[data-setup-notice=""]')).toContainText("Setup not finished");
 });
 
-test("fresh session, token mode: the Setup opens with the sign-in card INSIDE step 1 - no separate gate page, no wizard wording", async ({ browser }) => {
+test("fresh session, token mode: the Setup opens with the sign-in BAND above the checklist - no separate gate page, no wizard wording", async ({ browser }) => {
   // Keep the claimed auth cookie but drop the wizard-session cookie: the next
   // request mints a fresh server session with no cf login and (locally) no
   // stored user. This is what a new person sees right after the token claim.
@@ -284,15 +341,18 @@ test("fresh session, token mode: the Setup opens with the sign-in card INSIDE st
   await page.goto("/");
   await expect(page.locator("h1.pane-title")).toHaveText("Set up this installation");
   expect(page.url()).toContain("#/setup");
+  // 2026-09-15: the sign-in is the band above the checklist, and step 1 points at
+  // it instead of carrying a login card of its own.
+  const band = page.locator('[data-signin-gate=""]');
+  await expect(band).toBeVisible();
+  await expect(band.locator('[data-signin="cf"]')).toContainText("Cloud Foundry CLI");
+  await expect(band.locator('[data-signin="cf"]')).toContainText("required");
+  await expect(band.getByRole("button", { name: /Get passcode in browser/ })).toBeVisible();
+  await expect(band.locator('[data-signin="btp"]')).toContainText("SAP BTP CLI");
+  await expect(band.locator('[data-signin="btp"]')).toContainText("optional");
   const signin = page.locator('[data-body="prepare-signin"]');
-  await expect(signin).toContainText("First, sign in to Cloud Foundry");
-  const cards = signin.locator(".login-cards > .card");
-  await expect(cards).toHaveCount(2);
-  await expect(cards.nth(0)).toContainText("Cloud Foundry CLI");
-  await expect(cards.nth(0)).toContainText("required");
-  await expect(cards.nth(0).getByRole("button", { name: /Get passcode in browser/ })).toBeVisible();
-  await expect(cards.nth(1)).toContainText("SAP BTP CLI");
-  await expect(cards.nth(1)).toContainText("Optional");
+  await expect(signin).toContainText("Connect to CF and BTP");
+  await expect(signin.locator(".login-cards")).toHaveCount(0);
   await expect(page.getByText("Step 2", { exact: false })).toHaveCount(0);
   await expect(page.getByText("Sign-in method")).toHaveCount(0);
   // Nothing after step 1 is offered.

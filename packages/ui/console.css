@@ -389,3 +389,138 @@
   background: var(--danger-soft, #feecec);
   border-color: var(--danger, #c0392b);
 }
+
+/* ══ Setup page redesign (2026-09-15) ═══════════════════════════════════════
+   The page was long because every consequence was spelled out inline. It now
+   keeps the same facts, tiered: one line stays visible, the rest lives in a
+   "?" popover (InfoHint) or an inline reveal (Disclosure). The two CLI
+   sign-ins moved OUT of step 1 into a band above the checklist - a session is
+   a precondition, not an installation step.
+   Tokens the product never declared but console.css has always used. --line
+   in particular: without it every hairline below was invisible. */
+:root {
+  --line: var(--border);
+  --surface-3: #EEF1F5;
+  --radius-md: 8px;
+  --success-ink: #047857;
+  --ring: 0 0 0 3px var(--fg-blue-soft);
+}
+
+/* ── The "?" marker and its hover popover ───────────────────────────────── */
+.infohint { position: relative; display: inline-flex; vertical-align: baseline; }
+.infohint-marker {
+  appearance: none; width: 15px; height: 15px; padding: 0;
+  border: 1px solid var(--border-strong); border-radius: 50%;
+  background: var(--surface); color: var(--ink-3);
+  font: inherit; font-size: 10px; font-weight: 600; line-height: 1;
+  display: grid; place-items: center; cursor: help; transition: all .14s ease;
+}
+.infohint-marker:hover, .infohint:focus-within .infohint-marker { border-color: var(--fg-blue); color: var(--fg-blue); background: var(--fg-blue-soft); }
+.infohint-marker:focus-visible { outline: none; box-shadow: var(--ring); }
+.infohint-pop {
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0;
+  width: 280px; max-width: 320px; padding: 10px 12px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  background: var(--surface); box-shadow: var(--shadow-md);
+  font-size: 12px; font-weight: 400; line-height: 1.45; color: var(--ink-2); text-align: left;
+  opacity: 0; visibility: hidden; transition: opacity .14s ease; pointer-events: none;
+}
+.infohint.align-end .infohint-pop { left: auto; right: 0; }
+/* side "up" for a marker close to the bottom of a card or a scroll edge. */
+.infohint.side-up .infohint-pop { top: auto; bottom: calc(100% + 6px); }
+.infohint-marker:hover + .infohint-pop, .infohint:focus-within .infohint-pop { opacity: 1; visibility: visible; }
+
+/* ── Inline reveal for copy too long for a popover ──────────────────────── */
+.disclosure { margin-top: 4px; }
+.disclosure-toggle {
+  appearance: none; background: none; border: 0; padding: 0; font: inherit;
+  font-size: 11.5px; font-weight: 500; color: var(--fg-blue); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.disclosure-toggle:hover { text-decoration: underline; }
+.disclosure-toggle .chev { display: inline-flex; transition: transform .2s ease; }
+.disclosure.is-open .disclosure-toggle .chev { transform: rotate(90deg); }
+.disclosure-body { font-size: 12px; color: var(--ink-3); line-height: 1.45; margin-top: 6px; padding-left: 10px; border-left: 1px solid var(--border); }
+.disclosure-body p { margin: 0 0 6px; }
+.disclosure-body p:last-child { margin-bottom: 0; }
+
+/* ── The sign-in band above the checklist ──────────────────────────────────
+   The two CLI sessions the Setup runs on. No overflow:hidden - it would clip
+   an InfoHint popover opening from the last row.
+   --hint-gutter: the "?" marker (15px) plus the grid gap in front of it. One
+   value, used by the row's fourth track and by everything that must stay
+   clear of it or reach back onto it. */
+.signin-gate {
+  --hint-gutter: 27px;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface); margin-bottom: 14px;
+}
+.signin-gate.is-blocking { border-color: rgba(21, 101, 216, 0.35); box-shadow: var(--ring); }
+.signin-head {
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 18px; background: var(--surface-2); border-bottom: 1px solid var(--border);
+}
+.signin-head-title { font-size: 13px; font-weight: 600; color: var(--ink-0); }
+/* Every "?" in the band sits in one right-hand gutter, on a common axis. The
+   gutter is a REAL reserved track, so a marker never overlays a row's own
+   actions. */
+.signin-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) max-content 15px; align-items: start; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--line); }
+.signin-row:first-of-type { border-top: 0; }
+.signin-hint { grid-column: 4; display: flex; justify-content: flex-end; padding-top: 3px; }
+.signin-side { grid-column: 3; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 2px; }
+/* The form is a direct grid child on a second row, spanning the main, action
+   and gutter tracks - nested inside .signin-main it would stop short of the
+   hint axis. Its padding holds the controls OUT of the gutter so a text box
+   ends before the marker column; hints inside are pulled back onto the axis. */
+.signin-form { grid-column: 2 / -1; grid-row: 2; padding-right: var(--hint-gutter); margin-top: 12px; }
+.signin-form .field-label .infohint { margin-left: auto; margin-right: calc(-1 * var(--hint-gutter)); }
+.signin-icon { width: 32px; height: 32px; border-radius: var(--radius-md); background: var(--fg-blue-soft); color: var(--fg-blue); display: grid; place-items: center; }
+.signin-icon.is-optional { background: var(--surface-3); color: var(--ink-3); }
+.signin-main { min-width: 0; }
+.signin-name { font-size: 13px; font-weight: 600; color: var(--ink-0); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.signin-purpose { font-size: 12px; color: var(--ink-3); margin-top: 2px; line-height: 1.45; }
+.signin-gate .field-label { display: flex; align-items: center; gap: 8px; }
+/* The sign-in body comes from ScreenLogin, which wraps it in .card. Inside the
+   band the row IS the card, so the nested chrome is flattened away. */
+.signin-form .login-cards { gap: 0; }
+.signin-form .card { border: 0; padding: 0; background: none; box-shadow: none; opacity: 1 !important; }
+
+/* ── Collapsible step: the title row is the toggle, the body only exists
+      while expanded, exactly one step is open at a time. ────────────────── */
+.setup-step-head { display: flex; align-items: flex-start; gap: 8px; width: 100%; cursor: pointer; user-select: none; }
+.setup-step-head:focus-visible { outline: 2px solid var(--fg-blue); outline-offset: 3px; border-radius: var(--radius-sm); }
+.setup-step.is-static .setup-step-head { cursor: default; }
+.setup-chev { margin-left: auto; flex: 0 0 auto; display: inline-flex; padding-top: 2px; color: var(--ink-4); transition: transform .2s ease; }
+.setup-step.is-expanded .setup-chev { transform: rotate(90deg); color: var(--ink-2); }
+.setup-summary { font-size: 12px; color: var(--ink-3); margin-top: 2px; line-height: 1.45; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.setup-step.is-collapsed { padding: 7px 0; }
+.setup-step.is-collapsed.is-done { opacity: 0.75; }
+
+/* ── Compact plan row: name · one-line purpose · state · hint gutter.
+      The gutter keeps every "?" in a panel on one axis, at the right end. ── */
+.setup-plan-row.is-compact { display: grid; grid-template-columns: minmax(150px, 224px) minmax(0, 1fr) max-content 15px; gap: 4px 12px; align-items: center; padding: 8px 0; }
+.setup-plan-row.is-compact .setup-plan-extra { grid-column: 2 / -1; }
+.setup-plan-hint { display: flex; justify-content: flex-end; }
+.setup-plan-name { font-size: 12.5px; font-family: var(--font-mono); color: var(--ink-1); min-width: 0; }
+.setup-plan-name .input { width: 100%; }
+.setup-plan-purpose { font-size: 12px; color: var(--ink-2); line-height: 1.45; min-width: 0; }
+.setup-plan-state { display: flex; align-items: center; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.setup-plan-state .plan-note { font-size: 12px; color: var(--ink-3); }
+.setup-plan-state .select { width: auto; }
+.setup-plan-extra .setup-plan-error { font-size: 12px; color: var(--error, #b91c1c); }
+
+/* ── An optional group the operator opts into (the PI/PO services). ─────── */
+.setup-option-row { display: grid; grid-template-columns: 16px 1fr 15px; gap: 4px 10px; padding: 10px 0 4px; border-top: 1px solid var(--line); align-items: center; }
+.setup-option-hint { display: flex; justify-content: flex-end; }
+.setup-option-row > input { margin: 0; }
+.setup-option-title { font-size: 13px; font-weight: 600; color: var(--ink-0); cursor: pointer; }
+.setup-option-sub { grid-column: 2 / -1; font-size: 12px; color: var(--ink-3); line-height: 1.45; }
+/* A hint on a plain panel line lands on the same axis. */
+.setup-panel > .setup-hint-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.setup-panel > .setup-hint-line > .infohint { margin-left: auto; }
+
+/* ── Run plan: what the primary button is about to do, in one line. ─────── */
+.setup-runplan { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); font-size: 12px; color: var(--ink-2); }
+.setup-runplan strong { color: var(--ink-0); font-weight: 600; }
+.setup-runplan .spacer { flex: 1; }
