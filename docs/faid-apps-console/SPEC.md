@@ -410,6 +410,18 @@ binding is missing (failure path of step 1). Before step 1 the panel is
 blocked; nothing on it can restart the manager in token mode. FAID Apps
 shows only a one-line status of the instances with a link to the Setup.
 
+Shape (2026-09-16): the panel is a `setup-panel` like step 1's, with a head row
+(title, state pill, **Refresh**, **Create missing services**, the guide) and one
+grid for every row - required and optional - so name, purpose, state and actions
+line up down the panel (`display: contents` per row; see `.setup-svc-list` in
+`console.css`). It carries exactly ONE `InfoHint size="lg"`: a guide that takes
+every element of the panel in turn (what each button runs, what each status and
+access value means, what other apps bound to the database imply, what the PI/PO
+instances share) instead of a paragraph under each row. What stays visible on a
+row is what is true of THIS space only - which apps are bound, a stale entry and
+its reason, the Credential Store entry in use - plus the two things a person
+must read before acting: the drop confirmation and the restart warning.
+
 ### 4.2 The database: the backend's own role, an editable instance name
 
 Why (figaf-faid decision 0012 section 10; the plan was

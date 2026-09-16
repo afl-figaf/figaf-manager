@@ -1,4 +1,4 @@
-/* global React, Ico */
+/* global React, Ico, InfoHint */
 
 // ═══════════════════════════════════════════════════════════
 // FAID Apps manager — catalog dashboard
@@ -493,6 +493,56 @@ const FAID_DB_ACCESS_META = {
   "unknown":      { label: "access unknown",      cls: "gray" },
 };
 
+// ── Setup step 3: Base services. Same shape as step 1 (a setup-panel with a
+// head row and compact rows: name · purpose · state · actions). ONE "?" for the
+// whole panel: every element of it is explained in there, element by element,
+// instead of a paragraph under each row. Nothing was dropped - the facts that
+// belong to THIS space (which apps are bound, a stale entry, the entry's
+// instance) stay on the row; the explanations that are the same for everyone
+// live in the guide.
+function BaseServicesGuide({ ssoMode, hasOptional, hasOwnRole }) {
+  return (
+    <dl className="infohint-guide">
+      <dt>Base services</dt>
+      <dd>The service instances the Figaf Platform needs in this space. The manager creates them with plain <span className="kbd">cf create-service</span>; a plan that costs money is your choice, never the manager's.</dd>
+      <dt>Create missing services</dt>
+      <dd>Runs <span className="kbd">cf create-service</span> for every instance marked <em>Missing</em>, with the plan shown next to it. PostgreSQL takes minutes and keeps being created in the background.</dd>
+      <dt>Status</dt>
+      <dd><em>Ready</em>, <em>Missing</em>, <em>Creating…</em> or <em>Failed</em>, read from Cloud Foundry. While something is being created this panel refreshes itself every 10 seconds.</dd>
+      {!ssoMode && (
+        <>
+          <dt>Before step 1</dt>
+          <dd data-token-mode-note="">Nothing on this panel restarts the manager yet: in token mode a restart would cost a new setup token. Step 1 (Prepare the space) creates the instances and binds them to the manager itself.</dd>
+        </>
+      )}
+      <dt>Bind to manager</dt>
+      <dd>The Credential Store has to be bound to the manager. A binding only reaches the app after a restart, so a bound instance can still show <em>restart needed</em>.</dd>
+      {hasOwnRole && (
+        <>
+          <dt>access prepared / not prepared / stale</dt>
+          <dd>Only the database has this. The FAID backend connects with its own role <span className="kbd">faid_app</span>, limited to schema <span className="kbd">faid</span>; the instance itself is never bound to a FAID app. <em>Stale</em> means the stored entry no longer matches the instance.</dd>
+          <dt>Prepare database access</dt>
+          <dd>Creates the role <span className="kbd">faid_app</span> and the schema <span className="kbd">faid</span> on the instance and writes the Credential Store entry <span className="kbd">figaf-faid/backend-database</span>. <em>Prepare again</em> runs the same SQL; it is idempotent and keeps the password.</dd>
+          <dt>Rotate password</dt>
+          <dd>A new password for <span className="kbd">faid_app</span>. The entry is updated, and a shared backend that is already deployed is restarted so it reads the new one.</dd>
+          <dt>Drop the FAID schema</dt>
+          <dd>Deletes every FAID Apps table in the instance. The Figaf Tool's own data is not touched. A deployed shared backend fails at its next start until the access is prepared again.</dd>
+          <dt>Bound today</dt>
+          <dd>Other apps bound to this PostgreSQL instance. Each of them runs as <span className="kbd">dbo</span> and keeps full access, including schema <span className="kbd">faid</span>. One backup and restore point for everything in the instance; plan, connection limit and engine version are shared.</dd>
+        </>
+      )}
+      {hasOptional && (
+        <>
+          <dt>Optional: on-premise PI/PO</dt>
+          <dd>SAP PI and PO systems are reached through the SAP Cloud Connector; these two free instances make that possible. They are SHARED with the Figaf tool: an instance that already exists is reused, never replaced, configured or deleted.</dd>
+          <dt>Bind to backend &amp; restart backend</dt>
+          <dd>The shared backend binds these when it is installed, so on a fresh install there is nothing to do here. Only an instance created AFTER the backend was installed needs this button: a binding reaches an app only after a restart, so it does both (about 30-60 s of downtime for the FAID Apps; the manager itself is not restarted).</dd>
+        </>
+      )}
+    </dl>
+  );
+}
+
 function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform, onRestart, onRefresh, onDatabasePrepare, onDatabaseRotate, onDatabaseDrop }) {
   const api = typeof window !== "undefined" ? window.figaf : null;
   const [plans, setPlans] = React.useState({});
@@ -520,8 +570,8 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform,
 
   if (services === null) {
     return (
-      <div style={{ border: "1px dashed var(--line)", borderRadius: 10, padding: 12, marginBottom: 14, color: "var(--ink-3)" }}>
-        Checking base services…
+      <div className="setup-panel" data-panel="base-services">
+        <div style={{ color: "var(--ink-3)", fontSize: 13 }}>Checking base services…</div>
       </div>
     );
   }
@@ -533,15 +583,19 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform,
   const required = services.filter((s) => !s.optional);
   const optional = services.filter((s) => s.optional);
   const missing = required.filter((s) => s.status === "missing");
+  const creating = required.filter((s) => s.status === "in-progress");
   const allReady = required.every((s) => s.status === "ready");
   const credstore = required.find((s) => s.bindToManager);
 
   return (
-    <div style={{ border: "1px dashed var(--line)", borderRadius: 10, padding: 12, marginBottom: 14 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 700 }}>Base services</div>
-        {allReady ? <span className="pill green">all ready</span> : <span className="pill gray">{missing.length} missing</span>}
-        <div className="spacer" style={{ flex: 1 }} />
+    <div className="setup-panel" data-panel="base-services">
+      <div className="setup-panel-head">
+        <div className="setup-panel-title">Base services</div>
+        {allReady ? <span className="pill green">all ready</span>
+          : missing.length ? <span className="pill gray">{missing.length} missing</span>
+          : creating.length ? <span className="pill blue">creating…</span>
+          : <span className="pill gray">not ready</span>}
+        <span className="spacer" />
         <button className="btn" onClick={onRefresh} disabled={busy}>Refresh</button>
         <button
           className="btn btn-primary"
@@ -551,15 +605,13 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform,
         >
           {busy === "provision" ? "Creating… (PostgreSQL takes minutes)" : `Create missing services${missing.length ? ` (${missing.length})` : ""}`}
         </button>
+        <InfoHint size="lg" align="end" label="What everything on this panel means">
+          <BaseServicesGuide ssoMode={ssoMode} hasOptional={optional.length > 0}
+            hasOwnRole={required.some((s) => s.access === "own-role")} />
+        </InfoHint>
       </div>
-      <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>
-        Service instances the Figaf Platform needs in the space. Created by the manager with plain
-        <span className="kbd">cf create-service</span>; plans that cost money are your choice.
-        {!ssoMode && (
-          <span data-token-mode-note=""> Before step 1 (Prepare the space) nothing here restarts the manager: that step creates the
-          instances and binds them to the manager itself.</span>
-        )}
-      </div>
+
+      <div className="setup-svc-list">
       {required.map((s) => {
         const meta = FAID_SERVICE_STATUS_META[s.status] || FAID_SERVICE_STATUS_META.unknown;
         const own = s.access === "own-role";
@@ -568,78 +620,81 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform,
         const instanceName = s.instanceName || s.name;
         const typedName = dbName != null ? dbName : instanceName;
         const canEditName = own && !!s.nameEditable && !access.prepared;
+        const boundApps = own && s.status !== "missing" ? (s.boundApps || []).filter(Boolean) : [];
+        // Facts about THIS space, not explanations: they stay on the row.
+        const hasFacts = own && (boundApps.length > 0 || access.prepared ||
+          ((access.state === "stale" || access.state === "unknown") && access.reason));
         return (
-          <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid var(--line)", marginTop: 7, flexWrap: "wrap" }} data-service-row={s.name} data-database-access={own ? access.state : undefined}>
-            {canEditName ? (
-              <input className="input is-mono" data-instance-name={s.name} value={typedName} disabled={!!busy} spellCheck={false} style={{ width: 200 }}
-                title="The PostgreSQL instance the FAID backend uses (default figaf-db)" onChange={(e) => setDbName(e.target.value)} />
-            ) : (
-              <span className="kbd">{instanceName}</span>
-            )}
-            <span className={`pill ${meta.cls}`}>{meta.label}</span>
-            {own && <span className={`pill ${accessMeta.cls}`} data-access-pill="">{accessMeta.label}</span>}
-            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
-              {s.offering} · {s.status === "missing" && s.plans.length > 1 ? "plan:" : `plan ${s.actualPlan || s.plan}`}
-            </span>
-            {s.status === "missing" && s.plans.length > 1 && (
-              <select
-                className="select"
-                value={plans[s.name] || s.plan}
-                disabled={!!busy}
-                onChange={(e) => setPlans((p) => ({ ...p, [s.name]: e.target.value }))}
-                style={{ width: "auto" }}
-              >
-                {s.plans.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            )}
-            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.purpose}</span>
-            <div className="spacer" style={{ flex: 1 }} />
-            {s.bindToManager && s.status === "ready" && s.boundToManager === false && ssoMode && (
-              <button className="btn" onClick={() => onBind(s.name)} disabled={!!busy}>
-                {busy === "bind" ? "Binding…" : "Bind to manager"}
-              </button>
-            )}
-            {s.bindToManager && s.status === "ready" && s.boundToManager === false && !ssoMode && (
-              <span style={{ fontSize: 12, color: "var(--ink-3)" }} data-gated="bind">bound by step 1 (Prepare the space)</span>
-            )}
-            {s.bindToManager && s.status === "ready" && s.boundToManager === true && bindingLive === false && (
-              <span style={{ fontSize: 12, color: "var(--ink-3)" }}>bound · restart needed</span>
-            )}
-            {s.bindToManager && s.status === "ready" && s.boundToManager === true && bindingLive === true && (
-              <span className="pill green">bound to manager</span>
-            )}
-            {own && s.status === "ready" && !access.prepared && ssoMode && onDatabasePrepare && (
-              <button className="btn btn-primary" data-action="database-prepare" disabled={!!busy}
-                title={`cf create-service-key ${typedName} <temporary>, SQL as the owner, verification as faid_app, Credential Store entry, cf delete-service-key`}
-                onClick={() => onDatabasePrepare(String(typedName || "").trim())}>
-                {busy === "database-prepare" ? "Preparing…" : "Prepare database access"}
-              </button>
-            )}
-            {own && s.status === "ready" && !access.prepared && !ssoMode && (
-              <span style={{ fontSize: 12, color: "var(--ink-3)" }} data-gated="database-prepare">access prepared after step 1 (needs the Credential Store binding)</span>
-            )}
-            {own && access.prepared && ssoMode && onDatabasePrepare && (
-              <button className="btn" data-action="database-prepare-again" disabled={!!busy} title="Runs the same SQL again (idempotent); the password is kept"
-                onClick={() => onDatabasePrepare(instanceName)}>{busy === "database-prepare" ? "Preparing…" : "Prepare again"}</button>
-            )}
-            {own && access.prepared && ssoMode && onDatabaseRotate && (
-              <button className="btn" data-action="database-rotate" disabled={!!busy} title="New password for faid_app; the entry is updated; the shared backend is restarted when deployed"
-                onClick={onDatabaseRotate}>{busy === "database-rotate" ? "Rotating…" : "Rotate password"}</button>
-            )}
-            {own && access.prepared && ssoMode && onDatabaseDrop && !confirmDrop && (
-              <button className="btn" data-action="database-drop" disabled={!!busy} onClick={() => setConfirmDrop(true)}>Drop the FAID schema…</button>
-            )}
-            {own && (
-              <div style={{ width: "100%", fontSize: 12, color: "var(--ink-3)" }} data-database-note="">
-                The FAID backend connects as <span className="kbd">faid_app</span>, limited to schema <span className="kbd">faid</span>; the instance is never bound to a FAID app.
-                {s.status !== "missing" && (s.boundApps || []).length > 0 && <> Bound today: <strong>{s.boundApps.join(", ")}</strong> - every bound app runs as <span className="kbd">dbo</span> with full access, including schema <span className="kbd">faid</span>; one backup and restore point for everything in this instance.</>}
-                {access.state === "stale" && access.reason && <> <strong>Entry stale:</strong> {access.reason}.</>}
-                {access.state === "unknown" && access.reason && <> ({access.reason})</>}
-                {access.prepared && <> Entry <span className="kbd">figaf-faid/backend-database</span> for instance <span className="kbd">{access.instanceName}</span>.</>}
+          <div key={s.name} className="setup-svc-row" data-service-row={s.name} data-database-access={own ? access.state : undefined}>
+            <div className="setup-plan-name">
+              {canEditName ? (
+                <input className="input is-mono" data-instance-name={s.name} value={typedName} disabled={!!busy} spellCheck={false}
+                  title="The PostgreSQL instance the FAID backend uses (default figaf-db)" onChange={(e) => setDbName(e.target.value)} />
+              ) : instanceName}
+            </div>
+            <div className="setup-plan-purpose">{s.purpose}</div>
+            <div className="setup-plan-state">
+              <span className={`pill ${meta.cls}`}>{meta.label}</span>
+              {own && <span className={`pill ${accessMeta.cls}`} data-access-pill="">{accessMeta.label}</span>}
+              {s.status === "missing" && s.plans.length > 1 ? (
+                <select
+                  className="select"
+                  value={plans[s.name] || s.plan}
+                  disabled={!!busy}
+                  onChange={(e) => setPlans((p) => ({ ...p, [s.name]: e.target.value }))}
+                >
+                  {s.plans.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              ) : <span className="plan-note">plan {s.actualPlan || s.plan}</span>}
+            </div>
+            <div className="setup-svc-actions">
+              {s.bindToManager && s.status === "ready" && s.boundToManager === false && ssoMode && (
+                <button className="btn" onClick={() => onBind(s.name)} disabled={!!busy}>
+                  {busy === "bind" ? "Binding…" : "Bind to manager"}
+                </button>
+              )}
+              {s.bindToManager && s.status === "ready" && s.boundToManager === false && !ssoMode && (
+                <span className="setup-svc-note" data-gated="bind">bound by step 1</span>
+              )}
+              {s.bindToManager && s.status === "ready" && s.boundToManager === true && bindingLive === false && (
+                <span className="setup-svc-note">bound · restart needed</span>
+              )}
+              {s.bindToManager && s.status === "ready" && s.boundToManager === true && bindingLive === true && (
+                <span className="pill green">bound to manager</span>
+              )}
+              {own && s.status === "ready" && !access.prepared && ssoMode && onDatabasePrepare && (
+                <button className="btn btn-primary" data-action="database-prepare" disabled={!!busy}
+                  title={`cf create-service-key ${typedName} <temporary>, SQL as the owner, verification as faid_app, Credential Store entry, cf delete-service-key`}
+                  onClick={() => onDatabasePrepare(String(typedName || "").trim())}>
+                  {busy === "database-prepare" ? "Preparing…" : "Prepare database access"}
+                </button>
+              )}
+              {own && s.status === "ready" && !access.prepared && !ssoMode && (
+                <span className="setup-svc-note" data-gated="database-prepare">prepared after step 1</span>
+              )}
+              {own && access.prepared && ssoMode && onDatabasePrepare && (
+                <button className="btn" data-action="database-prepare-again" disabled={!!busy} title="Runs the same SQL again (idempotent); the password is kept"
+                  onClick={() => onDatabasePrepare(instanceName)}>{busy === "database-prepare" ? "Preparing…" : "Prepare again"}</button>
+              )}
+              {own && access.prepared && ssoMode && onDatabaseRotate && (
+                <button className="btn" data-action="database-rotate" disabled={!!busy} title="New password for faid_app; the entry is updated; the shared backend is restarted when deployed"
+                  onClick={onDatabaseRotate}>{busy === "database-rotate" ? "Rotating…" : "Rotate password"}</button>
+              )}
+              {own && access.prepared && ssoMode && onDatabaseDrop && !confirmDrop && (
+                <button className="btn btn-danger" data-action="database-drop" disabled={!!busy} onClick={() => setConfirmDrop(true)}>Drop the FAID schema…</button>
+              )}
+            </div>
+            {hasFacts && (
+              <div className="setup-svc-extra" data-database-note="">
+                {boundApps.length > 0 && <>Bound today: <strong>{boundApps.join(", ")}</strong> — each runs as <span className="kbd">dbo</span> with full access. </>}
+                {access.state === "stale" && access.reason && <><strong>Entry stale:</strong> {access.reason}. </>}
+                {access.state === "unknown" && access.reason && <>({access.reason}) </>}
+                {access.prepared && <>Entry <span className="kbd">figaf-faid/backend-database</span> for <span className="kbd">{access.instanceName}</span>.</>}
               </div>
             )}
             {own && confirmDrop && (
-              <div style={{ width: "100%", padding: 10, border: "1px solid var(--line)", borderRadius: 8, fontSize: 13 }} data-confirm="database-drop">
+              // A destructive confirmation: it stays spelled out in full.
+              <div className="setup-svc-extra setup-svc-box" data-confirm="database-drop">
                 <strong>Drop schema faid and role faid_app on {instanceName}?</strong> Every table of the FAID Apps in this instance is deleted; the
                 Figaf Tool's data is not touched. A deployed shared backend fails at its next start until you prepare the access again.
                 <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
@@ -651,69 +706,66 @@ function BaseServicesCard({ services, busy, onProvision, onBind, onBindPlatform,
           </div>
         );
       })}
+
       {optional.length > 0 && (
-        <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)" }} data-optional-services="">
-          <div style={{ fontWeight: 600, fontSize: 13 }}>Optional: on-premise PI/PO systems</div>
-          <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
-            SAP PI and PO systems are reached through the SAP Cloud Connector. These two free instances make that
-            possible, and they are SHARED with the Figaf tool: an instance that already exists is reused, never
-            replaced. The shared backend binds them when it is installed, so on a fresh install there is nothing
-            to do here. Only an instance created AFTER the backend was installed needs
-            <strong>Bind to backend &amp; restart backend</strong>: a binding reaches an app only after a restart,
-            so the button does both (about 30-60 s of downtime for the FAID Apps; the manager itself is not restarted).
-          </div>
+        <div className="setup-svc-group" data-optional-services="">
+          <div className="setup-svc-sub-title">Optional: on-premise PI/PO systems</div>
           {optional.map((s) => {
             const meta = FAID_SERVICE_STATUS_META[s.status] || FAID_SERVICE_STATUS_META.unknown;
             return (
-              <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid var(--line)", marginTop: 7, flexWrap: "wrap" }} data-optional-service={s.name}>
-                <span className="kbd">{s.name}</span>
-                <span className={`pill ${meta.cls}`}>{meta.label}</span>
-                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.offering} - plan {s.plan}</span>
-                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.purpose}</span>
-                {s.sharedWith === "figaf-tool" && <span className="pill gray">shared with the Figaf tool</span>}
-                <div className="spacer" style={{ flex: 1 }} />
-                {s.status === "missing" && (
-                  <button
-                    className="btn"
-                    disabled={!!busy}
-                    title={`cf create-service ${s.offering} ${s.plan} ${s.name}`}
-                    onClick={() => onProvision(plans, [s.name])}
-                  >
-                    {busy === "provision" ? "Creating…" : "Create"}
-                  </button>
-                )}
-                {s.status === "ready" && s.backendDeployed === false && (
-                  <span style={{ fontSize: 12, color: "var(--ink-3)" }} data-gated="bind-platform">bound automatically when the platform is installed</span>
-                )}
-                {s.status === "ready" && s.backendDeployed === true && s.boundToBackend === true && (
-                  <span className="pill green">bound to backend</span>
-                )}
-                {s.status === "ready" && s.backendDeployed === true && s.boundToBackend !== true && onBindPlatform && (
-                  <button
-                    className="btn"
-                    disabled={!!busy}
-                    title={`cf bind-service <shared backend> ${s.name}, then cf restart <shared backend>`}
-                    onClick={() => onBindPlatform(s.name)}
-                  >
-                    {busy === "bind-platform" ? "Binding…" : "Bind to backend & restart backend"}
-                  </button>
-                )}
+              <div key={s.name} className="setup-svc-row" data-optional-service={s.name}>
+                <div className="setup-plan-name">{s.name}</div>
+                <div className="setup-plan-purpose">{s.purpose}</div>
+                <div className="setup-plan-state">
+                  <span className={`pill ${meta.cls}`}>{meta.label}</span>
+                  {s.sharedWith === "figaf-tool" && <span className="pill gray">shared</span>}
+                  <span className="plan-note">plan {s.plan}</span>
+                </div>
+                <div className="setup-svc-actions">
+                  {s.status === "missing" && (
+                    <button
+                      className="btn"
+                      disabled={!!busy}
+                      title={`cf create-service ${s.offering} ${s.plan} ${s.name}`}
+                      onClick={() => onProvision(plans, [s.name])}
+                    >
+                      {busy === "provision" ? "Creating…" : "Create"}
+                    </button>
+                  )}
+                  {s.status === "ready" && s.backendDeployed === false && (
+                    <span className="setup-svc-note" data-gated="bind-platform">bound with the platform</span>
+                  )}
+                  {s.status === "ready" && s.backendDeployed === true && s.boundToBackend === true && (
+                    <span className="pill green">bound to backend</span>
+                  )}
+                  {s.status === "ready" && s.backendDeployed === true && s.boundToBackend !== true && onBindPlatform && (
+                    <button
+                      className="btn"
+                      disabled={!!busy}
+                      title={`cf bind-service <shared backend> ${s.name}, then cf restart <shared backend>`}
+                      onClick={() => onBindPlatform(s.name)}
+                    >
+                      {busy === "bind-platform" ? "Binding…" : "Bind to backend & restart backend"}
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
       )}
+      </div>
+
       {credstore && credstore.boundToManager === true && bindingLive === false && !ssoMode && (
-        <div style={{ marginTop: 10, padding: 10, border: "1px solid var(--line)", borderRadius: 8, fontSize: 13 }} data-gated="restart">
-          <strong>Binding not active yet.</strong> It becomes active with the restart at the end of step 1
-          (Prepare the space). No separate restart here: in token mode a restart would cost a new setup token.
+        <div className="setup-svc-box" data-gated="restart">
+          <strong>Binding not active yet.</strong> It becomes active with the restart at the end of step 1 (Prepare the space).
         </div>
       )}
       {credstore && credstore.boundToManager === true && bindingLive === false && ssoMode && (
-        <div style={{ marginTop: 10, padding: 10, border: "1px solid var(--line)", borderRadius: 8, fontSize: 13 }}>
-          <strong>Restart needed.</strong> The Credential Store is bound to the manager, but a binding only
-          becomes active after a restart. The restart ends this session; reload the page in about 30
-          seconds and sign in again with SAP IAS.
+        <div className="setup-svc-box">
+          {/* A restart ends the session: the cost stays spelled out, not in a hint. */}
+          <strong>Restart needed.</strong> The Credential Store is bound, but a binding only becomes active after a
+          restart. The restart ends this session — reload in about 30 seconds and sign in again with SAP IAS.
           {!confirmRestart ? (
             <div style={{ marginTop: 8 }}>
               <button className="btn" onClick={() => setConfirmRestart(true)} disabled={!!busy}>Restart manager…</button>

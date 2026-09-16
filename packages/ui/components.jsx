@@ -420,9 +420,12 @@ function EnvVarTable({ rows, onChange, note }) {
 
 // A "?" marker that reveals one short explanation on hover or focus. Hover is
 // CSS-driven so it works without JS; the button keeps it keyboard-reachable.
-function InfoHint({ children, label = "More information", align = "start", side = "down", width }) {
+// size="lg": one marker that is a reference for a whole panel (element by
+// element) rather than a note about one field - bigger, wider, scrollable,
+// and it stays open while the pointer is inside it.
+function InfoHint({ children, label = "More information", align = "start", side = "down", width, size }) {
   return (
-    <span className={`infohint align-${align} side-${side}`}>
+    <span className={`infohint align-${align} side-${side}${size ? ` is-${size}` : ""}`}>
       <button type="button" className="infohint-marker" aria-label={label}>?</button>
       <span className="infohint-pop" role="tooltip" style={width ? { width } : undefined}>{children}</span>
     </span>
