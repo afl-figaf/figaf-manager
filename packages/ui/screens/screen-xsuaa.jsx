@@ -471,12 +471,17 @@ function ScreenXsuaaUpgrade({ ctx, setCtx, onNext, onBack, setStep, STEPS }) {
   }, [outcome && outcome.managerMode === "xsuaa" ? "done" : (outcome ? "polling" : "idle")]);
 
   // Manual reboot — explicit user click after seeing the success state.
-  // window.location is sufficient: the page reloads against the public route,
-  // which is now served by the approuter; the approuter sees no XSUAA cookie
-  // and triggers an IAS sign-in. The new JWT includes the scope (assuming
-  // assignment succeeded or was done manually beforehand).
+  // The page must RELOAD against the public route, which is now served by the
+  // approuter; the approuter sees no XSUAA cookie and triggers an IAS sign-in.
+  // The new JWT includes the scope (assuming assignment succeeded or was done
+  // manually beforehand). Assigning window.location.href alone does not reload:
+  // the target differs from the current URL only in the fragment, which the
+  // browser handles inside the same document (verified in Chromium/Edge).
   function continueToWizard() {
-    try { window.location.href = "/#/session"; } catch (_) { /* defensive */ }
+    try {
+      window.location.hash = "#/session";
+      window.location.reload();
+    } catch (_) { /* defensive */ }
   }
 
   // Manual reboot via the assign-role fallback screen — the operator who
@@ -813,9 +818,12 @@ function ScreenXsuaaAssignRole({ ctx, setCtx, onNext, onBack }) {
   }
 
   // Manual reboot from this fallback screen too — same target as the
-  // upgrade screen's Continue button.
+  // upgrade screen's Continue button, and reloaded for the same reason.
   function continueToWizard() {
-    try { window.location.href = "/#/session"; } catch (_) {}
+    try {
+      window.location.hash = "#/session";
+      window.location.reload();
+    } catch (_) {}
   }
 
   return (

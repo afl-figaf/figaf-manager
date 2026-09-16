@@ -579,6 +579,19 @@ everything it needs; the run itself needs no input.
 | Hand off public route | `cf:mapRoute` | the approuter takes the public hostname |
 | Restart manager | `cf:restage` | bind the manager to the instance, unmap its public route, `cf restage` once (30-90 s); the page polls `/_manager-health` until `mode: "xsuaa"`, then **Continue** reloads `/#/setup` |
 
+**Continue is a full page load** (`location.hash` + `location.reload()`).
+Assigning `location.href = "/#/setup"` is not: the page is already on that
+hash, so the browser keeps the same document and nothing happens - the button
+looked dead while the installation was fine (2026-09-16). Only a real
+navigation goes through the approuter and its SAP IAS sign-in.
+
+**The run survives leaving the page** (2026-09-16). It is one promise over the
+RPC surface and nothing cancels it, so its state (phases, error, result) lives
+in the console's `ctx` (`ctx.prepareSpace`, seeded in `app.jsx`), not in the
+step component, which is unmounted as soon as another page is opened. Coming
+back to `#/setup` shows the phase the run has reached; while it runs, the
+Cloud Foundry target is not probed again.
+
 Result: one setup token, one passcode, one restart, no silent plan choice.
 After the IAS sign-in the Setup page opens on step 2 (management user). The
 role must be assigned (automatically, or by hand in the cockpit) before the

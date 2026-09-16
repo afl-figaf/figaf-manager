@@ -143,6 +143,10 @@ function App() {
       ],
       sso: { status: "idle", url: null, alias: null, error: null },
     },
+    // Setup step 1, "Prepare the space" (screen-setup-page.jsx). Here and not
+    // in the step component: the run keeps going when the person leaves
+    // #/setup, so coming back must still show the phases it is on.
+    prepareSpace: { started: false, phases: [], error: null, outcome: null },
     // Self-update — wizard's own update banner / pre-flight modal state.
     // Populated by update:checkSelf in PR 5 and the preflight modal in PR 2.
     selfUpdate: {

@@ -16,6 +16,10 @@
 const fgSetup = () => (typeof window !== "undefined" && window.figaf) || null;
 const setupXsuaaMode = () => typeof window !== "undefined" && window.figafXsuaaMode === true;
 
+// Step 1's run state (ctx.prepareSpace). Here as a fallback only: app.jsx
+// seeds it. See PrepareSpaceStep for why it does not live in the component.
+const EMPTY_PREPARE = { started: false, phases: [], error: null, outcome: null };
+
 // Short, factual notes per plan. The catalog names the plans; the manager
 // never picks a paid plan by itself.
 const PLAN_NOTES = {
@@ -330,11 +334,24 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, servicesError, onS
   const [precheck, setPrecheck] = React.useState(null);
   const [autoAssign, setAutoAssign] = React.useState(false);
   const [assignTo, setAssignTo] = React.useState("");
-  const [spaceCheck, setSpaceCheck] = React.useState({ status: "checking", data: null, error: null });
-  const [phases, setPhases] = React.useState([]);
-  const [started, setStarted] = React.useState(false);
-  const [error, setError] = React.useState(null);
-  const [outcome, setOutcome] = React.useState(null); // result of the run + managerMode
+  // The run (phases, error, outcome) lives in ctx, NOT in this component. The
+  // console renders one page at a time, so leaving #/setup unmounts this step
+  // while the run keeps going - it is one promise over the RPC surface, and
+  // nothing cancels it. ctx belongs to <App/> and survives the route change,
+  // so coming back shows the live phases instead of an empty step.
+  const prep = ctx.prepareSpace || EMPTY_PREPARE;
+  const { phases, started, error, outcome } = prep;
+  const patchPrep = React.useCallback((patch) => {
+    setCtx((c) => {
+      const cur = c.prepareSpace || EMPTY_PREPARE;
+      return { ...c, prepareSpace: { ...cur, ...(typeof patch === "function" ? patch(cur) : patch) } };
+    });
+  }, [setCtx]);
+  // A started run verified the target before it began, so a remount mid-run
+  // keeps that answer instead of probing again (the probe would fail while
+  // the manager is restaging).
+  const [spaceCheck, setSpaceCheck] = React.useState(() =>
+    prep.started ? { status: "ok", data: null, error: null } : { status: "checking", data: null, error: null });
   const roleName = (outcome && outcome.roleName) || "FAID-Manager-Admin";
 
   const rolePlan = React.useMemo(() => {
@@ -347,9 +364,10 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, servicesError, onS
     return typeof fn === "function" ? fn(assignTo) : /^[^\s@]+@[^\s@]+$/.test(String(assignTo || "").trim());
   }, [assignTo]);
 
-  // Both checks need the cf login; they run (again) whenever it appears.
+  // Both checks need the cf login; they run (again) whenever it appears, and
+  // never while the run is in flight (see spaceCheck above).
   React.useEffect(() => {
-    if (!signedIn || !api) return;
+    if (!signedIn || !api || started) return;
     let cancelled = false;
     setPrecheck(null);
     if (api.xsuaa && api.xsuaa.roleAssignmentPrecheck) {
@@ -371,7 +389,7 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, servicesError, onS
       setSpaceCheck({ status: "error", data: null, error: "cf-target probe unavailable" });
     }
     return () => { cancelled = true; };
-  }, [signedIn, ctx.login.btpStatus]);
+  }, [signedIn, ctx.login.btpStatus, started]);
 
   React.useEffect(() => {
     if (!rolePlan) return;
@@ -382,12 +400,14 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, servicesError, onS
   React.useEffect(() => {
     if (started) return;
     const build = typeof window !== "undefined" && window.figafPrepareSpacePhases;
-    setPhases(typeof build === "function" ? build(autoAssign) : []);
-  }, [autoAssign, started]);
+    patchPrep({ phases: typeof build === "function" ? build(autoAssign) : [] });
+  }, [autoAssign, started, patchPrep]);
 
   const markPhase = React.useCallback((id, status, sub) => {
-    setPhases((prev) => prev.map((p) => (p.id === id ? { ...p, status, sub: sub === undefined ? p.sub : sub } : p)));
-  }, []);
+    patchPrep((r) => ({
+      phases: r.phases.map((p) => (p.id === id ? { ...p, status, sub: sub === undefined ? p.sub : sub } : p)),
+    }));
+  }, [patchPrep]);
 
   // Live service status lines while the XSUAA instance is created.
   React.useEffect(() => {
@@ -404,9 +424,8 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, servicesError, onS
   async function run() {
     if (!canStart || started) return;
     const runner = typeof window !== "undefined" && window.figafRunPrepareSpace;
-    if (typeof runner !== "function") { setError("prepare-space.js is not loaded"); return; }
-    setStarted(true);
-    setError(null);
+    if (typeof runner !== "function") { patchPrep({ error: "prepare-space.js is not loaded" }); return; }
+    patchPrep({ started: true, error: null, outcome: null });
     setCtx((c) => ({ ...c, setupRunning: true }));
     // Only the plans of instances that do not exist yet are sent, and only
     // the ones this landscape offers a choice of (a single-plan landscape
@@ -420,12 +439,12 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, servicesError, onS
     for (const [k, v] of Object.entries(names || {})) if (String(v || "").trim()) sentNames[k] = String(v).trim();
     try {
       const r = await runner({ api, plans: chosen, names: sentNames, groups, autoAssign, assignTo, onPhase: markPhase });
-      if (!r.ok) { setError(r.error); return; }
-      setOutcome({ ...r, managerMode: r.alreadyBound ? "xsuaa" : null });
+      if (!r.ok) { patchPrep({ error: r.error }); return; }
+      patchPrep({ outcome: { ...r, managerMode: r.alreadyBound ? "xsuaa" : null } });
       setCtx((c) => ({ ...c, xsuaaUpgradeInitiated: true }));
       if (onServicesChanged) onServicesChanged();
     } catch (e) {
-      setError("Unexpected: " + e.message);
+      patchPrep({ error: "Unexpected: " + e.message });
     } finally {
       setCtx((c) => ({ ...c, setupRunning: false }));
     }
@@ -443,17 +462,26 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, servicesError, onS
         const r = await fetch("/_manager-health", { cache: "no-store", credentials: "same-origin" });
         let body = null;
         try { body = await r.json(); } catch { /* not json yet */ }
-        if (r.ok && body && body.mode === "xsuaa") { setOutcome((o) => (o ? { ...o, managerMode: "xsuaa" } : o)); return; }
+        if (r.ok && body && body.mode === "xsuaa") { patchPrep((p) => (p.outcome ? { outcome: { ...p.outcome, managerMode: "xsuaa" } } : {})); return; }
       } catch { /* offline while restaging */ }
-      if (Date.now() - startedAt > 5 * 60 * 1000) { setOutcome((o) => (o ? { ...o, managerMode: "timeout" } : o)); return; }
+      if (Date.now() - startedAt > 5 * 60 * 1000) { patchPrep((p) => (p.outcome ? { outcome: { ...p.outcome, managerMode: "timeout" } } : {})); return; }
       setTimeout(tick, 4000);
     }
     const h = setTimeout(tick, 3000);
     return () => { cancelled = true; clearTimeout(h); };
   }, [outcome ? (outcome.managerMode === "xsuaa" ? "done" : "polling") : "idle"]);
 
+  // A FULL document load is the whole point: the approuter now owns the public
+  // route, and only a real navigation goes through the SAP IAS sign-in.
+  // `location.href = "/#/setup"` does NOT do that - the page is already at
+  // "/#/setup", so the browser treats it as a same-document fragment
+  // navigation and nothing happens at all (verified in Chromium/Edge). Set the
+  // hash, then reload.
   function continueAfterRestart() {
-    try { window.location.href = "/#/setup"; } catch (_) { /* defensive */ }
+    try {
+      window.location.hash = "#/setup";
+      window.location.reload();
+    } catch (_) { /* defensive */ }
   }
   // The BTP login is added in place, exactly like the band's own button: the
   // band (one ScreenLogin instance) is subscribed to btp:gaChoice and renders
@@ -486,7 +514,9 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, servicesError, onS
   if (spaceCheck.status === "checking") {
     spaceRow = <CheckRow key="cf-target" status="running" title="Checking the Cloud Foundry target" sub="the manager and its approuter must live in the same space" />;
   } else if (spaceCheck.status === "ok") {
-    const t = (spaceCheck.data && spaceCheck.data.target) || {};
+    // No data after a remount mid-run (the probe is skipped then): the login
+    // in ctx names the same space.
+    const t = (spaceCheck.data && spaceCheck.data.target) || { orgName: ctx.login.org, spaceName: ctx.login.space };
     spaceRow = <CheckRow key="cf-target" status="done" title="Signed in to the manager's space" sub={`${t.orgName} / ${t.spaceName}`} />;
   } else if (spaceCheck.status === "error") {
     spaceRow = <CheckRow key="cf-target" status="error" title="Could not verify the Cloud Foundry target" sub={spaceCheck.error || "cf target check failed"} />;
@@ -613,7 +643,7 @@ function PrepareSpaceStep({ ctx, setCtx, appendLog, services, servicesError, onS
           </button>
         )}
         {started && !outcome && !error && <button className="btn btn-primary" disabled><Ico.Spinner /> Preparing…</button>}
-        {started && error && <button className="btn btn-primary" onClick={() => { setStarted(false); setError(null); }}>Try again</button>}
+        {started && error && <button className="btn btn-primary" onClick={() => patchPrep({ started: false, error: null })}>Try again</button>}
         {outcome && outcome.managerMode === "xsuaa" && (
           <button className="btn btn-primary" data-action="continue" onClick={continueAfterRestart}>Continue <Ico.ArrowRight /></button>
         )}
